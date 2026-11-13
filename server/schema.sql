@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS stores (
   longitude DOUBLE PRECISION,
   radius_km DOUBLE PRECISION CHECK(radius_km IS NULL OR (radius_km > 0 AND radius_km <= 500)),
   delivery_rate_per_km_pen NUMERIC(10,2) CHECK(delivery_rate_per_km_pen >= 0),
+  delivery_pricing_mode TEXT NOT NULL DEFAULT 'PER_KM' CHECK(delivery_pricing_mode IN ('PER_KM','FIXED')),
   delivery_fee_pen NUMERIC(10,2) CHECK(delivery_fee_pen >= 0),
   active BOOLEAN NOT NULL DEFAULT false,
   delivery_enabled BOOLEAN NOT NULL DEFAULT false,
@@ -118,3 +119,8 @@ UPDATE stores SET radius_km=NULL WHERE radius_km=0;
 ALTER TABLE stores ADD CONSTRAINT stores_radius_km_check CHECK (radius_km IS NULL OR (radius_km>0 AND radius_km<=500));
 ALTER TABLE stores DROP CONSTRAINT IF EXISTS stores_delivery_rate_per_km_pen_check;
 ALTER TABLE stores ADD CONSTRAINT stores_delivery_rate_per_km_pen_check CHECK (delivery_rate_per_km_pen IS NULL OR delivery_rate_per_km_pen>=0);
+
+-- Explicit pricing mode; historical fixed amount remains in delivery_fee_pen.
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS delivery_pricing_mode TEXT NOT NULL DEFAULT 'PER_KM';
+ALTER TABLE stores DROP CONSTRAINT IF EXISTS stores_delivery_pricing_mode_check;
+ALTER TABLE stores ADD CONSTRAINT stores_delivery_pricing_mode_check CHECK (delivery_pricing_mode IN ('PER_KM','FIXED'));
