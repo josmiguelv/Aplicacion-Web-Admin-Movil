@@ -36,7 +36,7 @@ const notYet=await req('/api/v1/mobile/config?appId='+encodeURIComponent(appId))
 assert.equal(notYet.status,200);assert.equal(notYet.data.ready,false,'Unpublished data not exposed')
 const store=await req('/api/admin/tenants/'+a+'/stores','POST',{
  name:'CI LOCAL FICTICIO - NO PRODUCCIÓN',address:'PRUEBA SIN DIRECCIÓN REAL',
- latitude:0,longitude:0,radiusKm:2,deliveryFeePen:4.5,active:true,
+ latitude:0,longitude:0,radiusKm:2,deliveryRatePerKmPen:2.5,active:true,
  delivery_enabled:true,pickup_enabled:true,dine_in_enabled:true
 },cookieA)
 assert.equal(store.status,200,JSON.stringify(store.data))
@@ -60,28 +60,21 @@ assert.equal(publicData.data.stores[0].hoursConfigured,false,'Unconfigured hours
 assert.equal(publicData.data.stores[0].openingHours,null,'No fabricated store hours')
 assert.equal(publicData.data.products.length,1)
 assert.equal(publicData.data.stores[0].paymentMethods.delivery[0],'yape')
+// With no opening hours configured, store eligibility must fail closed.
 const delivery=await req('/api/v1/mobile/fulfillment/resolve','POST',{
- appId,mode:'delivery',latitude:0,longitude:0
+ appId,mode:'delivery',address:'Calle de prueba 123',district:'Santa Anita'
 })
-assert.equal(delivery.status,200)
-assert.equal(delivery.data.storeId,storeId)
-assert.equal(delivery.data.deliveryFeePen,4.5)
-const dine=await req('/api/v1/mobile/fulfillment/resolve','POST',{
- appId,mode:'dine_in',storeId
-})
-assert.equal(dine.status,200)
-const outOfZone=await req('/api/v1/mobile/fulfillment/resolve','POST',{
- appId,mode:'delivery',latitude:20,longitude:20
-})
-assert.equal(outOfZone.status,409)
+assert.equal(delivery.status,409,'Unconfigured opening hours cannot authorize delivery')
+const dine=await req('/api/v1/mobile/fulfillment/resolve','POST',{appId,mode:'dine_in',storeId})
+assert.equal(dine.status,409,'Unconfigured opening hours cannot authorize dine-in')
 const missingPoint=await req('/api/v1/mobile/fulfillment/resolve','POST',{
  appId,mode:'delivery',address:'Calle sin coordenadas'
 })
-assert.equal(missingPoint.status,422)
+assert.equal(missingPoint.status,409,'No published operating hours')
 const closedDays=Object.fromEntries(['sun','mon','tue','wed','thu','fri','sat'].map(x=>[x,{closed:true}]))
 const closed=await req('/api/admin/tenants/'+a+'/stores','POST',{
  id:storeId,name:'CI LOCAL FICTICIO - NO PRODUCCIÓN',address:'PRUEBA SIN DIRECCIÓN REAL',
- latitude:0,longitude:0,radiusKm:2,deliveryFeePen:4.5,active:true,
+ latitude:0,longitude:0,radiusKm:2,deliveryRatePerKmPen:2.5,active:true,
  delivery_enabled:true,pickup_enabled:true,dine_in_enabled:true,
  openingHours:closedDays
 },cookieA)
@@ -94,4 +87,4 @@ assert.equal(afterClose.data.stores[0].closesAt,null)
 assert.equal((await req('/api/v1/mobile/fulfillment/resolve','POST',{
  appId,mode:'pickup',storeId
 })).status,409,'Closed published store cannot accept immediate pickup')
-console.log('PASS: multi-tenant isolation, catalog publication, optional hours hidden when missing, closed hours block pickup and delivery coverage')
+console.log('PASS: multi-tenant isolation, catalog publication, rate per km, undefined hours deny orders, closed hours block pickup and delivery coverage')
