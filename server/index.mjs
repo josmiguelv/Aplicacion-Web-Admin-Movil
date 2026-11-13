@@ -38,7 +38,7 @@ function validateOpeningHours(value){
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!WEEKDAYS.includes(k)))return false;
  return Object.values(value).every(v=>v&&typeof v==='object'&&!Array.isArray(v)&&(
    v.closed===true||(typeof v.open==='string'&&typeof v.close==='string'&&
-   /^([01]\\d|2[0-3]):[0-5]\\d$/.test(v.open)&&/^([01]\\d|2[0-3]):[0-5]\\d$/.test(v.close)&&v.open!==v.close)
+   /^([01]\d|2[0-3]):[0-5]\d$/.test(v.open)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v.close)&&v.open!==v.close)
  ));
 }
 function storeHours(store,date=new Date()){
