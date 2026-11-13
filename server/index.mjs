@@ -51,7 +51,7 @@ function storeHours(store,date=new Date()){
  const value=v=>Number(v.slice(0,2))*60+Number(v.slice(3));
  if(prev&&prev.closed!==true&&value(prev.close)<value(prev.open)&&minutes<value(prev.close))return {hoursConfigured:true,isOpen:true,closesAt:prev.close};
  if(!cfg)return {hoursConfigured:false};
- if(cfg.closed===true)return {hoursConfigured:true,isOpen:false};
+ if(cfg.closed===true)return {hoursConfigured:true,isOpen:false,closesAt:null};
  const begin=value(cfg.open),end=value(cfg.close),isOpen=end>begin?(minutes>=begin&&minutes<end):(minutes>=begin);
  return {hoursConfigured:true,isOpen,closesAt:isOpen?cfg.close:null};
 }
