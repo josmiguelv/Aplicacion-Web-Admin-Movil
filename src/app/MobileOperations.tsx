@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Building2, Check, CreditCard, ImagePlus, Package, Send, Store, Smartphone } from 'lucide-react'
+import { Building2, Check, CreditCard, Package, Send, Store, Smartphone } from 'lucide-react'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
