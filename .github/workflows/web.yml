@@ -8,6 +8,28 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: b3_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d b3_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/b3_test
+      ADMIN_ORIGIN: http://localhost:3000
+      COOKIE_SECURE: "false"
+      NODE_ENV: test
+      PORT: "4000"
+      BOOTSTRAP_ADMIN_EMAIL: ci-super@invalid.example
+      BOOTSTRAP_ADMIN_PASSWORD: CI-Only-Strong-Secret-2026!
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,5 +44,23 @@ jobs:
         run: |
           node --check server/index.mjs
           node --check server/bootstrap-admin.mjs
+          node --check server/smoke.mjs
       - name: Build frontend
         run: pnpm build
+      - name: Install database schema (disposable CI database only)
+        run: |
+          node --input-type=module -e 'import pg from "pg";import {readFileSync} from "node:fs";const p=new pg.Pool({connectionString:process.env.DATABASE_URL});try{await p.query(readFileSync("server/schema.sql","utf8"))}finally{await p.end()}'
+      - name: Bootstrap CI superadmin
+        run: node server/bootstrap-admin.mjs
+      - name: Start isolated API
+        run: |
+          node server/index.mjs >/tmp/b3-api.log 2>&1 &
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4000/api/v1/mobile/config)
+            if [ "$code" = "400" ]; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/b3-api.log
+          exit 1
+      - name: Test tenant isolation and published mobile catalog
+        run: node server/smoke.mjs
