@@ -66,6 +66,7 @@ assert.equal(publicData.data.stores[0].openingHours,null,'No fabricated store ho
 assert.equal(publicData.data.products.length,1)
 assert.equal(publicData.data.vacancies.length,1)
 assert.equal(publicData.data.vacancies[0].title,vacancy.data.title)
+assert.equal(publicData.data.vacancies[0].whatsappPhone.length,11)
 assert.equal(publicData.data.stores[0].paymentMethods.delivery[0],'yape')
 assert.equal(publicData.data.stores[0].deliveryPricingMode,'PER_KM','Existing pricing defaults to per km')
 // With no opening hours configured, store eligibility must fail closed.
