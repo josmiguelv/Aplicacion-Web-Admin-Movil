@@ -51,3 +51,12 @@ En la administración de cada empresa, `Vacantes` permite guardar un puesto, ima
 Android ofrece `Mi Cuenta → Trabaja con nosotros` con la lista y los detalles. `Postular por WhatsApp` abre `https://wa.me/<teléfono>?text=<texto>` mediante un puente Android que valida el dominio, teléfono y prefijo del mensaje. Mensaje: `Hola, estoy interesado(a) en trabajar en Pollos B3. Quisiera información sobre la vacante de <PUESTO>.` El envío requiere confirmación manual del solicitante en WhatsApp. No se registran postulaciones ni se transmite información personal al backend.
 
 Antes de desplegar, aplicar `server/schema.sql` en un entorno controlado para crear `job_vacancies`, configurar las imágenes y confirmar los números oficiales de RR. HH. No se han creado vacantes ficticias ni publicado las imágenes de ejemplo como ofertas activas.
+
+
+## FAQ y Libro de Reclamaciones (Pollos B3 Android)
+
+La app incluye preguntas frecuentes redactadas sin prometer cobros, atención con agentes ni seguimiento de pedidos reales que todavía no están conectados. En `Mi Cuenta → Libro de Reclamaciones`, la aplicación muestra información de derechos del consumidor y abre el enlace HTTPS **del propio proveedor** solo cuando su administrador lo guarda y publica desde `Operación móvil → Libro de Reclamaciones · Enlace oficial` para el `appId` correspondiente. El URL se almacena en `mobile_apps.complaints_book_url` y solo se entrega en el catálogo publicado como `complaintsBookUrl`.
+
+El enlace no es un libro construido por esta app. Debe apuntar a un Libro electrónico real y accesible con identidad del proveedor, hoja numerada, envío/impresión de constancia y procesamiento conforme al reglamento. Si no hay enlace, **no se simula una hoja ni un registro**: se muestra la advertencia y se orienta al consumidor a solicitar el Libro al proveedor. El proveedor debe cumplir además con la exhibición y disponibilidad que exija la normativa vigente. El backend rechaza HTTP, localhost, IP literals y URLs con credenciales. La app abre la URL fuera de su WebView.
+
+La actualización de la columna requiere aplicar el SQL en una base controlada antes de publicar. No se ha desplegado ni configurado un enlace oficial no suministrado por Pollos B3.
