@@ -39,3 +39,6 @@ Controles: tenant determinado por sesión, filtros tenant en operaciones, consul
 ## Identidad y datos
 
 Las empresas, direcciones, ofertas, productos y pagos **no se presuponen**. Ningún local está activo por defecto. Las fotografías se cargan únicamente a través del administrador autenticado. Los precios reales serán los publicados por cada empresa. No incluir credenciales secretas dentro del APK.
+## Tarifa fija o por kilómetro (por sede)
+
+Cada sede puede usar `delivery_pricing_mode='PER_KM'` (cargo = km reales de Google Routes × `delivery_rate_per_km_pen`) o `delivery_pricing_mode='FIXED'` (cargo = `delivery_fee_pen`, sin multiplicar). La modalidad y la tarifa se configuran y publican desde la administración web. La cobertura máxima (`radius_km`) permanece independiente del importe: si se configura, la ruta debe estar dentro del límite, incluso en modalidad fija; `NULL` significa sin límite. Para elegir la sede más cercana por carretera todavía se consultan rutas Google en ambos modos, aunque con tarifa fija esos kilómetros no intervienen en el cargo. Un importe no configurado no autoriza una cotización. Esta función todavía requiere activar Routes API y aplicar la migración de PostgreSQL; no se ha desplegado.
