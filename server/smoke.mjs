@@ -66,7 +66,7 @@ const delivery=await req('/api/v1/mobile/fulfillment/resolve','POST',{
 })
 assert.equal(delivery.status,409,'Unconfigured opening hours cannot authorize delivery')
 const dine=await req('/api/v1/mobile/fulfillment/resolve','POST',{appId,mode:'dine_in',storeId})
-assert.equal(dine.status,409,'Unconfigured opening hours cannot authorize dine-in')
+assert.equal(dine.status,200,'Dine-in remains eligible without configured schedule')
 const missingPoint=await req('/api/v1/mobile/fulfillment/resolve','POST',{
  appId,mode:'delivery',address:'Calle sin coordenadas'
 })
