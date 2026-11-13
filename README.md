@@ -42,3 +42,12 @@ Las empresas, direcciones, ofertas, productos y pagos **no se presuponen**. Ning
 ## Tarifa fija o por kilómetro (por sede)
 
 Cada sede puede usar `delivery_pricing_mode='PER_KM'` (cargo = km reales de Google Routes × `delivery_rate_per_km_pen`) o `delivery_pricing_mode='FIXED'` (cargo = `delivery_fee_pen`, sin multiplicar). La modalidad y la tarifa se configuran y publican desde la administración web. La cobertura máxima (`radius_km`) permanece independiente del importe: si se configura, la ruta debe estar dentro del límite, incluso en modalidad fija; `NULL` significa sin límite. Para elegir la sede más cercana por carretera todavía se consultan rutas Google en ambos modos, aunque con tarifa fija esos kilómetros no intervienen en el cargo. Un importe no configurado no autoriza una cotización. Esta función todavía requiere activar Routes API y aplicar la migración de PostgreSQL; no se ha desplegado.
+
+
+## Vacantes de trabajo y WhatsApp
+
+En la administración de cada empresa, `Vacantes` permite guardar un puesto, imagen JPG/PNG/WebP, resumen, descripción, requisitos, horario, modalidad, sede, teléfono de postulación y estado activo/inactivo. Cada cambio queda en borrador hasta pulsar `Publicar` para la app seleccionada. Solo las vacantes activas del tenant se incluyen en `GET /api/v1/mobile/config`, campo `vacancies`. El teléfono requiere formato celular peruano (9 dígitos empezando con 9; el backend normaliza a 51+9 dígitos).
+
+Android ofrece `Mi Cuenta → Trabaja con nosotros` con la lista y los detalles. `Postular por WhatsApp` abre `https://wa.me/<teléfono>?text=<texto>` mediante un puente Android que valida el dominio, teléfono y prefijo del mensaje. Mensaje: `Hola, estoy interesado(a) en trabajar en Pollos B3. Quisiera información sobre la vacante de <PUESTO>.` El envío requiere confirmación manual del solicitante en WhatsApp. No se registran postulaciones ni se transmite información personal al backend.
+
+Antes de desplegar, aplicar `server/schema.sql` en un entorno controlado para crear `job_vacancies`, configurar las imágenes y confirmar los números oficiales de RR. HH. No se han creado vacantes ficticias ni publicado las imágenes de ejemplo como ofertas activas.
