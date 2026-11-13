@@ -1,0 +1,26 @@
+name: Admin API checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        working-directory: server
+        run: npm install --no-audit --no-fund
+      - name: Syntax check
+        working-directory: server
+        run: |
+          node --check server.mjs
+          node --check bootstrap.mjs
+          node --check auth.mjs
+          node --check delivery.mjs
+      - name: Pure routing and payment tests
+        working-directory: server
+        run: npm test
