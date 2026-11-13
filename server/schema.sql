@@ -116,4 +116,5 @@ ALTER TABLE stores ALTER COLUMN radius_km DROP NOT NULL;
 ALTER TABLE stores ALTER COLUMN radius_km DROP DEFAULT;
 UPDATE stores SET radius_km=NULL WHERE radius_km=0;
 ALTER TABLE stores ADD CONSTRAINT stores_radius_km_check CHECK (radius_km IS NULL OR (radius_km>0 AND radius_km<=500));
+ALTER TABLE stores DROP CONSTRAINT IF EXISTS stores_delivery_rate_per_km_pen_check;
 ALTER TABLE stores ADD CONSTRAINT stores_delivery_rate_per_km_pen_check CHECK (delivery_rate_per_km_pen IS NULL OR delivery_rate_per_km_pen>=0);
