@@ -118,7 +118,7 @@ async function quote(req,res){
  const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[b.appId]);
  if(!q.rowCount)throw bad(409,'Catálogo no publicado');
  const config=q.rows[0].payload;
- const eligible=config.stores.map(withLiveHours).filter(s=>s.active&&s[b.mode==='dine_in'?'dine_in_enabled':b.mode+'_enabled']===true&&s.hoursConfigured===true&&s.isOpen===true);
+ const eligible=config.stores.map(withLiveHours).filter(s=>s.active&&s[b.mode==='dine_in'?'dine_in_enabled':b.mode+'_enabled']===true&&(b.mode==='delivery'?(s.hoursConfigured===true&&s.isOpen===true):(s.hoursConfigured!==true||s.isOpen===true)));
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para esta modalidad');
  let selected,roadKm=null,deliveryFeePen=0;
  if(b.mode==='delivery'){
