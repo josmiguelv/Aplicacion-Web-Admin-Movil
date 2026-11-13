@@ -1,0 +1,26 @@
+name: Web Admin API build
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.25.0'
+      - name: Install
+        run: pnpm install --no-frozen-lockfile
+      - name: Validate API syntax
+        run: |
+          node --check server/index.mjs
+          node --check server/bootstrap-admin.mjs
+      - name: Build frontend
+        run: pnpm build
