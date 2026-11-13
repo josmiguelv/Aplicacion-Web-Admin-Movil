@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS stores (
   delivery_enabled BOOLEAN NOT NULL DEFAULT false,
   pickup_enabled BOOLEAN NOT NULL DEFAULT false,
   dine_in_enabled BOOLEAN NOT NULL DEFAULT false,
+  opening_hours JSONB,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (id,tenant_id)
 );
@@ -102,3 +103,5 @@ CREATE TABLE IF NOT EXISTS product_images (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_product_images_tenant ON product_images(tenant_id);
+-- Additive migration for existing admin databases; null means NOT CONFIGURED.
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_hours JSONB;
