@@ -124,3 +124,23 @@ ALTER TABLE stores ADD CONSTRAINT stores_delivery_rate_per_km_pen_check CHECK (d
 ALTER TABLE stores ADD COLUMN IF NOT EXISTS delivery_pricing_mode TEXT NOT NULL DEFAULT 'PER_KM';
 ALTER TABLE stores DROP CONSTRAINT IF EXISTS stores_delivery_pricing_mode_check;
 ALTER TABLE stores ADD CONSTRAINT stores_delivery_pricing_mode_check CHECK (delivery_pricing_mode IN ('PER_KM','FIXED'));
+
+
+-- Vacantes: creadas solo por un administrador autenticado, ocultas hasta publicar.
+CREATE TABLE IF NOT EXISTS job_vacancies (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ tenant_id UUID NOT NULL REFERENCES tenants(id),
+ title TEXT NOT NULL CHECK(length(title) BETWEEN 3 AND 150),
+ summary TEXT NOT NULL DEFAULT '',
+ description TEXT NOT NULL DEFAULT '',
+ requirements TEXT NOT NULL DEFAULT '',
+ schedule TEXT NOT NULL DEFAULT '',
+ employment_type TEXT NOT NULL DEFAULT '',
+ location_label TEXT NOT NULL DEFAULT '',
+ image_url TEXT,
+ whatsapp_phone TEXT NOT NULL CHECK(whatsapp_phone ~ '^51[0-9]{9}$'),
+ active BOOLEAN NOT NULL DEFAULT false,
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(id,tenant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_vacancies_tenant ON job_vacancies(tenant_id);
