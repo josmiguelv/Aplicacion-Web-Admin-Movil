@@ -18,10 +18,14 @@ Esta entrega incorpora el prototipo frontend entregado por el usuario y un backe
 ## API pública Android
 
 - `GET /api/v1/mobile/config?appId=com.integrab2g.pollosb3`: solo publica datos de una app habilitada, enlazada a un tenant activo.
-- `POST /api/v1/mobile/fulfillment/resolve`: `{appId,mode,latitude,longitude}` para delivery; `{appId,mode,storeId}` para recojo o comer en tienda. Devuelve tienda elegible, pagos disponibles y tarifa de delivery publicada.
+- `POST /api/v1/mobile/fulfillment/resolve`: `{appId,mode:'delivery',address,district}` para delivery (o GPS confirmado con `useGps:true`); `{appId,mode,storeId}` para recojo o comer en tienda. Devuelve sede abierta elegible, kilómetros por carretera, tarifa por kilómetro configurada y cargo calculado.
 - `GET /api/v1/mobile/images/{uuid}`: fotografía **publicada** del catálogo.
 
-No permite crear pedidos ni procesar pagos. Una cotización de delivery usa **distancia geográfica aproximada por radio**, no rutas reales por calles. Configurar zonas poligonales/tiempos de ruta y validar inventario son futuros incrementos. No asigna delivery si no hay GPS/pin confirmado, tienda habilitada y cobertura configurada.
+No permite crear pedidos ni procesar pagos. Una cotización de Delivery utiliza **Google Routes API desde el servidor**, con distancia real de conducción. Compara todas las sedes activas, abiertas, con Delivery habilitado, coordenadas y tarifa/km publicada; asigna la más próxima por carretera que cumpla su cobertura. `radiusKm=null` significa cobertura ilimitada; una cobertura configurada es un límite máximo en km de ruta. Cargo = distancia real en km × tarifa/km, redondeado a céntimos. Sin clave/ruta válida se rechaza la cotización; no se utiliza distancia en línea recta para facturar. La tarifa fija histórica se conserva solo por compatibilidad y no se usa para cotizaciones nuevas.
+
+**Activación controlada**: en Google Cloud habilitar Routes API y facturación, crear clave restringida a esta API y a los orígenes de servidor correspondientes, definir cuotas/presupuesto, y establecer `GOOGLE_ROUTES_API_KEY` exclusivamente en el backend. No publicar secretos en la app. La API pública cuenta con un límite básico en memoria de 20 cotizaciones/minuto por IP del socket, además de caché y deduplicación de consultas durante 5 minutos. Para producción se requiere adicionalmente rate limiting en el gateway, controles antiabuso y cuotas reales en Google Cloud.
+
+**PostgreSQL**: el esquema incluye el campo `delivery_rate_per_km_pen` y admite `radius_km NULL`. Aplicar las sentencias `ALTER TABLE` del final de `server/schema.sql` como migración revisada en entornos existentes ANTES de desplegar el backend; no asumir que `CREATE TABLE IF NOT EXISTS` actualiza columnas. No se ejecutaron migraciones ni despliegues en este cambio.
 
 ## API administrativa
 
