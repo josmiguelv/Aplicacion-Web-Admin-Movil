@@ -69,10 +69,10 @@ async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'M�
 const routesApiKey=process.env.GOOGLE_ROUTES_API_KEY||'';
 const routeCache=new Map();
 const routeTimeoutMs=6000;
-async function roadDistanceKm(store,lat,lng,revision){
+async function roadDistanceKm(store,destination,revision){
  // The key never reaches the mobile device. No fallback to straight-line billing.
  if(!routesApiKey)throw bad(503,'Cotización de Delivery no disponible: falta configurar Google Routes');
- const key=[revision,store.id,lat.toFixed(4),lng.toFixed(4)].join(':');
+ const key=[revision,store.id,typeof destination==='string'?destination:destination.latitude.toFixed(4)+':'+destination.longitude.toFixed(4)].join(':');
  const cached=routeCache.get(key);
  if(cached&&Date.now()<cached.until)return cached.km;
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),routeTimeoutMs);
@@ -82,7 +82,7 @@ async function roadDistanceKm(store,lat,lng,revision){
    headers:{'Content-Type':'application/json','X-Goog-Api-Key':routesApiKey,'X-Goog-FieldMask':'routes.distanceMeters'},
    body:JSON.stringify({
     origin:{location:{latLng:{latitude:store.latitude,longitude:store.longitude}}},
-    destination:{location:{latLng:{latitude:lat,longitude:lng}}},
+    destination:typeof destination==='string'?{address:destination}:{location:{latLng:destination}},
     travelMode:'DRIVE',routingPreference:'TRAFFIC_UNAWARE',computeAlternativeRoutes:false
    })
   });
@@ -108,17 +108,25 @@ async function quote(req,res){
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para esta modalidad');
  let selected,roadKm=null,deliveryFeePen=0;
  if(b.mode==='delivery'){
-  if(!checkLatLng(b.latitude,b.longitude))throw bad(422,'Confirma la ubicación exacta para cotizar Delivery');
+  const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
+  const hasAddress=word(b.address,250)&&word(b.district,90);
+  if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
+  // A typed address takes precedence: an earlier GPS fix from browsing stores must
+  // never silently replace the delivery destination.
+  const destination=hasAddress?
+   [b.address.trim(),b.district.trim(),'Lima','Perú'].join(', '):
+   {latitude:b.latitude,longitude:b.longitude};
   const candidates=eligible.filter(s=>checkLatLng(s.latitude,s.longitude)&&
    Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0);
   if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa por kilómetro y coordenadas configuradas');
-  // Prioritize nearby candidates without charging for route calls on every visit.
-  candidates.sort((a,b2)=>kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-
-    kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
-  // Evaluate every viable candidate: straight-line proximity alone cannot prove road-route priority.
+  if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
+  if(hasCoordinates&&!hasAddress)candidates.sort((a,b2)=>
+   kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-
+   kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
+  // Evaluate all reachable, enabled stores so the road-nearest eligible one wins.
   const available=[];
   for(const store of candidates){
-   const km=await roadDistanceKm(store,b.latitude,b.longitude,q.rows[0].revision);
+   const km=await roadDistanceKm(store,destination,q.rows[0].revision);
    if(km===null)continue;
    if(store.radiusKm!==null&&store.radiusKm!==undefined&&km>store.radiusKm+1e-8)continue;
    available.push({store,km});
@@ -126,7 +134,6 @@ async function quote(req,res){
   available.sort((a,b2)=>a.km-b2.km||a.store.id.localeCompare(b2.store.id));
   if(!available.length)throw bad(409,'Dirección fuera de la cobertura de las sedes disponibles');
   selected=available[0].store;roadKm=available[0].km;
-  // Decimal money: perform rounding once, half-up to cents.
   deliveryFeePen=Math.round((roadKm*selected.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
  }else{
   selected=eligible.find(s=>s.id===b.storeId);
