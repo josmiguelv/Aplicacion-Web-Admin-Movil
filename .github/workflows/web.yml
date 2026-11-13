@@ -56,7 +56,7 @@ jobs:
         run: |
           node server/index.mjs >/tmp/b3-api.log 2>&1 &
           for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4000/api/v1/mobile/config)
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:4000/api/v1/mobile/config || true)
             if [ "$code" = "400" ]; then exit 0; fi
             sleep 1
           done
