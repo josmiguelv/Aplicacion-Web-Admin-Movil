@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS stores (
   address TEXT NOT NULL,
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
-  radius_km DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK(radius_km >= 0 AND radius_km <= 50),
+  radius_km DOUBLE PRECISION CHECK(radius_km IS NULL OR (radius_km > 0 AND radius_km <= 500)),
+  delivery_rate_per_km_pen NUMERIC(10,2) CHECK(delivery_rate_per_km_pen >= 0),
   delivery_fee_pen NUMERIC(10,2) CHECK(delivery_fee_pen >= 0),
   active BOOLEAN NOT NULL DEFAULT false,
   delivery_enabled BOOLEAN NOT NULL DEFAULT false,
@@ -105,3 +106,14 @@ CREATE TABLE IF NOT EXISTS product_images (
 CREATE INDEX IF NOT EXISTS idx_product_images_tenant ON product_images(tenant_id);
 -- Additive migration for existing admin databases; null means NOT CONFIGURED.
 ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_hours JSONB;
+
+-- Safe additive upgrade of already provisioned databases; run as a reviewed migration before deployment.
+-- Historical radius 0 signified unconfigured coverage: convert it to NULL (unlimited).
+-- Legacy fixed delivery fees are retained but never used for per-kilometre quotations.
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS delivery_rate_per_km_pen NUMERIC(10,2);
+ALTER TABLE stores DROP CONSTRAINT IF EXISTS stores_radius_km_check;
+ALTER TABLE stores ALTER COLUMN radius_km DROP NOT NULL;
+ALTER TABLE stores ALTER COLUMN radius_km DROP DEFAULT;
+UPDATE stores SET radius_km=NULL WHERE radius_km=0;
+ALTER TABLE stores ADD CONSTRAINT stores_radius_km_check CHECK (radius_km IS NULL OR (radius_km>0 AND radius_km<=500));
+ALTER TABLE stores ADD CONSTRAINT stores_delivery_rate_per_km_pen_check CHECK (delivery_rate_per_km_pen IS NULL OR delivery_rate_per_km_pen>=0);
