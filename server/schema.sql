@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS mobile_apps (
   tenant_id UUID NOT NULL REFERENCES tenants(id),
   app_id TEXT NOT NULL UNIQUE,
   enabled BOOLEAN NOT NULL DEFAULT false,
-  published_revision INT NOT NULL DEFAULT 0
+  published_revision INT NOT NULL DEFAULT 0,
+  complaints_book_url TEXT
 );
 CREATE TABLE IF NOT EXISTS stores (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -144,3 +145,6 @@ CREATE TABLE IF NOT EXISTS job_vacancies (
  UNIQUE(id,tenant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_job_vacancies_tenant ON job_vacancies(tenant_id);
+
+-- Official complaints-book URL is configured by the tenant, never guessed by the app.
+ALTER TABLE mobile_apps ADD COLUMN IF NOT EXISTS complaints_book_url TEXT;
