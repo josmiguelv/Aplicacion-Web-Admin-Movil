@@ -56,6 +56,8 @@ const publicData=await req('/api/v1/mobile/config?appId='+encodeURIComponent(app
 assert.equal(publicData.status,200)
 assert.equal(publicData.data.ready,true)
 assert.equal(publicData.data.stores.length,1)
+assert.equal(publicData.data.stores[0].hoursConfigured,false,'Unconfigured hours never claim an opening state')
+assert.equal(publicData.data.stores[0].openingHours,null,'No fabricated store hours')
 assert.equal(publicData.data.products.length,1)
 assert.equal(publicData.data.stores[0].paymentMethods.delivery[0],'yape')
 const delivery=await req('/api/v1/mobile/fulfillment/resolve','POST',{
@@ -76,4 +78,20 @@ const missingPoint=await req('/api/v1/mobile/fulfillment/resolve','POST',{
  appId,mode:'delivery',address:'Calle sin coordenadas'
 })
 assert.equal(missingPoint.status,422)
-console.log('PASS: superadmin -> tenants -> tenant auth isolation -> draft -> publication -> delivery -> dine in -> out of coverage')
+const closedDays=Object.fromEntries(['sun','mon','tue','wed','thu','fri','sat'].map(x=>[x,{closed:true}]))
+const closed=await req('/api/admin/tenants/'+a+'/stores','POST',{
+ id:storeId,name:'CI LOCAL FICTICIO - NO PRODUCCIÓN',address:'PRUEBA SIN DIRECCIÓN REAL',
+ latitude:0,longitude:0,radiusKm:2,deliveryFeePen:4.5,active:true,
+ delivery_enabled:true,pickup_enabled:true,dine_in_enabled:true,
+ openingHours:closedDays
+},cookieA)
+assert.equal(closed.status,200,JSON.stringify(closed.data))
+assert.equal((await req('/api/admin/tenants/'+a+'/publish','POST',{appId},cookieA)).status,200)
+const afterClose=await req('/api/v1/mobile/config?appId='+encodeURIComponent(appId))
+assert.equal(afterClose.data.stores[0].hoursConfigured,true)
+assert.equal(afterClose.data.stores[0].isOpen,false)
+assert.equal(afterClose.data.stores[0].closesAt,null)
+assert.equal((await req('/api/v1/mobile/fulfillment/resolve','POST',{
+ appId,mode:'pickup',storeId
+})).status,409,'Closed published store cannot accept immediate pickup')
+console.log('PASS: multi-tenant isolation, catalog publication, optional hours hidden when missing, closed hours block pickup and delivery coverage')
