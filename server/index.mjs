@@ -68,6 +68,15 @@ async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'M�
 
 const routesApiKey=process.env.GOOGLE_ROUTES_API_KEY||'';
 const routeCache=new Map();
+const routePending=new Map();
+const quoteRateLimit=new Map();
+function limitPublicDeliveryQuotes(req){
+ const ip=req.socket.remoteAddress||'unknown',now=Date.now();
+ const item=quoteRateLimit.get(ip);
+ if(quoteRateLimit.size>3000)quoteRateLimit.clear();
+ if(!item||now-item.start>=60000){quoteRateLimit.set(ip,{start:now,count:1});return}
+ if(++item.count>20)throw bad(429,'Demasiadas cotizaciones. Intenta de nuevo en un minuto');
+}
 const routeTimeoutMs=6000;
 async function roadDistanceKm(store,destination,revision){
  // The key never reaches the mobile device. No fallback to straight-line billing.
@@ -75,6 +84,8 @@ async function roadDistanceKm(store,destination,revision){
  const key=[revision,store.id,typeof destination==='string'?destination:destination.latitude.toFixed(4)+':'+destination.longitude.toFixed(4)].join(':');
  const cached=routeCache.get(key);
  if(cached&&Date.now()<cached.until)return cached.km;
+ if(routePending.has(key))return routePending.get(key);
+ const promise=(async()=>{
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),routeTimeoutMs);
  try{
   const response=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
@@ -96,6 +107,9 @@ async function roadDistanceKm(store,destination,revision){
   return km;
  }catch(err){if(err.name==='AbortError')throw bad(503,'Tiempo de espera agotado al calcular la ruta');throw bad(503,'No se pudo calcular la distancia por carretera')}
  finally{clearTimeout(timer)}
+ })();
+ routePending.set(key,promise);
+ try{return await promise}finally{routePending.delete(key)}
 }
 
 async function quote(req,res){
@@ -108,6 +122,7 @@ async function quote(req,res){
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para esta modalidad');
  let selected,roadKm=null,deliveryFeePen=0;
  if(b.mode==='delivery'){
+  limitPublicDeliveryQuotes(req);
   const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
   const hasAddress=word(b.address,250)&&word(b.district,90);
   if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
