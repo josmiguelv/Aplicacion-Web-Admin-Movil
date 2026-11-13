@@ -50,6 +50,11 @@ const payment=await req('/api/admin/tenants/'+a+'/payments','POST',{
  storeId,mode:'delivery',method:'yape',enabled:true
 },cookieA)
 assert.equal(payment.status,200)
+const vacancy=await req('/api/admin/tenants/'+a+'/vacancies','POST',{
+ title:'VACANTE DE TEST',whatsappPhone:'912345678',active:true
+},cookieA)
+assert.equal(vacancy.status,200)
+assert.equal((await req('/api/admin/tenants/'+b+'/vacancies','GET',undefined,cookieA)).status,403)
 const publication=await req('/api/admin/tenants/'+a+'/publish','POST',{appId},cookieA)
 assert.equal(publication.status,200)
 const publicData=await req('/api/v1/mobile/config?appId='+encodeURIComponent(appId))
