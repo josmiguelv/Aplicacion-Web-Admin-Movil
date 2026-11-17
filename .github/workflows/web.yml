@@ -62,5 +62,9 @@ jobs:
           done
           cat /tmp/b3-api.log
           exit 1
+      - name: Validate Railway health endpoints
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:4000/health/live
+          curl --fail --silent --show-error http://127.0.0.1:4000/health/ready
       - name: Test tenant isolation and published mobile catalog
         run: node server/smoke.mjs
