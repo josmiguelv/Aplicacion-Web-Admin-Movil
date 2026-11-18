@@ -1,4 +1,14 @@
-# Pollos B3 — Web de administración y API multitenant
+# Plataforma Administrativa Multitenant — INTEGRA B2G
+
+**Producto:** plataforma SaaS de gestión para restaurantes y negocios. El software es de INTEGRA B2G, **no de Pollos B3**. Pollos B3 será una empresa que el Super Administrador podrá crear, igual que cualquier otra; no debe figurar registrada por defecto.
+
+**Inicio real:** login sencillo en la ruta raíz, con sesión de servidor. El Super Administrador accede al listado persistente y creación de empresas; los administradores de empresa acceden a su propia configuración. Se conserva la lógica comercial/Android existente por compatibilidad. Las integraciones TU VERSO y WEB aún no están conectadas.
+
+**Arquitectura:** [docs/ARQUITECTURA_ADMINISTRADOR_SAAS.md](docs/ARQUITECTURA_ADMINISTRADOR_SAAS.md).
+
+---
+
+## Antecedentes técnicos: piloto de aplicación Android
 
 ## Estado real
 
@@ -11,7 +21,7 @@ Esta entrega incorpora el prototipo frontend entregado por el usuario y un backe
 3. Copia `.env.example` a `.env` y define variables seguras. No subas el archivo `.env` a GitHub.
 4. Ejecuta una sola vez `pnpm bootstrap:admin` con credenciales de superadministración fuertes. Borra las variables `BOOTSTRAP_*` luego.
 5. Ejecuta `pnpm install`, `pnpm dev` (interfaz Vite) y, en una terminal aparte, `pnpm start` (API).
-6. Abre `/mobile-operation`, autentícate; crea tenant, administrador, aplicación, locales, productos, métodos y publica.
+6. Abre `http://localhost:3000`, inicia sesión como Super Administrador, crea la empresa que corresponda y entra en **Configuración comercial**.
 
 **Despliegue:** servir `dist/` desde Node, establecer `NODE_ENV=production`, `COOKIE_SECURE=true`, `ADMIN_ORIGIN` HTTPS exacto, `DATABASE_URL` protegida y desactivar el acceso a la base de datos desde Internet. La plataforma requiere pruebas de penetración, copias de seguridad y revisión operacional antes de recibir clientes.
 

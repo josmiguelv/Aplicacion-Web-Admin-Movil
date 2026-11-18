@@ -1,4 +1,4 @@
--- Pollos B3 catalog admin: tenant isolation. Deploy in an empty, isolated PostgreSQL database.
+-- INTEGRA B2G multi-tenant commercial administration. Deploy only in an empty, isolated PostgreSQL database.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS tenants (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
