@@ -10,7 +10,7 @@ El repositorio es una plataforma SaaS de administración comercial, inicialmente
 - **TENANT_ADMIN**: usuario asignado a una empresa concreta; el backend determina su tenant y bloquea acceso a los demás.
 - **Empresas/tenants**: poseen sus propios locales, catálogo, precios, promociones, métodos de pago, recursos publicados y aplicaciones.
 - **Aplicaciones**: móviles, webs comerciales y, cuando se integren, terceros consumen contratos autorizados. Un appId público NO es una credencial para datos privados.
-- **TU VERSO**: producto independiente, con sus propios tenants, cuentas de canal, flujos y colas. La futura vinculación será exclusivamente mediante contratos API autorizados servidor-a-servidor. El backend comercial mantiene catálogo, precios, pedidos y logística.
+- **TU VERSO**: producto independiente, con sus propios tenants, cuentas de canal, flujos y colas. El módulo local permite custodiar credenciales y consultar disponibilidad 1A desde backend cuando exista autorización explícita. El backend comercial mantiene catálogo, precios, pedidos y logística.
 
 ## Estado de interfaz y compatibilidad
 
@@ -35,3 +35,11 @@ No se modifica el repositorio Android, la web comercial, el código o producció
 ## Estado TU VERSO del documento técnico 18-11-2026
 
 Fase 1A publicada; Fase 1B desplegada pero deshabilitada; transporte end-to-end MOBILE_APP y WEB sin certificación. El estado documentado no sustituye una verificación en producción.
+
+## Módulo de integraciones TU VERSO
+
+El portal incluye Integraciones por empresa, accesible solo por SUPER_ADMIN.
+El diseño, migración, contrato interno, cifrado, operación, pruebas y limitaciones
+se documentan en [TUVERSO_INTEGRACIONES.md](TUVERSO_INTEGRACIONES.md).
+La lectura 1A se ejecuta solo desde backend, con consultas reales deshabilitadas
+por defecto. No se habilita Fase 1B ni se automatiza administración humana TU VERSO.

@@ -1,0 +1,8 @@
+simulation: integra-admin-tuverso-1a
+routing: path
+mocks:
+  - name: tuverso
+    routeKey: tuverso
+    origin:
+      - api.tuverso.integra-b2g.com
+    path: postman/mocks/tuverso/config.yaml

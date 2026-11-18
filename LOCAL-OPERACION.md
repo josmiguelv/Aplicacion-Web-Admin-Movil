@@ -77,8 +77,9 @@ Resultados: `.local/validation-results.json`, `.local/bootstrap-result.json`,
 Se mantiene AdminPortal como entrada autenticada. El único ajuste visual es
 evitar la superposición de los controles de horarios en escritorio.
 Se conservan los identificadores históricos de contratos. No se precargó Pollos B3.
-Las futuras integraciones pueden incorporarse desde el backend conservando la
-autorización por tenant y los contratos existentes; TU VERSO no está integrado.
+El módulo Integraciones → TU VERSO permite custodiar credenciales por empresa
+y comprobar disponibilidad 1A desde backend con autorización explícita. Las
+consultas reales permanecen deshabilitadas; no hay conexión productiva certificada.
 No se efectuaron llamadas a TU VERSO, despliegues, pushes, migraciones externas
 ni modificaciones a los repositorios Android, WEB o Integra-Flow.
 
@@ -94,3 +95,12 @@ un código `sede-<UUID>` para mantener una identificación estable.
 Se verificaron creación, edición persistente, rechazo de cambio de ID,
 duplicados, formato y aislamiento entre empresas usando sedes temporales.
 Resultados: `.local/store-code-results.json`.
+
+## Integraciones TU VERSO
+
+La migración local `003-tuverso-integrations.sql` ya fue aplicada. La clave
+maestra privada se conserva únicamente en `.env`; no perderla ni publicarla.
+`TUVERSO_LIVE_CHECKS_ENABLED=false` mantiene bloqueadas las consultas externas.
+El acceso es exclusivo de SUPER_ADMIN desde cada empresa. La configuración
+completa, contratos, rotación y pruebas están en
+[docs/TUVERSO_INTEGRACIONES.md](docs/TUVERSO_INTEGRACIONES.md).

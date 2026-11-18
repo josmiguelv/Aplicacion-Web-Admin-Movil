@@ -1,0 +1,30 @@
+purpose:
+  stands_in_for: TU VERSO Phase 1A availability only, never its human administration or Phase 1B.
+  unblocks: Local administrator integration security and HTTP failure validation without production traffic.
+assumptions:
+  - id: availability-contract
+    status: supported
+    claim: The documented 1A request uses GET with exactly externalLocationId and purpose and an S2S bearer, without Origin or cookies.
+    reason: PDF pages 7 and 9-10 specify these constraints; the local stand-in rejects violations.
+    verification: On 2026-11-18 the real Node backend ran against Postman 1.74.0 on loopback. Request events and mock stats confirmed exact query keys and no Origin/cookies for AVAILABLE, UNAVAILABLE, 401, 403, 409, 429, 503, malformed response, wrong location, redirect and timeout. This verifies caller behavior against the PDF-derived stand-in, not production availability.
+    source: TU_VERSO_APIs_Globales_Documentacion_Tecnica_v1_18-11-2026.pdf pages 7, 9-10; postman/mocks/tuverso/default.cjs
+    updated_at: '2026-11-18'
+  - id: response-and-state
+    status: supported
+    claim: In the simulated cases run, the administrator distinguishes valid advisory availability from authentication errors, configuration/rate/service failures and invalid or missing responses.
+    reason: Focused real HTTP tests checked persisted states and safe response fields, with simulated evidence explicitly labelled.
+    verification: server/integrations.test.mjs passed against the local simulation; both 200 availability results yielded QUERY_CONNECTED, 401/403 AUTH_ERROR, and other tested failures CONFIGURED without stale success. No Phase 1B route was requested.
+    source: server/integrations.test.mjs; server/integrations.mjs; server/tuverso-client.mjs; postman/mocks/tuverso/default.cjs
+    updated_at: '2026-11-18'
+  - id: certification
+    status: unknown
+    claim: A real tenant credential and binding authorize a positive production query.
+    reason: No production credential, binding or explicit real-call authorization was supplied. A local simulation cannot certify production.
+    verification: No external request is performed; test backend is restricted to loopback simulation and live checks default to disabled.
+    source: server/tuverso-client.mjs; mandatory PDF pages 19-20
+    updated_at: '2026-11-18'
+fingerprints:
+  - id: pdf-v1
+    date: '2026-11-18'
+    commit: 671a1fa
+    cli: '1.74.0'

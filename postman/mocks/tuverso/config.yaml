@@ -1,0 +1,11 @@
+version: 1
+name: tuverso-availability-1a
+slug: tuverso
+protocol: http
+description: Local-only contract simulation from TU VERSO PDF v1, pages 9-10 and 18.
+origin: api.tuverso.integra-b2g.com
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.cjs
+    default: true
