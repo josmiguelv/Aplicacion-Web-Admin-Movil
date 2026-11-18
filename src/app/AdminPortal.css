@@ -43,6 +43,14 @@
 .portal-outline{border:1px solid #cdd7de;background:#fff;color:#31516b;padding:9px 12px;border-radius:7px;font-size:12px}
 .portal-outline:hover:not(:disabled){background:#f1f6fa}
 .portal-admin-form{margin-top:16px}
+.portal-content .ops-grid>.ops-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:0}
+.portal-content .ops-grid>.ops-row>label{min-width:0}
+.portal-content .ops-grid>.ops-row input[type=time]{width:100%;min-width:0}
+.ops-store-code{display:grid;align-content:start;gap:8px;min-width:0}
+.ops-store-code>button{justify-self:start}
+.ops-store-entry{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.ops-store-entry>.ops-row{flex:1;min-width:220px}
+.ops-store-entry>.button{flex-shrink:0}
 .portal-context{margin:0 0 16px;max-width:340px}
 .portal-content>.ops-wrapper{max-width:none;padding:5px 0 40px}
 @media(max-width:700px){.portal-header{padding:15px 20px;align-items:flex-start}.portal-role{display:none}.portal-company{flex-wrap:wrap}.portal-company>div{flex-basis:100%}.portal-title{display:block}.portal-panel{padding:17px}.portal-inline label,.portal-inline .portal-primary{flex-basis:100%}.portal-auth{padding:12px}.portal-login{padding:25px}.portal-body{padding:14px 12px 45px}.portal-tab{padding:12px 8px;font-size:12px}}

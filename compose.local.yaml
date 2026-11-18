@@ -1,0 +1,21 @@
+name: integra-admin-local
+services:
+  postgres:
+    image: postgres:17
+    container_name: integra-admin-postgres
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:55432:5432'
+    environment:
+      POSTGRES_DB: integra_admin
+      POSTGRES_USER: integra_admin_local
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Local password required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U integra_admin_local -d integra_admin']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+volumes:
+  postgres-data:
