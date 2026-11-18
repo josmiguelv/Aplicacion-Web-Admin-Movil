@@ -54,3 +54,30 @@
 .portal-context{margin:0 0 16px;max-width:340px}
 .portal-content>.ops-wrapper{max-width:none;padding:5px 0 40px}
 @media(max-width:700px){.portal-header{padding:15px 20px;align-items:flex-start}.portal-role{display:none}.portal-company{flex-wrap:wrap}.portal-company>div{flex-basis:100%}.portal-title{display:block}.portal-panel{padding:17px}.portal-inline label,.portal-inline .portal-primary{flex-basis:100%}.portal-auth{padding:12px}.portal-login{padding:25px}.portal-body{padding:14px 12px 45px}.portal-tab{padding:12px 8px;font-size:12px}}
+
+
+/* Vínculos locales TU VERSO: interfaz intencionalmente sobria y responsiva. */
+.binding-warning{background:#fff8eb;border:1px solid #e7d6ab;color:#5f4b1f;padding:13px 15px;border-radius:8px;font-size:13px;line-height:1.55;margin:0 0 20px}
+.binding-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 18px}
+.binding-form label{min-width:0;display:grid;align-content:start;gap:7px;font-size:12px;font-weight:600}
+.binding-form input,.binding-form select{width:100%;min-width:0;min-height:42px;border:1px solid #cbd4dd;border-radius:7px;padding:9px 10px;background:white;color:#24323c}
+.binding-form input[readonly]{background:#f2f4f6;color:#556574}
+.binding-form-note{grid-column:1 / -1;margin:0}
+.binding-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.binding-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.binding-form>.binding-actions{grid-column:1 / -1}
+.binding-list{display:grid;gap:14px}
+.binding-item{border:1px solid #dfe5e9;border-radius:9px;padding:16px}
+.binding-item-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.binding-item-header strong{font-size:14px}
+.binding-status{font-size:11px;color:#704c12;background:#fff5df;border:1px solid #f2dca7;border-radius:30px;padding:5px 10px}
+.binding-code{font-size:12px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.binding-item .portal-muted{margin:7px 0}
+.binding-item>.binding-actions{margin-top:14px}
+.binding-danger{color:#a33b34;border-color:#ebcac6}
+.binding-danger-solid{background:#a33b34;border-color:#a33b34}
+.binding-danger-solid:hover:not(:disabled){background:#822a25}
+.binding-confirm{margin-top:14px;background:#fff7f5;border:1px solid #eed4d0;border-radius:8px;padding:13px}
+.binding-confirm strong{font-size:13px}
+.binding-confirm p{font-size:12px;color:#69544f;line-height:1.5;margin:7px 0 13px}
+@media(max-width:700px){.binding-form{grid-template-columns:1fr}.binding-form-note,.binding-form>.binding-actions{grid-column:auto}}

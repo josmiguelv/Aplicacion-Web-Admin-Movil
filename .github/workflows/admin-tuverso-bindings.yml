@@ -1,0 +1,42 @@
+name: Admin vínculos TU VERSO — pruebas focalizadas
+on:
+  push:
+    branches:
+      - feat/admin-saas-multitenant-login
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: admin_binding_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d admin_binding_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/admin_binding_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.25.0'
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Syntax check local binding handler
+        run: node --check server/local-tuverso-bindings.mjs
+      - name: Frontend compile
+        run: pnpm build
+      - name: Focused authorization and CRUD tests
+        run: node --test server/local-tuverso-bindings.test.mjs

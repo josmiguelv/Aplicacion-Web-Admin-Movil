@@ -6,6 +6,8 @@
 
 **Arquitectura:** [docs/ARQUITECTURA_ADMINISTRADOR_SAAS.md](docs/ARQUITECTURA_ADMINISTRADOR_SAAS.md).
 
+**Vínculos TU VERSO (solo borradores locales):** [docs/VINCULOS_TUVERSO_BORRADOR_LOCAL.md](docs/VINCULOS_TUVERSO_BORRADOR_LOCAL.md). Para usar esta pantalla en una BD existente se requiere aplicar previamente la migración 002; no modifica vínculos remotos.
+
 ---
 
 ## Antecedentes técnicos: piloto de aplicación Android
