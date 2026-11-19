@@ -35,7 +35,7 @@ export async function publicNotificationRoutes({req,res,url,pool,json,bad,corsHe
  return false;
 }
 
-const selectFields = 'SELECT n.id,n.app_id AS "appId",n.title,n.message,n.image_id AS "imageId",n.send_at AS "scheduledAt",n.expires_at AS "expiresAt",n.cancelled_at AS "cancelledAt",n.enabled,n.created_at AS "createdAt",CASE WHEN n.cancelled_at IS NOT NULL OR n.enabled=false THEN \'CANCELLED\' WHEN n.expires_at IS NOT NULL AND n.expires_at<=now() THEN \'EXPIRED\' WHEN n.send_at<=now() THEN \'AVAILABLE\' ELSE \'SCHEDULED\' END AS status FROM scheduled_notifications n ';
+const selectFields = 'SELECT n.id,n.app_id AS "appId",n.title,n.message,n.image_id AS "imageId",n.send_at AS "scheduledAt",n.expires_at AS "expiresAt",n.cancelled_at AS "cancelledAt",n.enabled,n.created_at AS "createdAt",n.push_status AS "pushStatus",n.fcm_message_id AS "fcmMessageId",n.push_sent_at AS "pushSentAt",n.push_attempts AS "pushAttempts",n.push_last_error AS "pushLastError",CASE WHEN n.cancelled_at IS NOT NULL OR n.enabled=false THEN \'CANCELLED\' WHEN n.expires_at IS NOT NULL AND n.expires_at<=now() THEN \'EXPIRED\' WHEN n.send_at<=now() THEN \'AVAILABLE\' ELSE \'SCHEDULED\' END AS status FROM scheduled_notifications n ';
 export async function adminNotificationRoutes({req,res,url,user,pool,body,json,tenantOf,bad,uuid}){
  const route=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/notifications(?:\/([0-9a-f-]{36})(?:\/(cancel))?)?$/);
  if(!route)return false;
@@ -65,13 +65,14 @@ export async function adminNotificationRoutes({req,res,url,user,pool,body,json,t
    await client.query('BEGIN');
    const app=await client.query('SELECT 1 FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]);
    if(!app.rowCount)throw bad(404,'Aplicación no registrada para esta empresa');
-   const image=await client.query('SELECT 1 FROM product_images WHERE tenant_id=$1 AND id=$2',[tenantId,imageId]);
+   const image=await client.query('SELECT octet_length(content) AS bytes FROM product_images WHERE tenant_id=$1 AND id=$2',[tenantId,imageId]);
    if(!image.rowCount)throw bad(404,'Imagen no pertenece a esta empresa');
+   if(Number(image.rows[0].bytes)>1024*1024)throw bad(400,'Para enviar notificaciones por FCM la imagen debe pesar máximo 1 MB');
    let q;
    if(payload.id){
     if(!uuid(payload.id))throw bad(400,'Notificación inválida');
     q=await client.query(
-     'UPDATE scheduled_notifications SET app_id=$3,title=$4,message=$5,image_id=$6,send_at=$7,expires_at=$8,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND enabled=true AND send_at>now() RETURNING id',
+     'UPDATE scheduled_notifications SET app_id=$3,title=$4,message=$5,image_id=$6,send_at=$7,expires_at=$8,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND enabled=true AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id',
      [tenantId,payload.id,appId,title.trim(),message.trim(),imageId,schedule,payload.expiresAt||null]);
     if(!q.rowCount)throw bad(409,'Solo puedes editar notificaciones pendientes');
    }else{
@@ -92,7 +93,7 @@ export async function adminNotificationRoutes({req,res,url,user,pool,body,json,t
   const client=await pool.connect();
   try{
    await client.query('BEGIN');
-   const q=await client.query('UPDATE scheduled_notifications SET enabled=false,cancelled_at=now(),updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND send_at>now() RETURNING id',[tenantId,notificationId]);
+   const q=await client.query('UPDATE scheduled_notifications SET enabled=false,cancelled_at=now(),updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id',[tenantId,notificationId]);
    if(!q.rowCount)throw bad(409,'No se puede cancelar: la notificación ya estaba disponible o no existe');
    await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'NOTIFICATION_CANCELLED',notificationId]);
    await client.query('COMMIT');

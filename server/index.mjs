@@ -4,6 +4,7 @@ import {isStaticPathAllowed} from './static-path-policy.mjs'
 import {isAllowedAdminOrigin} from './admin-origin-policy.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {adminNotificationRoutes,publicNotificationRoutes} from './scheduled-notifications.mjs'
+import {startFcmWorker} from './fcm-push.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -384,3 +385,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(req.method==='GET')return await serve(res,url.pathname)
  throw bad(405,'Método no permitido')
  }catch(err){if(err.code==='23505')return json(res,409,{error:'Conflicto: registro duplicado'});if(err.code==='23503')return json(res,409,{error:'Referencia no válida'});const code=typeof err.code==='number'?err.code:500;if(code===500)console.error('API error',err.message);json(res,code,{error:code===500?'Error interno':err.message})}}).listen(port,()=>console.log('INTEGRA B2G multitenant admin listening',port))
+// FCM se activa solo mediante FCM_ENABLED=true. No dispara envíos en CI ni local por defecto.
+const pushWorker=startFcmWorker({pool})
+process.once('SIGTERM',()=>pushWorker.stop())
+process.once('SIGINT',()=>pushWorker.stop())

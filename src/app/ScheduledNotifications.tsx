@@ -5,6 +5,8 @@ type App = {app_id:string;enabled:boolean}
 type Notification = {
  id:string;appId:string;title:string;message:string;imageId:string;
  scheduledAt:string;expiresAt:string|null;status:'SCHEDULED'|'AVAILABLE'|'CANCELLED'|'EXPIRED';
+ pushStatus?:'PENDING'|'SENDING'|'SENT'|'RETRY'|'FAILED'|'UNKNOWN'|'SKIPPED';
+ fcmMessageId?:string|null;pushSentAt?:string|null;pushAttempts?:number;pushLastError?:string|null;
 }
 type Draft = {id:string;appId:string;title:string;message:string;imageId:string;scheduledAt:string;expiresAt:string}
 const initial=(appId=''):Draft=>({
@@ -16,6 +18,11 @@ const localValue=(value:string|null)=>{
  if(!value)return ''
  const d=new Date(value)
  return Number.isFinite(d.getTime())?new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16):''
+}
+const pushLabels:Record<NonNullable<Notification['pushStatus']>,string>={
+ PENDING:'Pendiente de envío',SENDING:'Enviando a Firebase',SENT:'Aceptada por Firebase',
+ RETRY:'Reintento programado',FAILED:'Error de envío',UNKNOWN:'Resultado incierto — revisar',
+ SKIPPED:'Solo API (anterior a FCM)'
 }
 const statusLabel:Record<Notification['status'],string>={
  SCHEDULED:'Programada',AVAILABLE:'Disponible por API',CANCELLED:'Cancelada',EXPIRED:'Vencida'
@@ -77,12 +84,13 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
    await refresh()
    setEditor(true)
    setDraft({...draft,id:result.id})
-   setNotice('Notificación guardada. Estará disponible en la API a partir de la fecha programada.')
+   setNotice('Notificación guardada. Estará disponible por API en la fecha indicada y se enviará por FCM si está habilitado en el servidor.')
   })
  }
  const upload=async(file:File)=>{
   setUploading(true);setError('');setNotice('')
   try{
+   if(file.size>1024*1024)throw Error('La imagen para FCM debe pesar máximo 1 MB.')
    const response=await fetch(root+'/images',{method:'POST',credentials:'include',body:file})
    const result=await response.json().catch(()=>({error:'Respuesta inesperada'}))
    if(!response.ok)throw Error(result.error||'No se pudo cargar la imagen')
@@ -110,7 +118,7 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
    <button className="button button-primary" type="button" disabled={busy||apps.length===0}
     onClick={()=>{setDraft(initial(apps[0]?.app_id));setEditor(true);setConfirmId('');setError('');setNotice('')}}>Programar notificación</button>
   </div>
-  <p className="ops-hint">La API mostrará los avisos cuando llegue la fecha indicada. Esto no envía notificaciones push al teléfono; la aplicación debe consultar la API.</p>
+  <p className="ops-hint">Los avisos se publican por API a su hora programada. El envío FCM se ejecutará únicamente cuando el servidor tenga habilitada y configurada la cuenta de servicio privada. «Aceptada por Firebase» no garantiza entrega en todos los teléfonos.</p>
   {apps.length===0&&<p className="ops-empty">Primero registra una aplicación en la sección Publicar para asociar las notificaciones.</p>}
   {!ready?<p className="ops-empty">Cargando notificaciones...</p>:items.length===0?
    <p className="ops-empty">Todavía no hay notificaciones programadas.</p>:
@@ -121,6 +129,9 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
       <strong>{item.title}</strong><small>{item.message}</small>
       <small>{item.appId} · {new Date(item.scheduledAt).toLocaleString('es-PE')}</small>
       <span className={'ops-record-status'+(item.status==='AVAILABLE'?' enabled':'')}>{statusLabel[item.status]}</span>
+      {item.pushStatus&&<small><strong>FCM:</strong> {pushLabels[item.pushStatus]}{item.pushSentAt?' · '+new Date(item.pushSentAt).toLocaleString('es-PE'):''}</small>}
+      {item.fcmMessageId&&<small title={item.fcmMessageId}>Referencia FCM: {item.fcmMessageId}</small>}
+      {item.pushLastError&&<small role="status">Detalle de envío: {item.pushLastError}</small>}
      </div>
      <div className="ops-record-actions">
       {item.status==='SCHEDULED'&&<button type="button" className="button button-secondary" disabled={busy} onClick={()=>edit(item)}>Editar</button>}
@@ -131,7 +142,7 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
      </div>
      {(confirmId==='cancel:'+item.id||confirmId==='delete:'+item.id)&&<div className="ops-delete-confirm" role="group" aria-label={'Confirmar acción sobre '+item.title}>
       <strong>{confirmId.startsWith('cancel:')?'¿Cancelar esta notificación?':'¿Eliminar esta notificación?'}</strong>
-      <p>{confirmId.startsWith('cancel:')?'No aparecerá en la API al llegar su fecha.':'Desaparecerá del administrador y dejará de estar disponible por API. No retira avisos que un teléfono haya leído antes.'}</p>
+      <p>{confirmId.startsWith('cancel:')?'No aparecerá en la API al llegar su fecha.':'Desaparecerá del administrador y dejará de estar disponible por API. No cancela un envío que Firebase ya haya aceptado.'}</p>
       <div className="ops-record-actions">
        <button type="button" className="button button-secondary ops-delete-trigger" disabled={busy}
         onClick={()=>remove(item,confirmId.startsWith('cancel:')?'cancel':'delete')}>Confirmar</button>
@@ -167,7 +178,7 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
    {draft.imageId?<div className="ops-notification-image-preview">
      <img src={imagePreview(draft.imageId)} alt="Vista previa de la imagen" />
      <span>Imagen adjunta</span>
-    </div>:<p className="ops-hint">La imagen es obligatoria. Máximo 4 MB; JPG, PNG o WebP.</p>}
+    </div>:<p className="ops-hint">La imagen es obligatoria. Máximo 1 MB para FCM; JPG, PNG o WebP.</p>}
    <div className="ops-record-actions">
     <button className="button button-primary" disabled={busy||uploading||!draft.imageId}>{busy?'Guardando...':draft.id?'Guardar cambios':'Guardar programación'}</button>
     <button className="button button-secondary" type="button" disabled={busy||uploading}

@@ -252,3 +252,65 @@ Firebase Cloud Messaging o APNs. Android debe consultar la API y
 deduplicar avisos por `id`; para mostrar push fuera de la aplicación
 se necesitaría una integración adicional de transporte push.
 No se modificó Android, TU VERSO ni Railway.
+
+
+## Envío PUSH FCM desde el administrador (Pollos B3)
+
+El proyecto Firebase de la app Android es `pollosb3-84297`,
+el identificador Android es `com.integrab2g.pollosb3` y el tema
+de destinatarios es `pollosb3_promotions`. El backend existente puede
+consultar `scheduled_notifications` periódicamente y enviar FCM HTTP v1
+con OAuth de cuenta de servicio. No se modifica el APK.
+
+### Activación del servidor
+
+1. En Firebase Console → Configuración del proyecto → Cuentas de servicio
+   generar una **clave privada de cuenta de servicio** para este proyecto.
+   El archivo **`google-services.json` de Android no es una cuenta de servicio**
+   y no autoriza el envío. Guardar el JSON privado **fuera del repositorio**
+   y no compartirlo por chat ni incorporarlo al APK.
+2. Activar **Firebase Cloud Messaging API (HTTP v1)** para `pollosb3-84297`
+   y conceder permiso de envío a esa cuenta (`roles/firebase.messagingAdmin`
+   cuando sea una cuenta de servicio dedicada).
+3. Configurar únicamente en el proceso de Node.js las variables:
+   `FCM_PROJECT_ID=pollosb3-84297`,
+   `FCM_TARGET_APP_ID=com.integrab2g.pollosb3`,
+   `FCM_TOPIC=pollosb3_promotions`,
+   `GOOGLE_APPLICATION_CREDENTIALS` con ruta del JSON privado o
+   `FCM_SERVICE_ACCOUNT_JSON` como secreto servidor, y
+   `FCM_PUBLIC_BASE_URL` como origen **HTTPS estable y público** del
+   backend para que Firebase descargue imágenes (máximo 1 MB).
+   Ejemplo de dominio: `https://api.tudominio.com` (solo ilustrativo).
+4. Aplicar a la base administrativa existente exclusivamente la migración
+   `server/migrations/007-fcm-push.sql`, **antes de iniciar este backend**.
+   Es aditiva e idempotente y preserva notificaciones existentes.
+   Las notificaciones anteriores a esta migración quedan `SKIPPED` y no
+   se envían inesperadamente al activar FCM. Para bases nuevas
+   `server/schema.sql` ya incluye el cambio.
+5. Después de revisar credencial y dominio, establecer `FCM_ENABLED=true`
+   solamente en el servidor y reiniciar. Si es `false` (valor inicial),
+   el backend no llama a Firebase y la API pública continúa funcionando.
+
+### Estados y seguridad
+
+El servidor revisa trabajos aproximadamente cada 15 segundos.
+`PENDING → SENDING → SENT` al recibir un ID válido de Firebase.
+`RETRY` ante un 429 o 503 explícito (hasta cuatro intentos);
+`FAILED` ante rechazo definitivo; `UNKNOWN` ante resultado ambiguo
+(timeout o caída), **sin reintento automático** para evitar duplicados.
+`SKIPPED` identifica registros anteriores a la activación.
+El estado `SENT` significa únicamente **aceptado por Firebase**,
+no entrega confirmada a todos los dispositivos.
+
+Los envíos se filtran por aplicación habilitada y tenant activo.
+El tema de destino y proyecto provienen exclusivamente de variables
+privadas del servidor, nunca de un campo editable por el tenant.
+Un `SELECT ... FOR UPDATE SKIP LOCKED` impide reclamar el mismo trabajo
+simultáneamente. Los errores almacenados no incluyen las credenciales.
+No se envían notificaciones por API desde Android al backend.
+
+**Producción:** requiere hosting permanente del backend con PostgreSQL
+y HTTPS público estable. Una sesión local o Cloudflare Quick Tunnel no
+garantiza que las notificaciones se envíen a la hora programada.
+**Ningún mensaje real fue enviado en las pruebas automatizadas:**
+las pruebas usan un simulador de respuesta OAuth/FCM.
