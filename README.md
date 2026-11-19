@@ -25,7 +25,9 @@ Esta entrega incorpora el prototipo frontend entregado por el usuario y un backe
 5. Ejecuta `pnpm install`, `pnpm dev` (interfaz Vite) y, en una terminal aparte, `pnpm start` (API).
 6. Abre `http://localhost:3000`, inicia sesión como Super Administrador, crea la empresa que corresponda y entra en **Configuración comercial**.
 
-**Despliegue:** servir `dist/` desde Node, establecer `NODE_ENV=production`, `COOKIE_SECURE=true`, `ADMIN_ORIGIN` HTTPS exacto, `DATABASE_URL` protegida y desactivar el acceso a la base de datos desde Internet. La plataforma requiere pruebas de penetración, copias de seguridad y revisión operacional antes de recibir clientes.
+**Despliegue:** servir `dist/` desde Node, establecer `NODE_ENV=production`, `COOKIE_SECURE=true`, `ADMIN_ORIGIN` HTTPS exacto, `DATABASE_URL` protegida y desactivar el acceso a la base de datos desde Internet.
+
+**Checklist obligatorio al desplegar en Railway (proyecto independiente de TU VERSO):** verificar que la ruta `/` entregue el login HTML, que `/health/ready` responda `ready`, que `/api/v1/mobile/config?appId=...` consulte el catálogo publicado y que los assets de `dist/` carguen sin errores. La validación de rutas estáticas usa semántica compatible con Windows local y Linux/Railway; no volver a introducir comparaciones con `/` fijo. Mantener `ADMIN_ORIGIN` igual al dominio HTTPS de administración y aplicar las migraciones correspondientes solo a la PostgreSQL independiente del administrador. **Este cambio no despliega a Railway.** La plataforma requiere pruebas de penetración, copias de seguridad y revisión operacional antes de recibir clientes.
 
 ## API pública Android
 

@@ -1,5 +1,6 @@
 import {integrationRoutes} from './integrations.mjs'
 import {mobileWeeklyHours} from './mobile-store-hours.mjs'
+import {isStaticPathAllowed} from './static-path-policy.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
@@ -248,7 +249,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(!result.rowCount&&resource!=='publish')throw bad(404,'Registro no encontrado');await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,resource.toUpperCase()+'_WRITE',result.rows[0]?.id||b.appId||null]);await client.query('COMMIT');return json(res,200,result.rows[0]);
  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
 }
-async function serve(res,path){const base=join(process.cwd(),'dist');const target=normalize(join(base,path==='/'?'index.html':path));if(!target.startsWith(base+'/')&&target!==base)throw bad(403,'Ruta inválida');let content;try{content=await readFile(target)}catch{content=await readFile(join(base,'index.html'))}const type=({'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[extname(target)]||'application/octet-stream';res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(content)}
+async function serve(res,path){const base=join(process.cwd(),'dist');const target=normalize(join(base,path==='/'?'index.html':path));if(!isStaticPathAllowed(base,target))throw bad(403,'Ruta inválida');let content;try{content=await readFile(target)}catch{content=await readFile(join(base,'index.html'))}const type=({'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[extname(target)]||'application/octet-stream';res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(content)}
 createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);try{
  if(url.pathname==='/health/live'&&req.method==='GET')return json(res,200,{status:'ok'});
  if(url.pathname==='/health/ready'&&req.method==='GET'){
