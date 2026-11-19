@@ -1,4 +1,5 @@
 import {integrationRoutes} from './integrations.mjs'
+import {mobileWeeklyHours} from './mobile-store-hours.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
@@ -62,7 +63,7 @@ function storeHours(store,date=new Date()){
  const begin=value(cfg.open),end=value(cfg.close),isOpen=end>begin?(minutes>=begin&&minutes<end):(minutes>=begin);
  return {hoursConfigured:true,isOpen,closesAt:isOpen?cfg.close:null};
 }
-function withLiveHours(store){return {...store,...storeHours(store)}}
+function withLiveHours(store){return {...store,weeklyHours:mobileWeeklyHours(store.openingHours??store.opening_hours),...storeHours(store)}}
 
 async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings]=await Promise.all([
  tx.query('SELECT id,name,address,latitude,longitude,radius_km,delivery_fee_pen,delivery_rate_per_km_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours FROM stores WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),

@@ -72,3 +72,27 @@ La app incluye preguntas frecuentes redactadas sin prometer cobros, atención co
 El enlace no es un libro construido por esta app. Debe apuntar a un Libro electrónico real y accesible con identidad del proveedor, hoja numerada, envío/impresión de constancia y procesamiento conforme al reglamento. Si no hay enlace, **no se simula una hoja ni un registro**: se muestra la advertencia y se orienta al consumidor a solicitar el Libro al proveedor. El proveedor debe cumplir además con la exhibición y disponibilidad que exija la normativa vigente. El backend rechaza HTTP, localhost, IP literals y URLs con credenciales. La app abre la URL fuera de su WebView.
 
 La actualización de la columna requiere aplicar el SQL en una base controlada antes de publicar. No se ha desplegado ni configurado un enlace oficial no suministrado por Pollos B3.
+
+
+### Sedes y horarios en Android (lectura desde API)
+
+Los horarios configurados en **Configuración comercial → Locales y modalidades**
+se almacenan como `opening_hours` con claves `mon/tue/wed/thu/fri/sat/sun`.
+Solo las sedes **activas** se incluyen en una publicación; los horarios no se
+exponen a Android hasta **Aplicación y publicación → Publicar cambios**.
+
+La API existente `GET /api/v1/mobile/config?appId=<id>` devuelve la
+configuración publicada de una empresa y calcula `hoursConfigured`, `isOpen`
+y `closesAt` en la zona horaria `America/Lima`. Para compatibilidad con
+la pantalla de detalle semanal del cliente Android existente, la API de lectura
+añade `weeklyHours` con claves completas `monday/tuesday/.../sunday`
+a partir de los días publicados, sin alterar `openingHours` ni el esquema
+de PostgreSQL. La adaptación también funciona para publicaciones anteriores,
+sin cambiar los borradores. Si un día no está configurado se omite; no se
+inventan horarios.
+
+La app Android consulta esta API usando el `appId` registrado. Su
+`B3_API_BASE` debe apuntar a una URL HTTPS accesible desde el dispositivo;
+`localhost:4000` solo sirve para probar la API desde el propio PC, **no desde
+Android**. La APK debe compilarse con esa dirección y no debe incluir
+API Keys secretas. Ningún repositorio Android o TU VERSO fue modificado.

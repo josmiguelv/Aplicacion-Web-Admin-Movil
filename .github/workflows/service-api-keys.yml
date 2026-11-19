@@ -36,6 +36,8 @@ jobs:
         run: node --check server/service-api-keys.mjs && node --check server/index.mjs
       - name: Build frontend
         run: pnpm build
+      - name: Mobile weekly store hours contract (focused)
+        run: node --test server/mobile-store-hours.test.mjs
       - name: TU VERSO credential formats (focused)
         run: node --test server/tuverso-credential-format.test.mjs
       - name: Focused PostgreSQL and HTTP integration tests
