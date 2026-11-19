@@ -44,3 +44,28 @@ test('API pública devuelve origen STRAIGHT_LINE y CORS también en errores',()=
  assert.doesNotMatch(source,/GOOGLE_ROUTES_API_KEY/)
  assert.match(source,/s\.hoursConfigured===true&&s\.isOpen===true/)
 })
+
+const universal={id:'7585340e-6d4d-4764-b127-b892dc50909d',name:'Universal',
+ latitude:-12.0482197,longitude:-77.1114342,radiusKm:10,
+ deliveryPricingMode:'FIXED',deliveryRatePerKmPen:null,deliveryFeePen:15}
+test('Universal: S/ 15 fijos si está dentro de 10 km, sin multiplicación por kilómetros',()=>{
+ const c=quote([universal],-12.048,-77.111)
+ assert.equal(c.store.name,'Universal')
+ assert.equal(c.deliveryFeePen,15)
+ assert.ok(c.straightDistanceKm<10)
+ assert.throws(()=>quote([universal],-11.90,-77.111),e=>e.code===409)
+})
+test('si el cliente selecciona Universal, se respeta su tarifa fija aun cuando Nogales esté más cerca',()=>{
+ const point={latitude:-12.0506096,longitude:-77.1251313}
+ const nearest=quote([nogales,universal],point.latitude,point.longitude)
+ assert.equal(nearest.store.name,'Nogales')
+ const preferred=quote([nogales,universal],point.latitude,point.longitude,universal.id)
+ assert.equal(preferred.store.name,'Universal')
+ assert.equal(preferred.deliveryFeePen,15)
+})
+test('una sede preferida fuera de cobertura no bloquea otra elegible',()=>{
+ const restricted={...universal,radiusKm:0.01}
+ const chosen=quote([nogales,restricted],nogales.latitude,nogales.longitude,universal.id)
+ assert.equal(chosen.store.id,nogales.id)
+ assert.equal(chosen.deliveryFeePen,0)
+})
