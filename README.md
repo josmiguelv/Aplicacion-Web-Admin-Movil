@@ -314,3 +314,31 @@ y HTTPS público estable. Una sesión local o Cloudflare Quick Tunnel no
 garantiza que las notificaciones se envíen a la hora programada.
 **Ningún mensaje real fue enviado en las pruebas automatizadas:**
 las pruebas usan un simulador de respuesta OAuth/FCM.
+
+
+### Activación FCM en PC local usando `.env`
+
+El proceso Node carga automáticamente `./.env` de la raíz del administrador
+cuando no se ejecuta con `NODE_ENV=production`.
+Las variables ya establecidas por el proceso tienen prioridad sobre ese
+archivo; en producción no se carga el `.env` y se usan secretos del hosting.
+
+Antes de activar envíos reales, desde la raíz del administrador ejecutar:
+
+```powershell
+node server/fcm-preflight.mjs
+```
+
+El preflight no imprime el contenido de los secretos ni envía ningún push.
+Comprueba la cuenta de servicio de Google, su correspondencia con el proyecto
+`pollosb3-84297`, la clave privada, el tema y la respuesta de
+`FCM_PUBLIC_BASE_URL/health/live` por HTTPS.
+Si devuelve `PREFLIGHT: PASS`, comprobar que la migración
+`007-fcm-push.sql` esté aplicada y activar `FCM_ENABLED=true` en el `.env`
+local (y reiniciar el backend). Un tema FCM es una difusión colectiva;
+no programar una promoción de prueba sin conocer los destinatarios.
+
+En caso de `PREFLIGHT: NO LISTO`, conservar `FCM_ENABLED=false` y corregir
+solo el componente que indique el diagnóstico.
+El preflight no prueba los permisos remotos de FCM: su validación definitiva
+ocurre al enviar un mensaje real autorizado por el operador.

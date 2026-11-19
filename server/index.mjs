@@ -5,12 +5,16 @@ import {isAllowedAdminOrigin} from './admin-origin-policy.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {adminNotificationRoutes,publicNotificationRoutes} from './scheduled-notifications.mjs'
 import {startFcmWorker} from './fcm-push.mjs'
+import {loadLocalEnv} from './load-local-env.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
 import {randomBytes,scryptSync,timingSafeEqual,createHash,randomUUID} from 'node:crypto'
 import pg from 'pg'
 
+// En local, permitir configurar el proceso Node mediante el .env raíz.
+// En producción, el servidor recibe secretos desde variables externas.
+loadLocalEnv()
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL, max:10})
 const port=Number(process.env.PORT||4000)
 const prod=process.env.NODE_ENV==='production'

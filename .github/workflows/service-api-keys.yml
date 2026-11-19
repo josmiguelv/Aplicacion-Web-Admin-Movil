@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Check edited backend syntax
-        run: node --check server/service-api-keys.mjs && node --check server/static-path-policy.mjs && node --check server/fcm-push.mjs && node --check server/scheduled-notifications.mjs && node --check server/index.mjs
+        run: node --check server/service-api-keys.mjs && node --check server/static-path-policy.mjs && node --check server/load-local-env.mjs && node --check server/fcm-preflight.mjs && node --check server/fcm-push.mjs && node --check server/scheduled-notifications.mjs && node --check server/index.mjs
       - name: Validate Windows and Railway static paths
         run: node --test server/static-path-policy.test.mjs
       - name: Validate tunnel login origin policy
@@ -54,3 +54,5 @@ jobs:
         run: node server/scheduled-notifications.test.mjs
       - name: Focused FCM scheduler, tenant routing and HTTP v1 send contract
         run: node server/fcm-push.test.mjs
+      - name: Local .env loading with production precedence
+        run: node --test server/load-local-env.test.mjs
