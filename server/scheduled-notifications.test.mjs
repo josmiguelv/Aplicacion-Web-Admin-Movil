@@ -50,31 +50,41 @@ try{
  const uploaded=await fetch(base+root+'/images',{method:'POST',headers:{Origin:origin,Cookie:cookie},body:png})
  assert.equal(uploaded.status,201)
  const image=(await uploaded.json()).id
+ const good=(await pool.query("INSERT INTO products(tenant_id,name,price_pen,active) VALUES($1,'Pollo especial',25,true) RETURNING id",[tenantA])).rows[0].id
+ const foreign=(await pool.query("INSERT INTO products(tenant_id,name,price_pen,active) VALUES($1,'Producto ajeno',15,true) RETURNING id",[tenantB])).rows[0].id
+ const inactive=(await pool.query("INSERT INTO products(tenant_id,name,price_pen,active) VALUES($1,'Fuera de carta',15,false) RETURNING id",[tenantA])).rows[0].id
  const future=new Date(Date.now()+3600000).toISOString()
  const notification={appId:appA,title:'Promoción programada',message:'Disponible únicamente en la hora indicada',
   imageId:image,scheduledAt:future,expiresAt:new Date(Date.now()+86400000).toISOString()}
  await check(root+'/notifications',{method:'POST',data:notification},401)
  await check(root+'/notifications',{method:'POST',cookie:otherCookie,data:notification},403)
  await check(root+'/notifications',{method:'POST',cookie,data:{...notification,appId:appB}},404)
+ await check(root+'/notifications',{method:'POST',cookie,data:{...notification,productId:foreign}},400)
+ await check(root+'/notifications',{method:'POST',cookie,data:{...notification,productId:inactive}},400)
+ await check(root+'/notifications',{method:'POST',cookie,data:{...notification,productId:'not-a-uuid'}},400)
  await check(root+'/notifications',{method:'POST',cookie,data:{...notification,imageId:'00000000-0000-4000-8000-000000000005'}},404)
  await check(root+'/notifications',{method:'POST',cookie,data:{...notification,scheduledAt:'2020-01-01T12:00:00Z'}},400)
  const item=await check(root+'/notifications',{method:'POST',cookie,data:notification},201)
  assert.equal(item.status,'SCHEDULED')
+ assert.equal(item.productId,null,'El producto no es obligatorio')
  assert.equal((await check(root+'/notifications',{cookie})).items.length,1)
  const publicPath='/api/v1/mobile/notifications?appId='+appA
  assert.equal((await check(publicPath)).notifications.length,0)
  assert.equal((await fetch(base+'/api/v1/mobile/notification-images/'+image+'?appId='+appA)).status,404)
  const rightNow=new Date(Date.now()-4000).toISOString()
  const updated=await check(root+'/notifications',{method:'POST',cookie,
-  data:{...notification,id:item.id,title:'Mensaje entregable',scheduledAt:rightNow,expiresAt:null}})
+  data:{...notification,id:item.id,title:'Mensaje entregable',scheduledAt:rightNow,expiresAt:null,productId:good}})
  assert.equal(updated.id,item.id)
  assert.equal(updated.status,'AVAILABLE')
+ assert.equal(updated.productId,good)
+ assert.equal(updated.productName,'Pollo especial')
  const received=await check(publicPath)
  assert.equal(received.ready,true)
  assert.equal(received.notifications.length,1)
  assert.equal(received.notifications[0].title,'Mensaje entregable')
  assert.equal(received.notifications[0].message,notification.message)
  assert.equal(received.notifications[0].id,item.id)
+ assert.equal(received.notifications[0].productId,good)
  assert.equal((await check('/api/v1/mobile/notifications?appId='+appB)).notifications.length,0)
  const imagePath=received.notifications[0].imageUrl
  const photo=await fetch(base+imagePath)
@@ -89,12 +99,26 @@ try{
  assert.equal((await check(publicPath)).notifications.length,0)
  assert.equal((await fetch(base+imagePath)).status,404)
  const futureSecond=await check(root+'/notifications',{method:'POST',cookie,
-  data:{...notification,scheduledAt:new Date(Date.now()+7200000).toISOString(),
+  data:{...notification,productId:good,scheduledAt:new Date(Date.now()+7200000).toISOString(),
    expiresAt:new Date(Date.now()+10800000).toISOString()}},201)
+ assert.equal(futureSecond.productId,good)
+ const without=await check(root+'/notifications',{method:'POST',cookie,data:{
+  ...notification,id:futureSecond.id,productId:null,
+  scheduledAt:new Date(Date.now()+7200000).toISOString(),
+  expiresAt:new Date(Date.now()+10800000).toISOString()
+ }})
+ assert.equal(without.productId,null,'La edición permite quitar producto')
  await check(root+'/notifications/'+futureSecond.id+'/cancel',{method:'POST',cookie,data:{confirm:false}},400)
  await check(root+'/notifications/'+futureSecond.id+'/cancel',{method:'POST',cookie,data:{confirm:true}})
  assert.equal((await check(root+'/notifications',{cookie})).items.find(x=>x.id===futureSecond.id).status,'CANCELLED')
  assert.equal((await check(publicPath)).notifications.length,0)
+ // Eliminar un producto desvincula la campaña sin eliminarla.
+ const removable=await check(root+'/notifications',{method:'POST',cookie,data:{
+  ...notification,productId:good,scheduledAt:new Date(Date.now()+14400000).toISOString(),
+  expiresAt:new Date(Date.now()+17280000).toISOString()
+ }},201)
+ await pool.query('DELETE FROM products WHERE tenant_id=$1 AND id=$2',[tenantA,good])
+ assert.equal((await check(root+'/notifications',{cookie})).items.find(n=>n.id===removable.id).productId,null)
  const audit=(await pool.query("SELECT action FROM admin_audit WHERE tenant_id=$1 AND action LIKE 'NOTIFICATION_%'",[tenantA])).rows.map(x=>x.action)
  for(const event of ['NOTIFICATION_CREATED','NOTIFICATION_UPDATED','NOTIFICATION_CANCELLED','NOTIFICATION_DELETED'])assert.ok(audit.includes(event),event)
  console.log('PASS notificaciones: autorización, multitenant, imagen segura, programación, edición, consulta y cancelación')

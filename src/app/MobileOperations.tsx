@@ -516,7 +516,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     </div>}
    </div>}
  </section>}
- {activeTab==='notifications'&&<ScheduledNotifications tenantId={tenantId} apps={apps}/>}
+ {activeTab==='notifications'&&<ScheduledNotifications tenantId={tenantId} apps={apps} products={products}/>}
  {activeTab==='publish'&&<section className="ops-panel ops-record-section">
   <h2><Smartphone size={19}/> Aplicaciones registradas y publicación</h2>
   <p>Elige la aplicación asociada a esta empresa. Los cambios de locales, productos y pagos solo llegan a Android al publicar.</p>

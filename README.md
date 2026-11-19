@@ -342,3 +342,31 @@ En caso de `PREFLIGHT: NO LISTO`, conservar `FCM_ENABLED=false` y corregir
 solo el componente que indique el diagnóstico.
 El preflight no prueba los permisos remotos de FCM: su validación definitiva
 ocurre al enviar un mensaje real autorizado por el operador.
+
+
+### Producto opcional en notificaciones
+
+Desde **Notificaciones → Programar notificación** se puede elegir **Producto asociado (opcional)**,
+o dejar **Sin producto asociado** para novedades informativas.
+Solo se pueden vincular productos activos del mismo tenant; el servidor
+valida el ID en cada creación y edición. Para enlazar un producto útil
+para compra debe estar además publicado en el catálogo de la aplicación.
+
+El campo administrativo `productId` es anulable. La API pública
+`GET /api/v1/mobile/notifications?appId=...` devuelve `productId` (UUID o null),
+y el envío FCM incluye `data.productId` únicamente si hay un producto activo
+asociado. Se conservan `type=marketing`, `screen=notifications` y el
+identificador original para compatibilidad con el receptor Android.
+
+Al eliminar un producto, PostgreSQL desvincula el UUID con `ON DELETE SET NULL`
+y conserva la notificación. Si el producto se desactiva, la API y FCM omiten
+su vínculo para no dirigir al cliente a una ficha inactiva.
+Para instalaciones actuales, ejecutar **solo**
+`server/migrations/008-notification-product.sql` antes de actualizar el backend.
+La migración es aditiva e idempotente y no reenvía notificaciones.
+
+**Apertura en Android:** el backend entrega el ID, pero la versión existente
+de la app solo muestra un enlace genérico a la carta. Para abrir la ficha
+del producto y añadirlo al carrito desde la notificación, el cliente móvil
+deberá utilizar `productId` y comprobar su vigencia contra el catálogo
+publicado. No se modifica ni se recompila Android en este cambio.

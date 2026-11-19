@@ -62,7 +62,8 @@ export function createFcmSender({env=process.env,fetchImpl=fetch,readFileImpl=re
    android:{ttl:secs+'s',priority:'HIGH',notification:{image:url,channel_id:'pollosb3_promotions'}},
    // Contrato nativo B3FirebaseMessagingService: marketing + title/body.
    data:{notificationId:String(notice.id),appId:notice.appId,type:'marketing',
-    screen:'notifications',title:notice.title,body:notice.message}}}
+    screen:'notifications',title:notice.title,body:notice.message,
+    ...(notice.productId?{productId:String(notice.productId)}:{})}}}
   let response
   try{response=await fetchImpl('https://fcm.googleapis.com/v1/projects/'+cfg.projectId+'/messages:send',{
    method:'POST',headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json'},
@@ -86,11 +87,12 @@ export async function dispatchDue({pool,send,config=pushConfig(),limit=10,logger
   await client.query('BEGIN')
   await client.query("UPDATE scheduled_notifications SET push_status='UNKNOWN',push_last_error='Proceso interrumpido. Revisar manualmente',push_locked_at=NULL WHERE push_status='SENDING' AND push_locked_at<now()-interval '5 minutes'")
   const sql=[
-   'SELECT n.id,n.app_id AS "appId",n.title,n.message,n.image_id AS "imageId",n.expires_at AS "expiresAt",octet_length(i.content) AS image_bytes',
+   'SELECT n.id,n.app_id AS "appId",n.title,n.message,n.image_id AS "imageId",n.expires_at AS "expiresAt",octet_length(i.content) AS image_bytes,CASE WHEN p.active=true THEN n.product_id ELSE NULL END AS "productId"',
    'FROM scheduled_notifications n',
    'JOIN mobile_apps a ON a.app_id=n.app_id AND a.tenant_id=n.tenant_id AND a.enabled=true',
    'JOIN tenants t ON t.id=n.tenant_id AND t.active=true',
    'JOIN product_images i ON i.id=n.image_id AND i.tenant_id=n.tenant_id',
+   'LEFT JOIN products p ON p.id=n.product_id AND p.tenant_id=n.tenant_id',
    'WHERE n.app_id=$1 AND n.enabled=true AND n.cancelled_at IS NULL',
    'AND n.send_at<=now() AND (n.expires_at IS NULL OR n.expires_at>now())',
    "AND n.push_status IN ('PENDING','RETRY') AND n.push_next_attempt_at<=now()",

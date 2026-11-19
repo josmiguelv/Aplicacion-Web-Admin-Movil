@@ -34,12 +34,14 @@ try{
    [t,a,p,secondsAgo,expires,u])
   return r.rows[0].id
  }
+ const productId=(await pool.query("INSERT INTO products(tenant_id,name,price_pen,active) VALUES($1,'Combo especial',35,true) RETURNING id",[tenant])).rows[0].id
  const id=await insert(tenant,config.appId,user,pic)
+ await pool.query('UPDATE scheduled_notifications SET product_id=$2 WHERE id=$1',[id,productId])
  const ignore=await insert(other,otherApp,otherUser,otherPic)
  const never=await insert(tenant,config.appId,user,pic,-3600)
  const expired=await insert(tenant,config.appId,user,pic,3600,new Date(Date.now()-1000))
  const count={value:0}
- const send=async n=>{count.value++;assert.equal(n.appId,config.appId);assert.equal(n.id,id);return 'projects/pollosb3-84297/messages/CI123'}
+ const send=async n=>{count.value++;assert.equal(n.appId,config.appId);assert.equal(n.id,id);assert.equal(n.productId,productId);return 'projects/pollosb3-84297/messages/CI123'}
  let result=await dispatchDue({pool,send,config})
  assert.equal(result.processed,1)
  assert.equal(count.value,1)
@@ -86,6 +88,7 @@ try{
   assert.equal(m.notification.body,'Oferta')
   assert.ok(m.notification.image.startsWith('https://example.invalid/api/v1/mobile/notification-images/'))
   assert.equal(m.data.notificationId,id)
+  assert.equal(m.data.productId,called<2?productId:undefined,'Producto opcional en el payload de FCM')
   assert.equal(m.data.type,'marketing','Android descarta otros tipos en primer plano')
   assert.equal(m.data.screen,'notifications','La app abre la pantalla de avisos')
   assert.equal(m.data.title,'Promo CI')
@@ -95,11 +98,12 @@ try{
   return {ok:true,json:async()=>({name:'projects/pollosb3-84297/messages/'+called})}
  }
  const transport=createFcmSender({env:{...env,FCM_SERVICE_ACCOUNT_JSON:JSON.stringify(creds)},fetchImpl:fetchMock})
- const outgoing={id,appId:config.appId,title:'Promo CI',message:'Oferta',imageId:pic,expiresAt:null}
+ const outgoing={id,appId:config.appId,title:'Promo CI',message:'Oferta',imageId:pic,expiresAt:null,productId}
  assert.ok((await transport(outgoing)).endsWith('/1'))
  assert.ok((await transport(outgoing)).endsWith('/2'))
+ assert.ok((await transport({...outgoing,productId:null})).endsWith('/3'))
  assert.equal(oauth,1,'token temporal cacheado en servidor')
- assert.equal(called,2)
+ assert.equal(called,3)
  await assert.rejects(()=>createFcmSender({env:{...env,FCM_SERVICE_ACCOUNT_JSON:JSON.stringify({...creds,project_id:'other'})},fetchImpl:fetchMock})(outgoing),/cuenta de servicio/)
  console.log('PASS contrato FCM v1 con OAuth RS256, credenciales privadas y tema correcto')
 } finally {

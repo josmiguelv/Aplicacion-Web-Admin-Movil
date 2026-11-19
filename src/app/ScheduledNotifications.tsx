@@ -2,15 +2,16 @@ import {useEffect,useState,type FormEvent} from 'react'
 import {Bell,CalendarClock,ImagePlus,Trash2} from 'lucide-react'
 
 type App = {app_id:string;enabled:boolean}
+type CatalogProduct = {id:string;name:string;active:boolean;price_pen:number|string}
 type Notification = {
- id:string;appId:string;title:string;message:string;imageId:string;
+ id:string;appId:string;title:string;message:string;imageId:string;productId:string|null;productName?:string|null;
  scheduledAt:string;expiresAt:string|null;status:'SCHEDULED'|'AVAILABLE'|'CANCELLED'|'EXPIRED';
  pushStatus?:'PENDING'|'SENDING'|'SENT'|'RETRY'|'FAILED'|'UNKNOWN'|'SKIPPED';
  fcmMessageId?:string|null;pushSentAt?:string|null;pushAttempts?:number;pushLastError?:string|null;
 }
-type Draft = {id:string;appId:string;title:string;message:string;imageId:string;scheduledAt:string;expiresAt:string}
+type Draft = {id:string;appId:string;title:string;message:string;imageId:string;productId:string;scheduledAt:string;expiresAt:string}
 const initial=(appId=''):Draft=>({
- id:'',appId,title:'',message:'',imageId:'',
+ id:'',appId,title:'',message:'',imageId:'',productId:'',
  scheduledAt:new Date(Date.now()+10*60000-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16),
  expiresAt:''
 })
@@ -36,7 +37,7 @@ async function api<T>(path:string,method:'GET'|'POST'|'DELETE'='GET',data?:unkno
  return result as T
 }
 
-export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;apps:App[]}){
+export default function ScheduledNotifications({tenantId,apps,products}:{tenantId:string;apps:App[];products:CatalogProduct[]}){
  const root='/api/admin/tenants/'+tenantId
  const [items,setItems]=useState<Notification[]>([])
  const [draft,setDraft]=useState<Draft>(initial(apps[0]?.app_id))
@@ -77,6 +78,7 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
    if(!draft.scheduledAt)throw Error('Indica cuándo estará disponible la notificación.')
    const result=await api<Notification>(root+'/notifications','POST',{
     id:draft.id||undefined,appId:draft.appId,title:draft.title.trim(),
+    productId:draft.productId||null,
     message:draft.message.trim(),imageId:draft.imageId,
     scheduledAt:new Date(draft.scheduledAt).toISOString(),
     expiresAt:draft.expiresAt?new Date(draft.expiresAt).toISOString():null
@@ -100,7 +102,7 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
   finally{setUploading(false)}
  }
  const edit=(item:Notification)=>{
-  setDraft({id:item.id,appId:item.appId,title:item.title,message:item.message,imageId:item.imageId,
+  setDraft({id:item.id,appId:item.appId,title:item.title,message:item.message,imageId:item.imageId,productId:item.productId||'',
    scheduledAt:localValue(item.scheduledAt),expiresAt:localValue(item.expiresAt)})
   setEditor(true);setConfirmId('');setError('');setNotice('')
  }
@@ -128,6 +130,7 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
      <div className="ops-record-info">
       <strong>{item.title}</strong><small>{item.message}</small>
       <small>{item.appId} · {new Date(item.scheduledAt).toLocaleString('es-PE')}</small>
+      {item.productId&&<small><strong>Producto asociado:</strong> {item.productName||products.find(p=>p.id===item.productId)?.name||'Producto no disponible'}</small>}
       <span className={'ops-record-status'+(item.status==='AVAILABLE'?' enabled':'')}>{statusLabel[item.status]}</span>
       {item.pushStatus&&<small><strong>FCM:</strong> {pushLabels[item.pushStatus]}{item.pushSentAt?' · '+new Date(item.pushSentAt).toLocaleString('es-PE'):''}</small>}
       {item.fcmMessageId&&<small title={item.fcmMessageId}>Referencia FCM: {item.fcmMessageId}</small>}
@@ -161,6 +164,13 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
       <option value="">Selecciona aplicación</option>
       {apps.map(a=><option key={a.app_id} value={a.app_id}>{a.app_id}</option>)}
      </select></label>
+    <label>Producto asociado (opcional)
+     <select value={draft.productId} disabled={busy} onChange={e=>setDraft(v=>({...v,productId:e.target.value}))}>
+      <option value="">Sin producto asociado</option>
+      {draft.productId&&!products.some(p=>p.id===draft.productId&&p.active)&&<option value={draft.productId} disabled>Producto antes vinculado no disponible: selecciona otro</option>}
+      {products.filter(p=>p.active).map(p=><option key={p.id} value={p.id}>{p.name} · S/ {Number(p.price_pen).toFixed(2)}</option>)}
+     </select>
+    </label>
     <label>Título<input maxLength={120} minLength={2} required value={draft.title}
      onChange={e=>setDraft(v=>({...v,title:e.target.value}))} placeholder="Ej. Promoción por tiempo limitado"/></label>
     <label>Fecha y hora programadas<input type="datetime-local" required value={draft.scheduledAt}
@@ -168,6 +178,7 @@ export default function ScheduledNotifications({tenantId,apps}:{tenantId:string;
     <label>Vencimiento (opcional)<input type="datetime-local" value={draft.expiresAt}
      onChange={e=>setDraft(v=>({...v,expiresAt:e.target.value}))}/></label>
    </div>
+   <p className="ops-hint">Si vinculas un producto, comprueba que esté activo y publicado en el catálogo de la aplicación antes de enviar el aviso. Puedes dejar este campo vacío para novedades informativas.</p>
    <label>Texto de la notificación<textarea rows={4} required minLength={1} maxLength={2000}
     value={draft.message} onChange={e=>setDraft(v=>({...v,message:e.target.value}))}
     placeholder="Escribe lo que verá el cliente"/></label>

@@ -12,10 +12,11 @@ export async function publicNotificationRoutes({req,res,url,pool,json,bad,corsHe
   const enabled=await pool.query('SELECT a.id FROM mobile_apps a JOIN tenants t ON t.id=a.tenant_id WHERE a.app_id=$1 AND a.enabled=true AND t.active=true',[appId]);
   if(!enabled.rowCount)return json(res,200,{ready:false,notifications:[]},true);
   const q=await pool.query(
-   'SELECT n.id,n.title,n.message,n.image_id,n.send_at,n.expires_at FROM scheduled_notifications n JOIN mobile_apps a ON a.app_id=n.app_id AND a.tenant_id=n.tenant_id JOIN tenants t ON t.id=n.tenant_id WHERE n.app_id=$1 AND a.enabled=true AND t.active=true AND n.enabled=true AND n.cancelled_at IS NULL AND n.send_at<=now() AND (n.expires_at IS NULL OR n.expires_at>now()) ORDER BY n.send_at DESC,n.id LIMIT 100',
+   'SELECT n.id,n.title,n.message,n.image_id,n.send_at,n.expires_at,CASE WHEN p.active=true THEN n.product_id ELSE NULL END AS product_id FROM scheduled_notifications n LEFT JOIN products p ON p.id=n.product_id AND p.tenant_id=n.tenant_id JOIN mobile_apps a ON a.app_id=n.app_id AND a.tenant_id=n.tenant_id JOIN tenants t ON t.id=n.tenant_id WHERE n.app_id=$1 AND a.enabled=true AND t.active=true AND n.enabled=true AND n.cancelled_at IS NULL AND n.send_at<=now() AND (n.expires_at IS NULL OR n.expires_at>now()) ORDER BY n.send_at DESC,n.id LIMIT 100',
    [appId]);
   return json(res,200,{ready:true,notifications:q.rows.map(n=>({
    id:n.id,title:n.title,message:n.message,imageUrl:publicImage(n.image_id,appId),
+   productId:n.product_id||null,
    scheduledAt:n.send_at,expiresAt:n.expires_at
   }))},true);
  }
@@ -35,7 +36,7 @@ export async function publicNotificationRoutes({req,res,url,pool,json,bad,corsHe
  return false;
 }
 
-const selectFields = 'SELECT n.id,n.app_id AS "appId",n.title,n.message,n.image_id AS "imageId",n.send_at AS "scheduledAt",n.expires_at AS "expiresAt",n.cancelled_at AS "cancelledAt",n.enabled,n.created_at AS "createdAt",n.push_status AS "pushStatus",n.fcm_message_id AS "fcmMessageId",n.push_sent_at AS "pushSentAt",n.push_attempts AS "pushAttempts",n.push_last_error AS "pushLastError",CASE WHEN n.cancelled_at IS NOT NULL OR n.enabled=false THEN \'CANCELLED\' WHEN n.expires_at IS NOT NULL AND n.expires_at<=now() THEN \'EXPIRED\' WHEN n.send_at<=now() THEN \'AVAILABLE\' ELSE \'SCHEDULED\' END AS status FROM scheduled_notifications n ';
+const selectFields = 'SELECT n.id,n.app_id AS "appId",n.title,n.message,n.image_id AS "imageId",n.send_at AS "scheduledAt",n.expires_at AS "expiresAt",n.cancelled_at AS "cancelledAt",n.enabled,n.created_at AS "createdAt",n.push_status AS "pushStatus",n.fcm_message_id AS "fcmMessageId",n.push_sent_at AS "pushSentAt",n.push_attempts AS "pushAttempts",n.push_last_error AS "pushLastError",n.product_id AS "productId",p.name AS "productName",CASE WHEN n.cancelled_at IS NOT NULL OR n.enabled=false THEN \'CANCELLED\' WHEN n.expires_at IS NOT NULL AND n.expires_at<=now() THEN \'EXPIRED\' WHEN n.send_at<=now() THEN \'AVAILABLE\' ELSE \'SCHEDULED\' END AS status FROM scheduled_notifications n LEFT JOIN products p ON p.id=n.product_id AND p.tenant_id=n.tenant_id ';
 export async function adminNotificationRoutes({req,res,url,user,pool,body,json,tenantOf,bad,uuid}){
  const route=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/notifications(?:\/([0-9a-f-]{36})(?:\/(cancel))?)?$/);
  if(!route)return false;
@@ -50,6 +51,8 @@ export async function adminNotificationRoutes({req,res,url,user,pool,body,json,t
  if(notificationId&&!uuid(notificationId))throw bad(400,'Notificación inválida');
  if(req.method==='POST'&&!notificationId&&!action){
   const appId=payload.appId,imageId=payload.imageId,title=payload.title,message=payload.message;
+   const productId=payload.productId===undefined||payload.productId===null||payload.productId===''?null:payload.productId;
+   if(productId!==null&&!uuid(productId))throw bad(400,'Producto asociado inválido');
   if(typeof appId!=='string'||appId.length>150||!matchApp.test(appId)||
      typeof title!=='string'||title.trim().length<2||title.trim().length>120||
      typeof message!=='string'||message.trim().length<1||message.trim().length>2000||
@@ -68,17 +71,21 @@ export async function adminNotificationRoutes({req,res,url,user,pool,body,json,t
    const image=await client.query('SELECT octet_length(content) AS bytes FROM product_images WHERE tenant_id=$1 AND id=$2',[tenantId,imageId]);
    if(!image.rowCount)throw bad(404,'Imagen no pertenece a esta empresa');
    if(Number(image.rows[0].bytes)>1024*1024)throw bad(400,'Para enviar notificaciones por FCM la imagen debe pesar máximo 1 MB');
+    if(productId!==null){
+     const linked=await client.query('SELECT id FROM products WHERE tenant_id=$1 AND id=$2 AND active=true',[tenantId,productId]);
+     if(!linked.rowCount)throw bad(400,'Selecciona un producto activo de esta empresa');
+    }
    let q;
    if(payload.id){
     if(!uuid(payload.id))throw bad(400,'Notificación inválida');
     q=await client.query(
-     "UPDATE scheduled_notifications SET app_id=$3,title=$4,message=$5,image_id=$6,send_at=$7,expires_at=$8,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND enabled=true AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id",
-     [tenantId,payload.id,appId,title.trim(),message.trim(),imageId,schedule,payload.expiresAt||null]);
+     "UPDATE scheduled_notifications SET app_id=$3,title=$4,message=$5,image_id=$6,send_at=$7,expires_at=$8,product_id=$9,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND enabled=true AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id",
+     [tenantId,payload.id,appId,title.trim(),message.trim(),imageId,schedule,payload.expiresAt||null,productId]);
     if(!q.rowCount)throw bad(409,'Solo puedes editar notificaciones pendientes');
    }else{
     q=await client.query(
-     'INSERT INTO scheduled_notifications(tenant_id,app_id,title,message,image_id,send_at,expires_at,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-     [tenantId,appId,title.trim(),message.trim(),imageId,schedule,payload.expiresAt||null,user.id]);
+     'INSERT INTO scheduled_notifications(tenant_id,app_id,title,message,image_id,send_at,expires_at,created_by,product_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+     [tenantId,appId,title.trim(),message.trim(),imageId,schedule,payload.expiresAt||null,user.id,productId]);
    }
    const id=q.rows[0].id;
    await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',
