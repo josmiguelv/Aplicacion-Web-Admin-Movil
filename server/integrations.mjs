@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto'
 import {encryptCredential,decryptCredential,credentialHint} from './integration-crypto.mjs'
 import {TUVERSO_BASE,TUVERSO_SCOPES,connectionMode,checkAvailability} from './tuverso-client.mjs'
 import {normalizeTuVersoCredential} from './tuverso-credential-format.mjs'
+import {createMobileInteraction,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 
 const uuid=x=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(x)
 const fail=(code,message)=>Object.assign(new Error(message),{code})
@@ -13,7 +14,7 @@ function state(row){
  if(row.expires_at&&new Date(row.expires_at)<=new Date())return 'EXPIRED'
  return row.check_state==='UNCONFIGURED'?'CONFIGURED':row.check_state
 }
-function view(row){return {id:row.id,tenantId:row.tenant_id,provider:row.provider,name:row.name,externalTenantId:row.external_tenant_id,channelAccountId:row.channel_account_id,channelType:row.channel_type,instanceKey:row.instance_key,baseUrl:row.base_url,scopes:row.scopes,hasCredential:!!row.credential_hint,credentialHint:row.credential_hint,credentialReference:row.credential_reference,expiresAt:row.expires_at,suspended:row.suspended,status:state(row),lastCheck:row.last_check,revision:row.revision,metadataSource:'MANUAL',connectionMode:connectionMode(),phase1BEnabled:false}}
+function view(row){return {id:row.id,tenantId:row.tenant_id,provider:row.provider,name:row.name,externalTenantId:row.external_tenant_id,channelAccountId:row.channel_account_id,channelType:row.channel_type,instanceKey:row.instance_key,baseUrl:row.base_url,scopes:row.scopes,hasCredential:!!row.credential_hint,credentialHint:row.credential_hint,credentialReference:row.credential_reference,expiresAt:row.expires_at,suspended:row.suspended,status:state(row),lastCheck:row.last_check,revision:row.revision,metadataSource:'MANUAL',connectionMode:connectionMode(),phase1BEnabled:mobileInteractionMode()==='LIVE'}}
 function keys(b,allowed){if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!allowed.includes(k)))throw fail(400,'Campos no admitidos en esta operación')}
 function expiry(value){if(value==null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d\d-\d\dT/.test(value)||!Number.isFinite(Date.parse(value)))throw fail(400,'Vencimiento inválido');return new Date(value).toISOString()}
 function metadata(b,existing={}){
@@ -27,7 +28,7 @@ function metadata(b,existing={}){
 }
 const attempts=new Map()
 export async function integrationRoutes({req,res,url,user,pool,body,json,tenantOf}){
- const route=url.pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/integrations(?:\/([^/]+))?(?:\/(credential|credential-delete|bindings|test|suspension|delete))?(?:\/([^/]+)\/delete)?$/)
+ const route=url.pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/integrations(?:\/([^/]+))?(?:\/(credential|credential-delete|bindings|test|request|suspension|delete))?(?:\/([^/]+)\/delete)?$/)
  // Fail closed for malformed integration subroutes as well.
  if(!url.pathname.includes('/integrations'))return false
  if(user.role!=='SUPER_ADMIN'){json(res,403,{error:'Solo el Super Administrador puede gestionar integraciones'});return true}
@@ -116,6 +117,40 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
    const store=await client.query('SELECT id,code FROM stores WHERE tenant_id=$1 AND id=$2',[tenantId,b.storeId]);if(!store.rowCount)throw fail(400,'La sede no pertenece a esta empresa')
    const created=await client.query('INSERT INTO integration_bindings(tenant_id,integration_id,store_id,external_location_id,purpose,queue_reference,authorization_confirmed_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[tenantId,id,b.storeId,b.externalLocationId?.trim()??store.rows[0].code,b.purpose,b.queueReference??null,user.id]);await invalidate()
    return await finish(201,{id:created.rows[0].id},'BINDING_SAVED')
+  }
+  if(action==='request'){
+   keys(b,['bindingId','customerExternalId','externalReference','summary','idempotencyKey','authorizeSend'])
+   if(b.authorizeSend!==true||!uuid(b.bindingId)||!uuid(b.idempotencyKey)||
+      !text(b.customerExternalId,180)||!text(b.externalReference,180)||
+      !text(b.summary,1200))throw fail(400,'Solicitud externa inválida')
+   if(mobileInteractionMode()!=='LIVE')throw fail(409,'La recepción de solicitudes TU VERSO no está habilitada')
+   if(row.suspended||!row.encrypted_credential||
+      row.expires_at&&new Date(row.expires_at)<=new Date())
+     throw fail(409,'La conexión carece de credencial vigente')
+   if(!row.scopes?.includes('interactions.create'))
+     throw fail(403,'La conexión no tiene permiso para enviar solicitudes')
+   if(row.channel_type&&row.channel_type!=='MOBILE_APP')
+     throw fail(409,'El conector solo admite cuentas de aplicación móvil')
+   const binding=(await client.query(
+    'SELECT b.* FROM integration_bindings b JOIN stores s ON s.id=b.store_id AND s.tenant_id=b.tenant_id WHERE b.tenant_id=$1 AND b.integration_id=$2 AND b.id=$3',
+    [tenantId,id,b.bindingId])).rows[0]
+   if(!binding||!binding.authorization_confirmed_at)
+     throw fail(409,'La sede no tiene autorización vigente para enviar solicitudes')
+   // Only the trusted backend selects the external location/purpose; the
+   // caller cannot inject tenant, queue, channel or a different location.
+   const result=await createMobileInteraction(
+    decryptCredential(row.encrypted_credential,tenantId,id),binding,{
+     customerExternalId:b.customerExternalId,
+     externalReference:b.externalReference,summary:b.summary,
+     idempotencyKey:b.idempotencyKey,
+    })
+   if(!result.ok){
+    const status=result.httpStatus===401?401:result.httpStatus===403?403:
+      result.httpStatus===429?429:result.httpStatus===409?409:503
+    throw fail(status,'TU VERSO no aceptó la solicitud: '+(result.message??result.errorCode))
+   }
+   // Keep minimal audit: do not store customer/summary/bearer in admin_audit.
+   return await finish(result.httpStatus===201?201:200,result.data,'REQUEST_SUBMITTED')
   }
   if(action==='test'){
    keys(b,['bindingId','authorizeCheck'])
