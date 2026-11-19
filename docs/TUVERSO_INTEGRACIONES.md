@@ -9,6 +9,20 @@ El PDF se encontró localmente en Descargas; no se consultó ni modificó produc
 SHA-256 de la referencia revisada:
 `F88C12B5B23D337DC3A90907CA63147A3F39823B55F426C24B263C64BB92B734`.
 
+## Experiencia de uso del administrador
+
+Una conexión con clave registrada se presenta primero con su **estado real** y la acción
+**Comprobar disponibilidad**. Las sedes vinculadas se gestionan en el siguiente bloque.
+El cambio de clave, la activación/desactivación local y la eliminación se ubican bajo
+**Acciones avanzadas**, con confirmaciones para cambios destructivos.
+Una conexión vacía también puede eliminarse sin volver a introducir una clave.
+No se añaden rutas ni operaciones nuevas al contrato de TU VERSO.
+
+Las confirmaciones de guardado se muestran **debajo de la acción utilizada** o,
+si el formulario se sustituye después del guardado inicial, en el nuevo bloque de estado.
+No se muestran como mensajes de éxito aislados al principio de la página. Se conservan
+los mensajes de error visibles y los permisos y estados reales del servidor.
+
 El portal conserva el login y las sesiones existentes. El Super Administrador
 entra a Empresas → Integraciones → TU VERSO. Puede registrar varias cuentas o
 instancias por empresa. TENANT_ADMIN no tiene acceso a ninguna ruta de este módulo,
