@@ -64,3 +64,34 @@
 .portal-context{margin:0 0 16px;max-width:340px}
 .portal-content>.ops-wrapper{max-width:none;padding:5px 0 40px}
 @media(max-width:700px){.portal-header{padding:15px 20px;align-items:flex-start}.portal-role{display:none}.portal-company{flex-wrap:wrap}.portal-company>div{flex-basis:100%}.portal-title{display:block}.portal-panel{padding:17px}.portal-inline label,.portal-inline .portal-primary{flex-basis:100%}.portal-auth{padding:12px}.portal-login{padding:25px}.portal-body{padding:14px 12px 45px}.portal-tab{padding:12px 8px;font-size:12px}}
+
+
+/* Gestión de claves S2S por empresa: sin mostrar secretos en listados. */
+.service-keys-warning{display:flex;gap:10px;align-items:flex-start;padding:14px 15px;background:#fff7e8;color:#58451e;border:1px solid #ecd8aa;border-radius:9px;font-size:13px;line-height:1.55;margin:0 0 18px}
+.service-keys-warning svg{flex-shrink:0;margin-top:2px}
+.service-key-form{display:grid;grid-template-columns:minmax(0,2fr) minmax(140px,1fr);gap:15px;align-items:end}
+.service-key-form label{display:grid;gap:7px;font-size:12px;font-weight:600}
+.service-key-form input,.service-key-form select,.service-secret input{width:100%;min-width:0;min-height:42px;background:white;color:#24323c;border:1px solid #cbd4dd;border-radius:7px;padding:9px 11px;font-size:13px}
+.service-key-form>div,.service-key-form>button{grid-column:1 / -1}
+.service-key-form>button{justify-self:start}
+.service-label{display:block;font-weight:600;font-size:12px}
+.service-key-form .portal-muted{display:flex;gap:6px;align-items:center;margin:7px 0 0}
+.service-issued{border-color:#a9c4d3;background:#f7fbfd}
+.service-secret{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 14px}
+.service-secret input{flex:1 1 300px;font-family:ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+.service-issued>button,.service-secret button{display:inline-flex;align-items:center;gap:7px}
+.service-key-list{display:grid;gap:12px}
+.service-key-item{border:1px solid #e1e5e9;border-radius:8px;padding:15px}
+.service-key-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}
+.service-key-head strong{font-size:14px}
+.service-badge{padding:5px 9px;border-radius:20px;border:1px solid #ccdbe0;background:#f3f7f9;font-size:11px}
+.service-badge.active{border-color:#c7e2d1;color:#285940;background:#f0f9f2}
+.service-badge.expired,.service-badge.revoked{color:#764f25;background:#f9f3eb;border-color:#ecdfcf}
+.service-key-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px 16px;font-size:12px;color:#64717d}
+.service-key-meta code{font-size:11px;color:#334d60}
+.service-key-controls{margin-top:14px}
+.service-revoke{color:#9b332c;border-color:#e0c9c7}
+.service-revoke-confirm{background:#fff7f5;border:1px solid #ebceca;border-radius:8px;padding:12px}
+.service-revoke-confirm p{font-size:12px;color:#72423e;margin:0 0 10px}
+.service-revoke-confirm button{margin:0 8px 6px 0}
+@media(max-width:650px){.service-key-form{grid-template-columns:1fr}.service-secret input{flex-basis:100%}.service-key-head{align-items:flex-start}}

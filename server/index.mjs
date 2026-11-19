@@ -1,4 +1,5 @@
 import {integrationRoutes} from './integrations.mjs'
+import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -173,6 +174,7 @@ async function quote(req,res){
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
  if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok)throw bad(401,'Credenciales inválidas');const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
  const user=await session(req);if(req.method!=='GET'&&!sameOrigin(req))throw bad(403,'Origen no autorizado');
+ if(await adminApiKeyRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(await integrationRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
  if(url.pathname==='/api/admin/logout'&&req.method==='POST'){await sql('DELETE FROM admin_sessions WHERE token_hash=$1',[digest(cookie(req))]);res.setHeader('Set-Cookie',`b3sid=; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`);return json(res,200,{ok:true})}
@@ -253,6 +255,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
   catch{ return json(res,503,{status:'unavailable'}) }
  }
 
+ if(await serviceCatalogRoute({req,res,url,pool,json}))return
  if(url.pathname.startsWith('/api/v1/mobile/')){
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)

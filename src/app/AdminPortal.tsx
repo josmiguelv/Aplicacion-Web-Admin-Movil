@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Building2, LogOut, Plus, Settings2, ShieldCheck } from 'lucide-react'
+import { Building2, KeyRound, LogOut, Plus, Settings2, ShieldCheck } from 'lucide-react'
 import MobileOperations from './MobileOperations'
 import TuVersoIntegrations from './TuVersoIntegrations'
+import ServiceApiKeys from './ServiceApiKeys'
 import './AdminPortal.css'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
-type Section = 'companies' | 'operations' | 'integrations'
+type Section = 'companies' | 'operations' | 'integrations' | 'api-keys'
 
 async function api<T>(path: string, method: 'GET' | 'POST' = 'GET', data?: unknown): Promise<T> {
   const response = await fetch(path, {
@@ -132,6 +133,7 @@ export default function AdminPortal() {
         {superAdmin && <button className={section === 'companies' ? 'portal-tab active' : 'portal-tab'} type="button" onClick={() => { setSection('companies'); setError(''); setNotice('') }}><Building2 size={17} /> Empresas</button>}
         <button className={section === 'operations' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={superAdmin && !tenantId} onClick={() => { setSection('operations'); setError(''); setNotice('') }}><Settings2 size={17} /> Configuración comercial</button>
         {superAdmin && <button className={section === 'integrations' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('integrations'); setError(''); setNotice('') }}>Integraciones</button>}
+        {superAdmin && <button className={section === 'api-keys' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('api-keys'); setError(''); setNotice('') }}><KeyRound size={17}/> API Keys</button>}
       </nav>
       {error && <p className="portal-error" role="alert">{error}</p>}
       {notice && <p className="portal-notice" role="status">{notice}</p>}
@@ -152,6 +154,7 @@ export default function AdminPortal() {
               <button className="portal-outline" type="button" onClick={() => selectTenant(tenant.id, true)} disabled={!tenant.active}>Administrar</button>
               <button className="portal-outline" type="button" onClick={() => selectTenant(tenant.id)}>Accesos</button>
               <button className="portal-outline" type="button" disabled={!tenant.active} onClick={() => { selectTenant(tenant.id); setSection('integrations') }}>Integraciones</button>
+              <button className="portal-outline" type="button" disabled={!tenant.active} onClick={() => { selectTenant(tenant.id); setSection('api-keys') }}>API Keys</button>
             </div>)}</div>}
         </section>
         {selectedTenant && <section className="portal-panel">
@@ -167,6 +170,10 @@ export default function AdminPortal() {
       {superAdmin && section === 'integrations' && <main className="portal-content">
         <div className="portal-context"><label>Empresa seleccionada<select value={tenantId} onChange={event => selectTenant(event.target.value)}><option value="">Selecciona una empresa</option>{tenants.filter(tenant => tenant.active).map(tenant => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label></div>
         {selectedTenant ? <TuVersoIntegrations key={tenantId} tenantId={tenantId} tenantName={selectedTenant.name} /> : <div className="portal-panel">Selecciona una empresa registrada para configurar sus integraciones.</div>}
+      </main>}
+      {superAdmin && section === 'api-keys' && <main className="portal-content">
+        <div className="portal-context"><label>Empresa seleccionada<select value={tenantId} onChange={event => selectTenant(event.target.value)}><option value="">Selecciona una empresa</option>{tenants.filter(tenant => tenant.active).map(tenant => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label></div>
+        {selectedTenant ? <ServiceApiKeys key={tenantId} tenantId={tenantId} tenantName={selectedTenant.name} /> : <div className="portal-panel">Selecciona una empresa registrada para gestionar API Keys.</div>}
       </main>}
       {section === 'operations' && <main className="portal-content">
         {superAdmin && <div className="portal-context"><label>Empresa seleccionada<select value={tenantId} onChange={event => selectTenant(event.target.value)}><option value="">Selecciona una empresa</option>{tenants.filter(tenant => tenant.active).map(tenant => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></label></div>}

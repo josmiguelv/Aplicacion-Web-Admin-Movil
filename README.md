@@ -6,6 +6,8 @@
 
 **Arquitectura:** [docs/ARQUITECTURA_ADMINISTRADOR_SAAS.md](docs/ARQUITECTURA_ADMINISTRADOR_SAAS.md).
 
+**API Keys para servidores externos:** [docs/API_KEYS_INTEGRACIONES.md](docs/API_KEYS_INTEGRACIONES.md). Requiere migración local 005; no modifica el consumo público móvil ni las credenciales TU VERSO.
+
 ---
 
 ## Antecedentes técnicos: piloto de aplicación Android
