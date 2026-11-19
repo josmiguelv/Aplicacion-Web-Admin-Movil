@@ -33,10 +33,10 @@ test('radio nulo es ilimitado y tarifa inválida no se presupone',()=>{
  assert.ok(quote([{...nogales,radiusKm:null}],-11.95,-77.1251313).straightDistanceKm>10)
  assert.throws(()=>quote([{...nogales,deliveryRatePerKmPen:null}],-12.05,-77.12),e=>e.code===409)
 })
-test('selección automática o preferida siempre requiere sede elegible y en cobertura',()=>{
+test('la selección automática comprueba cercanía y cobertura sin sede preferida',()=>{
  assert.equal(quote([nogales,tallanes],-12.05065,-77.1039).store.id,tallanes.id)
- assert.equal(quote([nogales,tallanes],-12.05065,-77.1039,nogales.id).store.id,nogales.id)
- assert.equal(quote([{...nogales,radiusKm:0.1},tallanes],-12.05065,-77.1039,nogales.id).store.id,tallanes.id)
+ assert.equal(quote([tallanes,nogales],-12.05065,-77.1039).store.id,tallanes.id)
+ assert.equal(quote([{...nogales,radiusKm:0.1},tallanes],-12.05065,-77.1039).store.id,tallanes.id)
 })
 test('API pública devuelve origen STRAIGHT_LINE y CORS también en errores',()=>{
  assert.match(source,/distanceSource:b\.mode==='delivery'\?'STRAIGHT_LINE':null/)
