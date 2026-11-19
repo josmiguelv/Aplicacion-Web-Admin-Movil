@@ -55,17 +55,15 @@ test('Universal: S/ 15 fijos si está dentro de 10 km, sin multiplicación por k
  assert.ok(c.straightDistanceKm<10)
  assert.throws(()=>quote([universal],-11.90,-77.111),e=>e.code===409)
 })
-test('si el cliente selecciona Universal, se respeta su tarifa fija aun cuando Nogales esté más cerca',()=>{
+test('la sede siempre se asigna por cercanía y disponibilidad, sin preferencia del usuario',()=>{
  const point={latitude:-12.0506096,longitude:-77.1251313}
- const nearest=quote([nogales,universal],point.latitude,point.longitude)
- assert.equal(nearest.store.name,'Nogales')
- const preferred=quote([nogales,universal],point.latitude,point.longitude,universal.id)
- assert.equal(preferred.store.name,'Universal')
- assert.equal(preferred.deliveryFeePen,15)
+ assert.equal(quote([nogales,universal],point.latitude,point.longitude).store.id,nogales.id)
+ assert.equal(quote([universal,nogales],point.latitude,point.longitude).store.id,nogales.id)
 })
-test('una sede preferida fuera de cobertura no bloquea otra elegible',()=>{
- const restricted={...universal,radiusKm:0.01}
- const chosen=quote([nogales,restricted],nogales.latitude,nogales.longitude,universal.id)
- assert.equal(chosen.store.id,nogales.id)
- assert.equal(chosen.deliveryFeePen,0)
+test('si la más cercana sale de cobertura se elige automáticamente otra abierta y cubierta',()=>{
+ const restricted={...nogales,radiusKm:0.01}
+ const selected=quote([restricted,universal],-12.0482197,-77.1114342)
+ assert.equal(selected.store.id,universal.id)
+ assert.equal(selected.deliveryFeePen,15)
 })
+
