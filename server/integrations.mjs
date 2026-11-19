@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto'
 import {encryptCredential,decryptCredential,credentialHint} from './integration-crypto.mjs'
 import {TUVERSO_BASE,TUVERSO_SCOPES,connectionMode,checkAvailability} from './tuverso-client.mjs'
+import {normalizeTuVersoCredential} from './tuverso-credential-format.mjs'
 
 const uuid=x=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(x)
 const fail=(code,message)=>Object.assign(new Error(message),{code})
@@ -76,11 +77,13 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
   if(req.method!=='POST')throw fail(405,'Usa POST para esta operación')
   if(action==='credential'){
    keys(b,['token','credentialReference','expiresAt'])
-   if(typeof b.token!=='string'||!/^tvi_v1_[A-Za-z0-9_-]{32,512}$/.test(b.token)||b.credentialReference&&!text(b.credentialReference,180))throw fail(400,'Credencial o referencia inválida')
+   const token=normalizeTuVersoCredential(b.token)
+   if(!token)throw fail(400,'Clave inválida: pega la credencial completa emitida por TU VERSO, sin Bearer ni espacios internos')
+   if(b.credentialReference&&!text(b.credentialReference,180))throw fail(400,'Referencia de credencial inválida')
    const expiresAt=b.expiresAt===undefined?row.expires_at:expiry(b.expiresAt)
    if(expiresAt&&new Date(expiresAt)<=new Date())throw fail(400,'La credencial registrada ya está vencida')
-   const encrypted=encryptCredential(b.token,tenantId,id)
-   await client.query('UPDATE tenant_integrations SET encrypted_credential=$3,credential_hint=$4,credential_reference=$5,expires_at=$6 WHERE tenant_id=$1 AND id=$2',[tenantId,id,encrypted,credentialHint(b.token),b.credentialReference===undefined?row.credential_reference:b.credentialReference||null,expiresAt]);await invalidate()
+   const encrypted=encryptCredential(token,tenantId,id)
+   await client.query('UPDATE tenant_integrations SET encrypted_credential=$3,credential_hint=$4,credential_reference=$5,expires_at=$6 WHERE tenant_id=$1 AND id=$2',[tenantId,id,encrypted,credentialHint(token),b.credentialReference=undefined?row.credential_reference:b.credentialReference||null,expiresAt]);await invalidate()
    return await finish(200,{ok:true},row.encrypted_credential?'CREDENTIAL_REPLACED':'CREDENTIAL_SAVED')
   }
   if(action==='credential-delete'){

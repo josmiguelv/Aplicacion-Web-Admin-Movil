@@ -42,7 +42,7 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
  const saveKey=(event:FormEvent<HTMLFormElement>)=>{
   event.preventDefault();const dom=event.currentTarget,data=new FormData(dom),name=String(data.get('name')||'').trim()
   // Keep the secret out of React state and browser storage; clear the input immediately.
-  const request={token:String(data.get('token')||''),expiresAt:data.get('expires')?new Date(String(data.get('expires'))).toISOString():null};dom.reset()
+  const request={token:String(data.get('token')||'').trim(),expiresAt:data.get('expires')?new Date(String(data.get('expires'))).toISOString():null};dom.reset()
   void run(async()=>{
    let target=selectedId
    try{
@@ -62,8 +62,8 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
   {loadingDetail?<p>Consultando conexión...</p>:<>
    <form key={selectedId||'new'} ref={secretForm} className="portal-panel portal-form" onSubmit={saveKey}>
     <h2>{detail?.hasCredential?'1. Sustituir clave de conexión':'1. Clave de integración'}</h2>
-    <p className="portal-muted">Pega aquí la clave que te entregó TU VERSO. Se guarda cifrada y no se vuelve a mostrar.</p>
-    <label>Clave de integración<input name="token" type="password" autoComplete="off" required minLength={39} maxLength={519} spellCheck={false} disabled={busy}/></label>
+    <p className="portal-muted">Pega la clave tal como la emitió TU VERSO (por ejemplo, tuverso_… o un formato anterior). No la renombres ni agregues Bearer. Se guarda cifrada y no se vuelve a mostrar.</p>
+    <label>Clave de integración<input name="token" type="password" autoComplete="off" required minLength={32} maxLength={1024} spellCheck={false} disabled={busy}/></label>
     <details className="integration-details"><summary>Nombre y vencimiento (opcionales)</summary><div className="integration-fields">
      <label>Nombre de la conexión (opcional)<input name="name" defaultValue={detail?.name||''} maxLength={180} disabled={busy}/></label>
      <label>Fecha de vencimiento (si la conoces)<input name="expires" type="datetime-local" defaultValue={localDate(detail?.expiresAt||null)} disabled={busy}/></label>

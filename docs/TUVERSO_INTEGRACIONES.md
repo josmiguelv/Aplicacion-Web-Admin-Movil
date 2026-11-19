@@ -134,8 +134,13 @@ si no se proporcionan, sin inventar identificadores de TU VERSO. `scopes` usa po
 defecto `queue.availability.read`; si se proporciona debe incluirlo, sin duplicados.
 También se admiten `baseUrl` (solo la fija), `credentialReference` (hasta 180) y
 `expiresAt` ISO 8601 o null. Solo se admiten los seis scopes del PDF; registrar
-scopes 1B no los activa. El token requiere prefijo `tvi_v1_` y nunca se acepta
-como credencial de sesión local. Una nueva credencial ya vencida se rechaza.
+scopes 1B no los activa. El token se trata como un valor **opaco emitido por TU VERSO**: no exige
+prefijo ni versión fija. Acepta el formato vigente `tvi_v1_`, posibles versiones
+futuras y el prefijo `tuverso_` si TU VERSO lo adopta. Solo se eliminan espacios
+accidentales al inicio y al final; se rechazan espacios internos, controles,
+valores demasiado cortos/largos y claves `ib2g_sk_` de otro sistema.
+**El administrador no renombra claves:** hacerlo rompería su autenticación.
+Una nueva credencial ya vencida se rechaza.
 
 `externalLocationId`: 1–180, o se toma del código real de la sede cuando se omite;
 `purpose`: `[A-Z][A-Z0-9_]*`, hasta 80; `queueReference`: UUID opcional que no se
