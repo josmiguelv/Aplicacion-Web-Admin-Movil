@@ -394,4 +394,4 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
 // FCM se activa solo mediante FCM_ENABLED=true. No dispara envíos en CI ni local por defecto.
 startFcmWorker({pool})
 // Independiente de FCM: las ventanas semanales también quedan disponibles por API.
-startRecurringWorker({pool})
+if(process.env.NODE_ENV!=='test')startRecurringWorker({pool})

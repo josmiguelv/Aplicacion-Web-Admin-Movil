@@ -119,6 +119,50 @@ try{
  assert.equal((await pool.query('SELECT count(*)::int AS count FROM scheduled_notifications WHERE recurrence_id=$1',[first.id])).rows[0].count,3)
  await check(seriesRoot,{method:'POST',cookie,data:{...input,id:first.id}},404)
 
+ // Varias combinaciones: lunes/miércoles 12-14, jueves 15-18 y 18-20, sábado 09-12.
+ const slots=[
+  {weekday:1,startTime:'12:00',endTime:'14:00'},
+  {weekday:3,startTime:'12:00',endTime:'14:00'},
+  {weekday:4,startTime:'15:00',endTime:'18:00'},
+  {weekday:4,startTime:'18:00',endTime:'20:00'},
+  {weekday:6,startTime:'09:00',endTime:'12:00'}
+ ]
+ const manyInput={...input,id:undefined,title:'Multi horarios',slots,untilDate:'2026-12-31'}
+ await check(seriesRoot,{method:'POST',cookie,data:{...manyInput,slots:[]}},400)
+ await check(seriesRoot,{method:'POST',cookie,data:{...manyInput,slots:[slots[2],{weekday:4,startTime:'16:00',endTime:'19:00'}]}},400)
+ await check(seriesRoot,{method:'POST',cookie,data:{...manyInput,slots:[slots[2],slots[2]]}},400)
+ await check(seriesRoot,{method:'POST',cookie,data:{...manyInput,slots:[{weekday:9,startTime:'15:00',endTime:'18:00'}]}},400)
+ const many=await check(seriesRoot,{method:'POST',cookie,data:manyInput},201)
+ assert.equal(many.slots.length,5,'Se conservaron las cinco combinaciones')
+ assert.equal((await check(seriesRoot,{cookie})).items[0].slots.length,5)
+ const generated=await Promise.all([
+  q('2026-11-19T20:00:00Z'),q('2026-11-19T20:00:00Z')
+ ])
+ assert.equal(generated.reduce((sum,r)=>sum+r.created,0),1,'Primer horario del jueves sin duplicados')
+ assert.equal((await q('2026-11-19T22:59:59Z')).created,0,'No repetir a mitad de la primera franja')
+ assert.equal((await q('2026-11-19T23:00:00Z')).created,1,'Segunda franja del jueves independiente')
+ assert.equal((await q('2026-11-19T23:00:00Z')).created,0,'Segunda franja sin duplicados')
+ assert.equal((await q('2026-11-20T20:00:00Z')).created,0,'Viernes no incluido todavía')
+ assert.equal((await q('2026-11-21T14:00:00Z')).created,1,'Sábado 09:00')
+ assert.equal((await q('2026-11-23T17:00:00Z')).created,1,'Lunes 12:00')
+ assert.equal((await q('2026-11-25T17:00:00Z')).created,1,'Miércoles 12:00')
+ const occurrenceCount=()=>pool.query('SELECT count(*)::int AS total FROM scheduled_notifications WHERE recurrence_id=$1',[many.id]).then(r=>r.rows[0].total)
+ assert.equal(await occurrenceCount(),5)
+ await check(seriesRoot+'/'+many.id+'/pause',{method:'POST',cookie,data:{}})
+ assert.equal((await q('2026-11-26T20:00:00Z')).created,0,'Pausada: no genera')
+ await check(seriesRoot+'/'+many.id+'/resume',{method:'POST',cookie,data:{}})
+ assert.equal((await q('2026-11-26T20:00:00Z')).created,1,'Reanudación')
+ assert.equal((await q('2026-11-26T20:00:00Z')).created,0)
+ // Al cambiar combinaciones se conserva lo enviado, se apagan reglas retiradas.
+ const newSlots=[slots[0],slots[1],slots[2],{weekday:5,startTime:'13:00',endTime:'15:00'}]
+ const change=await check(seriesRoot,{method:'POST',cookie,data:{...manyInput,id:many.id,slots:newSlots}},200)
+ assert.equal(change.slots.length,4,'Edición con conjunto de horarios distinto')
+ assert.equal((await q('2026-11-26T23:00:00Z')).created,0,'Franja eliminada no envía')
+ assert.equal((await q('2026-11-27T18:00:00Z')).created,1,'Nueva franja viernes 13:00')
+ assert.equal((await q('2026-11-26T20:00:00Z')).created,0,'Regla existente conserva identidad al editar')
+ assert.equal(await occurrenceCount(),7,'El historial sigue íntegro')
+ console.log('PASS días múltiples, horarios diferentes, segundo turno mismo día, deduplicación, cambios y solapamientos')
+
  const audit=(await pool.query("SELECT action FROM admin_audit WHERE tenant_id=$1 AND action LIKE 'NOTIFICATION_SERIES_%'",[a])).rows.map(x=>x.action)
  for(const action of ['NOTIFICATION_SERIES_CREATED','NOTIFICATION_SERIES_UPDATED','NOTIFICATION_SERIES_PAUSE','NOTIFICATION_SERIES_RESUME','NOTIFICATION_SERIES_DELETE'])
   assert.ok(audit.includes(action),action)

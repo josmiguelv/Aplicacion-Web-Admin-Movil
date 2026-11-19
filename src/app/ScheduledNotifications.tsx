@@ -3,9 +3,22 @@ import {Bell,CalendarClock,ImagePlus,Trash2} from 'lucide-react'
 
 type App = {app_id:string;enabled:boolean}
 type CatalogProduct = {id:string;name:string;active:boolean;price_pen:number|string}
+type WeekSlot = {weekday:number;startTime:string;endTime:string}
+type TimeGroup = {key:string;days:number[];startTime:string;endTime:string}
+const newTimeGroup=():TimeGroup=>({key:String(Date.now())+Math.random().toString(36).slice(2),days:[4],startTime:'15:00',endTime:'18:00'})
+const groupSlots=(slots:WeekSlot[]):TimeGroup[]=>{
+ const groups=new Map<string,TimeGroup>()
+ for(const slot of slots){
+  const key=slot.startTime+'|'+slot.endTime
+  if(!groups.has(key))groups.set(key,{key,days:[],startTime:slot.startTime,endTime:slot.endTime})
+  const group=groups.get(key)!
+  if(!group.days.includes(slot.weekday))group.days.push(slot.weekday)
+ }
+ return [...groups.values()]
+}
 type WeeklySeries = {
  id:string;appId:string;title:string;message:string;imageId:string;
- productId:string|null;productName:string|null;weekday:number;startTime:string;endTime:string;
+ productId:string|null;productName:string|null;weekday:number;startTime:string;endTime:string;slots:WeekSlot[];
  startDate:string;untilDate:string|null;timeZone:string;status:'ACTIVE'|'PAUSED'
 }
 const dayNames=['','lunes','martes','miércoles','jueves','viernes','sábado','domingo']
@@ -54,9 +67,7 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
  const [series,setSeries]=useState<WeeklySeries[]>([])
  const [frequency,setFrequency]=useState<'once'|'weekly'>('once')
  const [seriesId,setSeriesId]=useState('')
- const [weekday,setWeekday]=useState(4)
- const [startTime,setStartTime]=useState('15:00')
- const [endTime,setEndTime]=useState('18:00')
+ const [timeGroups,setTimeGroups]=useState<TimeGroup[]>([newTimeGroup()])
  const [startDate,setStartDate]=useState(peruToday())
  const [untilDate,setUntilDate]=useState('')
  const [draft,setDraft]=useState<Draft>(initial(apps[0]?.app_id))
@@ -101,14 +112,18 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
   void run(async()=>{
    if(!draft.imageId)throw Error('Adjunta una imagen antes de programar la notificación.')
    if(frequency==='weekly'){
-    if(startTime>=endTime)throw Error('La hora de cierre debe ser posterior a la de inicio.')
+    const slots=timeGroups.flatMap(group=>group.days.map(weekday=>({
+     weekday,startTime:group.startTime,endTime:group.endTime
+    })))
+    if(!slots.length)throw Error('Selecciona al menos un día para repetir la promoción.')
+    if(slots.some(slot=>slot.startTime>=slot.endTime))throw Error('Cada horario debe terminar después de empezar.')
     const result=await api<WeeklySeries>(root+'/notification-series','POST',{
      id:seriesId||undefined,appId:draft.appId,title:draft.title.trim(),message:draft.message.trim(),
-     productId:draft.productId||null,imageId:draft.imageId,weekday,startTime,endTime,startDate,
+     productId:draft.productId||null,imageId:draft.imageId,slots,startDate,
      untilDate:untilDate||null,timeZone:'America/Lima'
     })
     await refresh();setSeriesId(result.id);setEditor(true)
-    setNotice('Secuencia semanal guardada. Se generará una sola notificación por semana dentro del horario configurado.')
+    setNotice('Secuencia guardada: un envío por día y franja configurados, sin duplicados al reiniciar.')
    }else{
     if(!draft.scheduledAt)throw Error('Indica cuándo estará disponible la notificación.')
     const result=await api<Notification>(root+'/notifications','POST',{
@@ -137,14 +152,16 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
  }
  const newNotice=(kind:'once'|'weekly')=>{
   setFrequency(kind);setSeriesId('');setDraft(initial(apps[0]?.app_id))
-  setWeekday(4);setStartTime('15:00');setEndTime('18:00');setStartDate(peruToday());setUntilDate('')
+  setTimeGroups([newTimeGroup()]);setStartDate(peruToday());setUntilDate('')
   setEditor(true);setConfirmId('');setError('');setNotice('')
  }
  const editSeries=(item:WeeklySeries)=>{
   setFrequency('weekly');setSeriesId(item.id)
   setDraft({...initial(item.appId),appId:item.appId,title:item.title,message:item.message,imageId:item.imageId,
    productId:item.productId||''})
-  setWeekday(item.weekday);setStartTime(item.startTime);setEndTime(item.endTime)
+  setTimeGroups(groupSlots(item.slots?.length?item.slots:[{
+   weekday:item.weekday,startTime:item.startTime,endTime:item.endTime
+  }]))
   setStartDate(item.startDate);setUntilDate(item.untilDate||'')
   setEditor(true);setConfirmId('');setError('');setNotice('')
  }
@@ -186,7 +203,8 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
     <img className="ops-notification-thumb" src={imagePreview(item.imageId)} loading="lazy" alt={'Imagen de '+item.title}/>
     <div className="ops-record-info">
      <strong>{item.title}</strong><small>{item.message}</small>
-     <small>Todos los {dayNames[item.weekday]} · {item.startTime} a {item.endTime} (Perú)</small>
+     {(item.slots?.length?groupSlots(item.slots):groupSlots([{weekday:item.weekday,startTime:item.startTime,endTime:item.endTime}])).map(group=>
+      <small key={group.key}>{group.days.sort((a,b)=>a-b).map(day=>dayNames[day]).join(', ')} · {group.startTime}–{group.endTime} (Perú)</small>)}
      <small>Desde {item.startDate}{item.untilDate?' hasta '+item.untilDate:' · Sin fecha de finalización'}</small>
      <small>{item.appId}{item.productId?' · '+(item.productName||'Producto asociado'):''}</small>
      <span className={'ops-record-status'+(item.status==='ACTIVE'?' enabled':'')}>{item.status==='ACTIVE'?'Secuencia activa':'Pausada'}</span>
@@ -272,18 +290,39 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
      <label>Vencimiento (opcional)<input type="datetime-local" value={draft.expiresAt}
       onChange={e=>setDraft(v=>({...v,expiresAt:e.target.value}))}/></label>
     </>:<>
-     <label>Día de la semana
-      <select value={weekday} onChange={e=>setWeekday(Number(e.target.value))} required>
-       {dayNames.slice(1).map((day,i)=><option key={day} value={i+1}>{day[0].toUpperCase()+day.slice(1)}</option>)}
-      </select>
-     </label>
-     <label>Hora de envío (Perú)<input required type="time" value={startTime} onChange={e=>setStartTime(e.target.value)}/></label>
-     <label>Vigente hasta (Perú)<input required type="time" value={endTime} onChange={e=>setEndTime(e.target.value)}/></label>
      <label>Comenzar a partir de<input required type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></label>
      <label>Última repetición (opcional)<input type="date" min={startDate} value={untilDate} onChange={e=>setUntilDate(e.target.value)}/></label>
     </>}
    </div>
-   <p className="ops-hint">{frequency==='weekly'?'Se envía una sola notificación por semana al iniciar la promoción y permanece disponible hasta la hora final. No se envían múltiples mensajes durante ese intervalo. Horario de Perú (America/Lima).':'Selecciona una fecha y hora para un envío único.'} Si vinculas un producto, comprueba que esté activo y publicado en la aplicación; es opcional.</p>
+   {frequency==='weekly'&&<div className="ops-record-section">
+    <h4>Días y horarios de repetición</h4>
+    <p className="ops-hint">Marca varios días que compartan horario. Para otros días u otra franja, utiliza «Agregar otro horario».</p>
+    {timeGroups.map((group,index)=><div className="ops-record-editor" key={group.key}>
+     <strong>Horario {index+1}</strong>
+     <div className="ops-grid">
+      <label>Enviar a las (Perú)
+       <input type="time" required value={group.startTime} onChange={e=>setTimeGroups(groups=>groups.map(g=>g.key===group.key?{...g,startTime:e.target.value}:g))}/>
+      </label>
+      <label>Vigente hasta (Perú)
+       <input type="time" required value={group.endTime} onChange={e=>setTimeGroups(groups=>groups.map(g=>g.key===group.key?{...g,endTime:e.target.value}:g))}/>
+      </label>
+     </div>
+     <div className="ops-record-actions" role="group" aria-label={'Días del horario '+(index+1)}>
+      {dayNames.slice(1).map((day,i)=><label className="ops-check" key={day}>
+       <input type="checkbox" checked={group.days.includes(i+1)} onChange={e=>setTimeGroups(groups=>groups.map(g=>g.key!==group.key?g:{
+        ...g,days:e.target.checked?[...g.days,i+1].sort((a,b)=>a-b):g.days.filter(dayNumber=>dayNumber!==i+1)
+       }))}/>
+       {day[0].toUpperCase()+day.slice(1)}
+      </label>)}
+     </div>
+     {timeGroups.length>1&&<button type="button" className="button button-secondary" disabled={busy}
+      onClick={()=>setTimeGroups(groups=>groups.filter(g=>g.key!==group.key))}>Quitar este horario</button>}
+    </div>)}
+    <button type="button" className="button button-secondary" disabled={busy||timeGroups.length>=6}
+     onClick={()=>setTimeGroups(groups=>[...groups,{...newTimeGroup(),days:[]}])}>Agregar otro horario</button>
+    <p className="ops-hint">Máximo 6 horarios y 7 días por horario. No se permiten franjas superpuestas el mismo día; cada combinación elegida genera un push independiente.</p>
+   </div>}
+   <p className="ops-hint">{frequency==='weekly'?'Horario de Perú (America/Lima). Cada franja genera una notificación al comenzar y permanece vigente hasta su cierre.':'Selecciona una fecha y hora para un envío único.'} Si vinculas un producto, comprueba que esté activo y publicado en la aplicación; es opcional.</p>
    <label>Texto de la notificación<textarea rows={4} required minLength={1} maxLength={2000}
     value={draft.message} onChange={e=>setDraft(v=>({...v,message:e.target.value}))}
     placeholder="Escribe lo que verá el cliente"/></label>

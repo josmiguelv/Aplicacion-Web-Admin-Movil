@@ -8,6 +8,37 @@ const validDate=value=>{
  return Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value
 }
 const problem=(bad,status,msg)=>{throw bad(status,msg)}
+// Normalizar franjas por día. Dos reglas del mismo día pueden ser distintas,
+// pero no solaparse: de lo contrario llegarían pushes promocionales duplicados.
+export function parseWeeklySlots(data,bad=(status,msg)=>Object.assign(new Error(msg),{code:status})){
+ const input=Array.isArray(data.slots)?data.slots:[{weekday:data.weekday,startTime:data.startTime,endTime:data.endTime}]
+ if(input.length<1||input.length>42)problem(bad,400,'Elige entre 1 y 42 franjas semanales')
+ const slots=input.map(item=>({
+  weekday:item?.weekday,
+  startTime:item?.startTime,
+  endTime:item?.endTime
+ }))
+ for(const item of slots){
+  if(!Number.isInteger(item.weekday)||item.weekday<1||item.weekday>7||
+     typeof item.startTime!=='string'||!timePattern.test(item.startTime)||
+     typeof item.endTime!=='string'||!timePattern.test(item.endTime)||
+     item.startTime>=item.endTime)problem(bad,400,'Día u horario semanal inválido')
+ }
+ slots.sort((a,b)=>a.weekday-b.weekday||a.startTime.localeCompare(b.startTime)||a.endTime.localeCompare(b.endTime))
+ for(let i=1;i<slots.length;i++){
+  const left=slots[i-1],right=slots[i]
+  if(left.weekday===right.weekday&&left.endTime>right.startTime)
+   problem(bad,400,'Hay horarios superpuestos el mismo día: ajusta las franjas')
+ }
+ return slots
+}
+async function attachSlots(pool,rows){
+ if(!rows.length)return rows
+ const q=await pool.query(
+  'SELECT recurrence_id AS "recurrenceId",weekday,to_char(start_time,\'HH24:MI\') AS "startTime",to_char(end_time,\'HH24:MI\') AS "endTime" FROM recurring_notification_slots WHERE recurrence_id=ANY($1::uuid[]) AND active=true ORDER BY weekday,start_time,end_time',
+  [rows.map(x=>x.id)])
+ return rows.map(row=>({...row,slots:q.rows.filter(slot=>slot.recurrenceId===row.id).map(({weekday,startTime,endTime})=>({weekday,startTime,endTime}))}))
+}
 
 const rowSQL=[
  'SELECT r.id,r.app_id AS "appId",r.title,r.message,r.image_id AS "imageId",',
@@ -27,7 +58,7 @@ export async function adminRecurrenceRoutes({req,res,url,user,pool,body,json,ten
  await tenantOf(user,tenantId)
  if(req.method==='GET'&&!seriesId){
   const q=await pool.query(rowSQL+" WHERE r.tenant_id=$1 AND r.status!='DELETED' ORDER BY r.created_at DESC LIMIT 200",[tenantId])
-  return json(res,200,{items:q.rows})
+  return json(res,200,{items:await attachSlots(pool,q.rows)})
  }
  if(req.method!=='POST')problem(bad,405,'Método no permitido')
  const data=await body(req)
@@ -51,16 +82,13 @@ export async function adminRecurrenceRoutes({req,res,url,user,pool,body,json,ten
  if(seriesId||action)problem(bad,404,'Ruta de secuencia inválida')
  const appId=data.appId,imageId=data.imageId,productId=data.productId||null
  const title=data.title, message=data.message
- const weekday=data.weekday
- const startTime=data.startTime,endTime=data.endTime
+ const slots=parseWeeklySlots(data,bad)
+ const {weekday,startTime,endTime}=slots[0]
  const startDate=data.startDate,untilDate=data.untilDate||null
  if(typeof appId!=='string'||appId.length>150||!appPattern.test(appId)||
    typeof title!=='string'||title.trim().length<2||title.trim().length>120||
    typeof message!=='string'||message.trim().length<1||message.trim().length>2000||
    !uuid(imageId)||productId!==null&&!uuid(productId)||
-   !Number.isInteger(weekday)||weekday<1||weekday>7||
-   typeof startTime!=='string'||!timePattern.test(startTime)||
-   typeof endTime!=='string'||!timePattern.test(endTime)||startTime>=endTime||
    !validDate(startDate)||(untilDate!==null&&(!validDate(untilDate)||untilDate<startDate))||
    data.timeZone!=null&&data.timeZone!=='America/Lima')
   problem(bad,400,'Completa aplicación, mensaje, imagen, día, horario y fechas válidas')
@@ -89,38 +117,47 @@ export async function adminRecurrenceRoutes({req,res,url,user,pool,body,json,ten
     [tenantId,appId,user.id,title.trim(),message.trim(),imageId,productId,weekday,startTime,endTime,startDate,untilDate])
   }
   const id=q.rows[0].id
+  // Regla existente conserva su ID e historial al editar o reactivar.
+  // Las reglas retiradas permanecen inactivas para preservar auditoría.
+  await client.query('UPDATE recurring_notification_slots SET active=false WHERE recurrence_id=$1',[id])
+  for(const slot of slots){
+   await client.query(
+    'INSERT INTO recurring_notification_slots(recurrence_id,weekday,start_time,end_time) VALUES($1,$2,$3,$4) ON CONFLICT (recurrence_id,weekday,start_time,end_time) DO UPDATE SET active=true',
+    [id,slot.weekday,slot.startTime,slot.endTime])
+  }
   await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',
    [tenantId,user.id,data.id?'NOTIFICATION_SERIES_UPDATED':'NOTIFICATION_SERIES_CREATED',id])
   await client.query('COMMIT')
   const result=await pool.query(rowSQL+' WHERE r.tenant_id=$1 AND r.id=$2',[tenantId,id])
-  return json(res,data.id?200:201,result.rows[0])
+  return json(res,data.id?200:201,(await attachSlots(pool,result.rows))[0])
  }catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
 }
 
 export async function materializeDue({pool,at=new Date()}){
  const atDate=new Date(at)
  if(!Number.isFinite(atDate.getTime()))throw Error('Instante de programación inválido')
- // SQL en una sola transacción; el índice único evita avisos repetidos
- // durante la misma fecha, incluso si varios procesos hacen polling a la vez.
+ // Índice único por fecha y franja: multi-día, multi-horario y sin reenvíos
+ // al reiniciar o ejecutar varios workers en paralelo.
  const sql=[
  'INSERT INTO scheduled_notifications',
- '(tenant_id,app_id,created_by,title,message,image_id,product_id,send_at,expires_at,recurrence_id,occurrence_date)',
+ '(tenant_id,app_id,created_by,title,message,image_id,product_id,send_at,expires_at,recurrence_id,occurrence_date,recurrence_slot_id)',
  'SELECT r.tenant_id,r.app_id,r.created_by,r.title,r.message,r.image_id,',
  'CASE WHEN p.active=true THEN r.product_id ELSE NULL END,',
- "((clock.local_date+r.start_time) AT TIME ZONE 'America/Lima'),",
- "((clock.local_date+r.end_time) AT TIME ZONE 'America/Lima'),",
- 'r.id,clock.local_date',
+ "((clock.local_date+s.start_time) AT TIME ZONE 'America/Lima'),",
+ "((clock.local_date+s.end_time) AT TIME ZONE 'America/Lima'),",
+ 'r.id,clock.local_date,s.id',
  'FROM recurring_notifications r',
+ 'JOIN recurring_notification_slots s ON s.recurrence_id=r.id AND s.active=true',
  'JOIN tenants t ON t.id=r.tenant_id AND t.active=true',
  'JOIN mobile_apps a ON a.tenant_id=r.tenant_id AND a.app_id=r.app_id AND a.enabled=true',
  'JOIN product_images i ON i.id=r.image_id AND i.tenant_id=r.tenant_id',
  'LEFT JOIN products p ON p.id=r.product_id AND p.tenant_id=r.tenant_id',
  "CROSS JOIN (SELECT ($1::timestamptz AT TIME ZONE 'America/Lima')::date AS local_date) clock",
  "WHERE r.status='ACTIVE' AND r.time_zone='America/Lima'",
- 'AND r.weekday=EXTRACT(ISODOW FROM clock.local_date)',
+ 'AND s.weekday=EXTRACT(ISODOW FROM clock.local_date)',
  'AND clock.local_date>=r.start_date AND (r.until_date IS NULL OR clock.local_date<=r.until_date)',
- "AND $1::timestamptz>=((clock.local_date+r.start_time) AT TIME ZONE 'America/Lima')",
- "AND $1::timestamptz<((clock.local_date+r.end_time) AT TIME ZONE 'America/Lima')",
+ "AND $1::timestamptz>=((clock.local_date+s.start_time) AT TIME ZONE 'America/Lima')",
+ "AND $1::timestamptz<((clock.local_date+s.end_time) AT TIME ZONE 'America/Lima')",
  'AND octet_length(i.content)<=1048576',
  'ON CONFLICT DO NOTHING RETURNING id'
  ].join(' ')

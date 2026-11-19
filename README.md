@@ -416,3 +416,31 @@ todo el intervalo, se omite esa semana (sin envío retrospectivo).
 formato de la API pública ni el contrato FCM: las ocurrencias se almacenan
 como notificaciones estándar. No crea nuevas funciones en Android ni TU VERSO.
 El servidor debe permanecer en ejecución para cumplir el horario.
+
+
+### Múltiples días y combinaciones por campaña (migración 010)
+
+Una misma secuencia semanal permite hasta **6 grupos de horarios**.
+Cada grupo selecciona uno o varios días (lunes a domingo) y una franja
+de envío y vigencia. Por ejemplo: lunes, miércoles y viernes 15:00–18:00
++ sábados 12:00–14:00, o jueves 15:00–18:00 y jueves 18:00–20:00.
+
+El cliente envía `slots:[{weekday:1,startTime:'15:00',endTime:'18:00'}, ...]`
+(uno por día y franja). La API también acepta la estructura histórica
+de `weekday`, `startTime` y `endTime` para compatibilidad con programas
+guardados o clientes del administrador anteriores. En respuestas `GET`
+se retorna `slots`, además de los campos iniciales anteriores.
+
+Se envía **una notificación por cada combinación distinta de día y franja**,
+nunca durante todo el intervalo. Para evitar mensajes duplicados se
+rechazan los intervalos superpuestos del mismo día y se usa un índice
+único de `(recurrence_slot_id,occurrence_date)` que soporta concurrencia
+y reinicios. Si se edita una campaña, las reglas no modificadas conservan
+su identidad y las eliminadas se desactivan; el historial no se reenvía.
+
+**Para una base ya instalada:** aplicar `server/migrations/010-recurring-multi-schedule.sql`
+después de la 009 y antes de reiniciar el backend. La migración conserva
+las secuencias antiguas y registra su primer horario en la tabla nueva.
+El backend debe quedar encendido dentro de los horarios de promoción.
+Las notificaciones existentes siguen consultándose por la API pública;
+no requiere actualización Android ni modificaciones en TU VERSO.
