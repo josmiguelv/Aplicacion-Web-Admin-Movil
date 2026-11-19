@@ -83,7 +83,7 @@ function limitPublicDeliveryQuotes(req){
 }
 
 // Transitional distance model. No external routing API or fabricated road distance.
-function straightLineQuote(stores,latitude,longitude,preferredStoreId=null){
+function straightLineQuote(stores,latitude,longitude){
  if(!checkLatLng(latitude,longitude))throw bad(422,'Confirma las coordenadas de entrega antes de calcular la cobertura');
  const eligible=stores.filter(s=>checkLatLng(s.latitude,s.longitude)&&
   (s.deliveryPricingMode==='FIXED'
@@ -94,10 +94,8 @@ function straightLineQuote(stores,latitude,longitude,preferredStoreId=null){
   .filter(x=>x.store.radiusKm==null||x.km<=Number(x.store.radiusKm)+1e-8)
   .sort((a,b)=>a.km-b.km||a.store.id.localeCompare(b.store.id));
  if(!within.length)throw bad(409,'Dirección fuera de la cobertura de las sedes abiertas');
- // A preferred shop is honored only while it is eligible and covers the destination;
- // otherwise use the nearest open, covered shop.
- const match=preferredStoreId?within.find(x=>x.store.id===preferredStoreId):null;
- const chosen=match||within[0];
+ // Always choose the nearest open and covered store, independent of tariff mode.
+ const chosen=within[0];
  const fixed=chosen.store.deliveryPricingMode==='FIXED';
  const fee=fixed?chosen.store.deliveryFeePen:
   Math.round((chosen.km*chosen.store.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
@@ -119,7 +117,7 @@ async function quote(req,res){
   // A text address is metadata, never silently treated as a point or shop coordinates.
   if(!checkLatLng(b.latitude,b.longitude))
    throw bad(422,'No hay coordenadas del destino. Confirma el punto de entrega o utiliza tu ubicación actual');
-  const chosen=straightLineQuote(eligible,b.latitude,b.longitude,typeof b.storeId==='string'?b.storeId:null);
+  const chosen=straightLineQuote(eligible,b.latitude,b.longitude);
   selected=chosen.store;straightDistanceKm=chosen.straightDistanceKm;deliveryFeePen=chosen.deliveryFeePen;
  }else{
   selected=eligible.find(s=>s.id===b.storeId);
