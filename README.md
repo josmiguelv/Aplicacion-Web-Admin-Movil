@@ -119,3 +119,30 @@ pública permanente; cerrar el túnel al finalizar o utilizar un túnel
 nombrado con Cloudflare Access (y rate limiting) antes de abrir a usuarios.
 Para comprobar sedes desde Android no es necesario abrir el login remoto;
 puede administrarse desde localhost y usar HTTPS solo para lectura de API.
+
+
+## Experiencia de uso: configuración comercial
+
+El menú **Configuración comercial** está organizado por tareas para evitar una
+única página extensa: **Locales**, **Carta** (productos y promociones), **Pagos**,
+**Más opciones** (vacantes y Libro de Reclamaciones) y **Publicar**.
+La administración de usuarios de empresa aparece solo para SUPER_ADMIN en el
+modo operativo independiente; la gestión de empresas continúa en el portal
+principal de Super Administrador.
+
+En **Locales**, las sedes registradas aparecen antes del formulario de edición.
+Se muestra el formulario únicamente al elegir una sede o **Agregar local**;
+los horarios semanales y la configuración GPS/delivery son desplegables y
+mantienen su estado cuando están ocultos. Ningún campo de la base de datos se
+elimina ni se modifica el contrato de la API.
+
+Las confirmaciones y errores de operaciones comerciales aparecen junto al
+botón o campo que ejecutó la acción, no en el encabezado de la página.
+Guardar mantiene los cambios en borrador: **Publicar cambios** continúa siendo
+la única acción que actualiza el catálogo consultado por Android. No hay cambios
+en tuverso, Android, WEB ni las reglas de aislamiento por tenant.
+
+Validación focalizada: abrir cada sección en escritorio y móvil; seleccionar
+sede existente y verificar que se carguen horarios y tarifa; editar/guardar
+sin alterar el ID de sede; crear/guardar producto; cargar imagen; publicar y
+confirmar el mensaje junto a **Publicar cambios**. No se requieren migraciones.
