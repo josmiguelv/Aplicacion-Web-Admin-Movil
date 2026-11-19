@@ -1,0 +1,20 @@
+name: Pollos B3 delivery straight-line contract
+on:
+  push:
+    branches: [feat/b3-railway-deploy-prep]
+    paths:
+      - server/index.mjs
+      - scripts/delivery-straight-line.test.mjs
+      - .github/workflows/delivery-straight-line.yml
+jobs:
+  delivery:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check server/index.mjs
+      - run: node --test scripts/delivery-straight-line.test.mjs
