@@ -5,6 +5,7 @@ import {isAllowedAdminOrigin} from './admin-origin-policy.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {adminNotificationRoutes,publicNotificationRoutes} from './scheduled-notifications.mjs'
 import {startFcmWorker} from './fcm-push.mjs'
+import {adminRecurrenceRoutes,startRecurringWorker} from './recurring-notifications.mjs'
 import {loadLocalEnv} from './load-local-env.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
@@ -186,6 +187,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(await adminApiKeyRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(await integrationRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(/^\/api\/admin\/tenants\/[0-9a-f-]+\/notifications(?:\/|$)/.test(url.pathname))return await adminNotificationRoutes({req,res,url,user,pool,body,json,tenantOf,bad,uuid})
+ if(/^\/api\/admin\/tenants\/[0-9a-f-]+\/notification-series(?:\/|$)/.test(url.pathname))return await adminRecurrenceRoutes({req,res,url,user,pool,body,json,tenantOf,bad,uuid})
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
  if(url.pathname==='/api/admin/logout'&&req.method==='POST'){await sql('DELETE FROM admin_sessions WHERE token_hash=$1',[digest(cookie(req))]);res.setHeader('Set-Cookie',`b3sid=; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`);return json(res,200,{ok:true})}
  if(url.pathname==='/api/admin/tenants'&&req.method==='GET'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const x=await sql('SELECT id,name,active FROM tenants ORDER BY created_at');return json(res,200,{tenants:x.rows})}
@@ -391,3 +393,5 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  }catch(err){if(err.code==='23505')return json(res,409,{error:'Conflicto: registro duplicado'});if(err.code==='23503')return json(res,409,{error:'Referencia no válida'});const code=typeof err.code==='number'?err.code:500;if(code===500)console.error('API error',err.message);json(res,code,{error:code===500?'Error interno':err.message})}}).listen(port,()=>console.log('INTEGRA B2G multitenant admin listening',port))
 // FCM se activa solo mediante FCM_ENABLED=true. No dispara envíos en CI ni local por defecto.
 startFcmWorker({pool})
+// Independiente de FCM: las ventanas semanales también quedan disponibles por API.
+startRecurringWorker({pool})

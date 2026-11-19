@@ -3,6 +3,17 @@ import {Bell,CalendarClock,ImagePlus,Trash2} from 'lucide-react'
 
 type App = {app_id:string;enabled:boolean}
 type CatalogProduct = {id:string;name:string;active:boolean;price_pen:number|string}
+type WeeklySeries = {
+ id:string;appId:string;title:string;message:string;imageId:string;
+ productId:string|null;productName:string|null;weekday:number;startTime:string;endTime:string;
+ startDate:string;untilDate:string|null;timeZone:string;status:'ACTIVE'|'PAUSED'
+}
+const dayNames=['','lunes','martes','miércoles','jueves','viernes','sábado','domingo']
+const peruToday=()=>{
+ const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date())
+ const value=(type:string)=>parts.find(p=>p.type===type)?.value||''
+ return `${value('year')}-${value('month')}-${value('day')}`
+}
 type Notification = {
  id:string;appId:string;title:string;message:string;imageId:string;productId:string|null;productName?:string|null;
  scheduledAt:string;expiresAt:string|null;status:'SCHEDULED'|'AVAILABLE'|'CANCELLED'|'EXPIRED';
@@ -40,6 +51,14 @@ async function api<T>(path:string,method:'GET'|'POST'|'DELETE'='GET',data?:unkno
 export default function ScheduledNotifications({tenantId,apps,products}:{tenantId:string;apps:App[];products:CatalogProduct[]}){
  const root='/api/admin/tenants/'+tenantId
  const [items,setItems]=useState<Notification[]>([])
+ const [series,setSeries]=useState<WeeklySeries[]>([])
+ const [frequency,setFrequency]=useState<'once'|'weekly'>('once')
+ const [seriesId,setSeriesId]=useState('')
+ const [weekday,setWeekday]=useState(4)
+ const [startTime,setStartTime]=useState('15:00')
+ const [endTime,setEndTime]=useState('18:00')
+ const [startDate,setStartDate]=useState(peruToday())
+ const [untilDate,setUntilDate]=useState('')
  const [draft,setDraft]=useState<Draft>(initial(apps[0]?.app_id))
  const [editor,setEditor]=useState(false)
  const [busy,setBusy]=useState(false)
@@ -49,16 +68,22 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
  const [uploading,setUploading]=useState(false)
  const [ready,setReady]=useState(false)
  const refresh=async()=>{
-  const result=await api<{items:Notification[]}>(root+'/notifications')
-  setItems(result.items)
+  const [notices,recurrences]=await Promise.all([
+   api<{items:Notification[]}>(root+'/notifications'),
+   api<{items:WeeklySeries[]}>(root+'/notification-series')
+  ])
+  setItems(notices.items);setSeries(recurrences.items)
   setReady(true)
  }
  useEffect(()=>{
   let cancelled=false
-  setReady(false);setItems([]);setEditor(false);setConfirmId('')
+  setReady(false);setItems([]);setSeries([]);setEditor(false);setConfirmId('');setSeriesId('');setFrequency('once')
   setDraft(initial(apps[0]?.app_id))
-  void api<{items:Notification[]}>(root+'/notifications').then(result=>{
-   if(!cancelled){setItems(result.items);setReady(true)}
+  void Promise.all([
+   api<{items:Notification[]}>(root+'/notifications'),
+   api<{items:WeeklySeries[]}>(root+'/notification-series')
+  ]).then(([notices,recurrences])=>{
+   if(!cancelled){setItems(notices.items);setSeries(recurrences.items);setReady(true)}
   }).catch(e=>{if(!cancelled){setError(e.message);setReady(true)}})
   return ()=>{cancelled=true}
  },[tenantId])
@@ -75,18 +100,27 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
   e.preventDefault()
   void run(async()=>{
    if(!draft.imageId)throw Error('Adjunta una imagen antes de programar la notificación.')
-   if(!draft.scheduledAt)throw Error('Indica cuándo estará disponible la notificación.')
-   const result=await api<Notification>(root+'/notifications','POST',{
-    id:draft.id||undefined,appId:draft.appId,title:draft.title.trim(),
-    productId:draft.productId||null,
-    message:draft.message.trim(),imageId:draft.imageId,
-    scheduledAt:new Date(draft.scheduledAt).toISOString(),
-    expiresAt:draft.expiresAt?new Date(draft.expiresAt).toISOString():null
-   })
-   await refresh()
-   setEditor(true)
-   setDraft({...draft,id:result.id})
-   setNotice('Notificación guardada. Estará disponible por API en la fecha indicada y se enviará por FCM si está habilitado en el servidor.')
+   if(frequency==='weekly'){
+    if(startTime>=endTime)throw Error('La hora de cierre debe ser posterior a la de inicio.')
+    const result=await api<WeeklySeries>(root+'/notification-series','POST',{
+     id:seriesId||undefined,appId:draft.appId,title:draft.title.trim(),message:draft.message.trim(),
+     productId:draft.productId||null,imageId:draft.imageId,weekday,startTime,endTime,startDate,
+     untilDate:untilDate||null,timeZone:'America/Lima'
+    })
+    await refresh();setSeriesId(result.id);setEditor(true)
+    setNotice('Secuencia semanal guardada. Se generará una sola notificación por semana dentro del horario configurado.')
+   }else{
+    if(!draft.scheduledAt)throw Error('Indica cuándo estará disponible la notificación.')
+    const result=await api<Notification>(root+'/notifications','POST',{
+     id:draft.id||undefined,appId:draft.appId,title:draft.title.trim(),
+     productId:draft.productId||null,
+     message:draft.message.trim(),imageId:draft.imageId,
+     scheduledAt:new Date(draft.scheduledAt).toISOString(),
+     expiresAt:draft.expiresAt?new Date(draft.expiresAt).toISOString():null
+    })
+    await refresh();setEditor(true);setDraft({...draft,id:result.id})
+    setNotice('Notificación guardada. Estará disponible por API en la fecha indicada y se enviará por FCM si está habilitado en el servidor.')
+   }
   })
  }
  const upload=async(file:File)=>{
@@ -101,7 +135,28 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
   }catch(e){setError(e instanceof Error?e.message:'Error al cargar imagen')}
   finally{setUploading(false)}
  }
+ const newNotice=(kind:'once'|'weekly')=>{
+  setFrequency(kind);setSeriesId('');setDraft(initial(apps[0]?.app_id))
+  setWeekday(4);setStartTime('15:00');setEndTime('18:00');setStartDate(peruToday());setUntilDate('')
+  setEditor(true);setConfirmId('');setError('');setNotice('')
+ }
+ const editSeries=(item:WeeklySeries)=>{
+  setFrequency('weekly');setSeriesId(item.id)
+  setDraft({...initial(item.appId),appId:item.appId,title:item.title,message:item.message,imageId:item.imageId,
+   productId:item.productId||''})
+  setWeekday(item.weekday);setStartTime(item.startTime);setEndTime(item.endTime)
+  setStartDate(item.startDate);setUntilDate(item.untilDate||'')
+  setEditor(true);setConfirmId('');setError('');setNotice('')
+ }
+ const seriesAction=(item:WeeklySeries,action:'pause'|'resume'|'delete')=>void run(async()=>{
+  await api(root+'/notification-series/'+item.id+'/'+action,'POST',action==='delete'?{confirm:true}:{})
+  if(seriesId===item.id){setEditor(false);setSeriesId('')}
+  await refresh();setConfirmId('')
+  setNotice(action==='delete'?'Secuencia eliminada. No habrá nuevas repeticiones.':
+   action==='pause'?'Secuencia pausada. No se generarán nuevos avisos hasta reanudarla.':'Secuencia reanudada.')
+ })
  const edit=(item:Notification)=>{
+  setFrequency('once');setSeriesId('')
   setDraft({id:item.id,appId:item.appId,title:item.title,message:item.message,imageId:item.imageId,productId:item.productId||'',
    scheduledAt:localValue(item.scheduledAt),expiresAt:localValue(item.expiresAt)})
   setEditor(true);setConfirmId('');setError('');setNotice('')
@@ -118,10 +173,42 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
    <div><h2><Bell size={20}/> Notificaciones programadas</h2>
     <p>Crea avisos con imagen y texto para una aplicación específica.</p></div>
    <button className="button button-primary" type="button" disabled={busy||apps.length===0}
-    onClick={()=>{setDraft(initial(apps[0]?.app_id));setEditor(true);setConfirmId('');setError('');setNotice('')}}>Programar notificación</button>
+    onClick={()=>newNotice('once')}>Notificación única</button>
+   <button className="button button-secondary" type="button" disabled={busy||apps.length===0}
+    onClick={()=>newNotice('weekly')}>Nueva secuencia semanal</button>
   </div>
   <p className="ops-hint">Los avisos se publican por API a su hora programada. El envío FCM se ejecutará únicamente cuando el servidor tenga habilitada y configurada la cuenta de servicio privada. «Aceptada por Firebase» no garantiza entrega en todos los teléfonos.</p>
   {apps.length===0&&<p className="ops-empty">Primero registra una aplicación en la sección Publicar para asociar las notificaciones.</p>}
+  <h3>Secuencias semanales</h3>
+  {ready&&series.length===0&&<p className="ops-empty">No hay secuencias semanales configuradas.</p>}
+  {ready&&series.length>0&&<div className="ops-record-list">
+   {series.map(item=><article key={item.id} className="ops-record-row ops-notification-card">
+    <img className="ops-notification-thumb" src={imagePreview(item.imageId)} loading="lazy" alt={'Imagen de '+item.title}/>
+    <div className="ops-record-info">
+     <strong>{item.title}</strong><small>{item.message}</small>
+     <small>Todos los {dayNames[item.weekday]} · {item.startTime} a {item.endTime} (Perú)</small>
+     <small>Desde {item.startDate}{item.untilDate?' hasta '+item.untilDate:' · Sin fecha de finalización'}</small>
+     <small>{item.appId}{item.productId?' · '+(item.productName||'Producto asociado'):''}</small>
+     <span className={'ops-record-status'+(item.status==='ACTIVE'?' enabled':'')}>{item.status==='ACTIVE'?'Secuencia activa':'Pausada'}</span>
+    </div>
+    <div className="ops-record-actions">
+     <button type="button" className="button button-secondary" disabled={busy} onClick={()=>editSeries(item)}>Editar</button>
+     <button type="button" className="button button-secondary" disabled={busy}
+      onClick={()=>seriesAction(item,item.status==='ACTIVE'?'pause':'resume')}>{item.status==='ACTIVE'?'Pausar':'Reanudar'}</button>
+     <button type="button" className="button button-secondary ops-delete-trigger" disabled={busy}
+      onClick={()=>{setConfirmId('series:'+item.id);setError('');setNotice('')}}><Trash2 size={14}/> Eliminar</button>
+    </div>
+    {confirmId==='series:'+item.id&&<div className="ops-delete-confirm">
+     <strong>¿Eliminar esta secuencia semanal?</strong>
+     <p>Se detendrán futuras repeticiones. Los avisos ya enviados no se pueden retirar de los teléfonos.</p>
+     <div className="ops-record-actions">
+      <button type="button" className="button button-secondary ops-delete-trigger" disabled={busy} onClick={()=>seriesAction(item,'delete')}>Confirmar</button>
+      <button type="button" className="button button-secondary" onClick={()=>setConfirmId('')}>Volver</button>
+     </div>
+    </div>}
+   </article>)}
+  </div>}
+  <h3>Notificaciones individuales e historial de envíos</h3>
   {!ready?<p className="ops-empty">Cargando notificaciones...</p>:items.length===0?
    <p className="ops-empty">Todavía no hay notificaciones programadas.</p>:
    <div className="ops-record-list">
@@ -157,7 +244,13 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
   {!editor&&notice&&<p className="ops-success ops-action-feedback" role="status">{notice}</p>}
   {!editor&&error&&<p className="ops-error ops-action-feedback" role="alert">{error}</p>}
   {editor&&<form className="ops-record-editor" onSubmit={save}>
-   <h3><CalendarClock size={17}/>{draft.id?'Editar programación':'Nueva notificación'}</h3>
+   <h3><CalendarClock size={17}/>{frequency==='weekly'?(seriesId?'Editar secuencia semanal':'Nueva secuencia semanal'):(draft.id?'Editar programación':'Nueva notificación')}</h3>
+   <label>Frecuencia
+    <select value={frequency} disabled={!!draft.id||!!seriesId||busy} onChange={e=>setFrequency(e.target.value as 'once'|'weekly')}>
+     <option value="once">Una sola vez</option>
+     <option value="weekly">Repetir semanalmente</option>
+    </select>
+   </label>
    <div className="ops-grid">
     <label>Aplicación de destino
      <select required value={draft.appId} disabled={busy} onChange={e=>setDraft(v=>({...v,appId:e.target.value}))}>
@@ -173,12 +266,24 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
     </label>
     <label>Título<input maxLength={120} minLength={2} required value={draft.title}
      onChange={e=>setDraft(v=>({...v,title:e.target.value}))} placeholder="Ej. Promoción por tiempo limitado"/></label>
-    <label>Fecha y hora programadas<input type="datetime-local" required value={draft.scheduledAt}
-     onChange={e=>setDraft(v=>({...v,scheduledAt:e.target.value}))}/></label>
-    <label>Vencimiento (opcional)<input type="datetime-local" value={draft.expiresAt}
-     onChange={e=>setDraft(v=>({...v,expiresAt:e.target.value}))}/></label>
+    {frequency==='once'?<>
+     <label>Fecha y hora programadas<input type="datetime-local" required value={draft.scheduledAt}
+      onChange={e=>setDraft(v=>({...v,scheduledAt:e.target.value}))}/></label>
+     <label>Vencimiento (opcional)<input type="datetime-local" value={draft.expiresAt}
+      onChange={e=>setDraft(v=>({...v,expiresAt:e.target.value}))}/></label>
+    </>:<>
+     <label>Día de la semana
+      <select value={weekday} onChange={e=>setWeekday(Number(e.target.value))} required>
+       {dayNames.slice(1).map((day,i)=><option key={day} value={i+1}>{day[0].toUpperCase()+day.slice(1)}</option>)}
+      </select>
+     </label>
+     <label>Hora de envío (Perú)<input required type="time" value={startTime} onChange={e=>setStartTime(e.target.value)}/></label>
+     <label>Vigente hasta (Perú)<input required type="time" value={endTime} onChange={e=>setEndTime(e.target.value)}/></label>
+     <label>Comenzar a partir de<input required type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></label>
+     <label>Última repetición (opcional)<input type="date" min={startDate} value={untilDate} onChange={e=>setUntilDate(e.target.value)}/></label>
+    </>}
    </div>
-   <p className="ops-hint">Si vinculas un producto, comprueba que esté activo y publicado en el catálogo de la aplicación antes de enviar el aviso. Puedes dejar este campo vacío para novedades informativas.</p>
+   <p className="ops-hint">{frequency==='weekly'?'Se envía una sola notificación por semana al iniciar la promoción y permanece disponible hasta la hora final. No se envían múltiples mensajes durante ese intervalo. Horario de Perú (America/Lima).':'Selecciona una fecha y hora para un envío único.'} Si vinculas un producto, comprueba que esté activo y publicado en la aplicación; es opcional.</p>
    <label>Texto de la notificación<textarea rows={4} required minLength={1} maxLength={2000}
     value={draft.message} onChange={e=>setDraft(v=>({...v,message:e.target.value}))}
     placeholder="Escribe lo que verá el cliente"/></label>
@@ -191,7 +296,7 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
      <span>Imagen adjunta</span>
     </div>:<p className="ops-hint">La imagen es obligatoria. Máximo 1 MB para FCM; JPG, PNG o WebP.</p>}
    <div className="ops-record-actions">
-    <button className="button button-primary" disabled={busy||uploading||!draft.imageId}>{busy?'Guardando...':draft.id?'Guardar cambios':'Guardar programación'}</button>
+    <button className="button button-primary" disabled={busy||uploading||!draft.imageId}>{busy?'Guardando...':(draft.id||seriesId)?'Guardar cambios':frequency==='weekly'?'Guardar secuencia semanal':'Guardar programación'}</button>
     <button className="button button-secondary" type="button" disabled={busy||uploading}
      onClick={()=>{setEditor(false);setError('');setNotice('')}}>Cerrar</button>
    </div>

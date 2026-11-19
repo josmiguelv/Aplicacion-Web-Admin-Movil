@@ -373,3 +373,46 @@ producto se mantiene **Explorar la carta**. Reutiliza el flujo normal de
 selección de modalidad, ficha y carrito: no realiza compras automáticas.
 Es necesario generar e instalar una APK con este cambio para verlo en el
 teléfono; una APK previa no se actualiza sola.
+
+
+## Notificaciones recurrentes: promociones semanales
+
+En **Configuración comercial → Notificaciones → Nueva secuencia semanal**
+se programa una difusión una vez por semana dentro de una ventana horaria
+de Perú (`America/Lima`). Ejemplo: todos los jueves de 15:00 a 18:00:
+el sistema crea **una única ocurrencia** el jueves a partir de las 15:00,
+con disponibilidad en API hasta las 18:00. Si FCM está habilitado, se envía
+**un solo push por jueves**, nunca uno cada pocos minutos.
+
+Campos: aplicación, título, texto, imagen (máximo 1 MB), producto opcional,
+día semanal, hora de envío, hora de cierre, primera fecha de vigencia y
+fecha final opcional. No se permiten ventanas que crucen la medianoche.
+El administrador lista las secuencias y permite editar, pausar, reanudar y
+eliminar (borrado lógico). Las ocurrencias ya creadas conservan su historial;
+editar una secuencia cambia las **siguientes** ocurrencias, no reenvía las
+pasadas ni modifica un mensaje ya aceptado por Firebase.
+
+El worker del backend se ejecuta aproximadamente cada 15 segundos mientras
+Node.js esté activo, incluso con `FCM_ENABLED=false` para mantener la API
+actualizada. Solo crea el aviso si la fecha y la hora actual están dentro
+de la ventana configurada y la empresa/aplicación siguen habilitadas.
+Si el servicio se reinicia durante la ventana, un índice único garantiza
+que no habrá un segundo aviso ese mismo día; si el servicio estuvo caído
+todo el intervalo, se omite esa semana (sin envío retrospectivo).
+
+**API administrativa de secuencias (sesión + tenant):**
+- `GET /api/admin/tenants/{tenantId}/notification-series` lista las secuencias.
+- `POST /api/admin/tenants/{tenantId}/notification-series` crea o modifica
+  con `id` opcional, `appId`, `title`, `message`, `imageId`, `productId` (o null),
+  `weekday` (1 lunes … 7 domingo), `startTime` y `endTime` (`HH:mm`),
+  `startDate` y `untilDate` (`YYYY-MM-DD` o null).
+- `POST .../notification-series/{id}/pause` detiene repeticiones futuras.
+- `POST .../notification-series/{id}/resume` reactiva la programación.
+- `POST .../notification-series/{id}/delete` con `{"confirm":true}`
+  elimina la secuencia de la vista (borrado lógico sin borrar historial).
+
+**Migración PostgreSQL de instalación existente:**
+`server/migrations/009-recurring-notifications.sql`. No modifica el
+formato de la API pública ni el contrato FCM: las ocurrencias se almacenan
+como notificaciones estándar. No crea nuevas funciones en Android ni TU VERSO.
+El servidor debe permanecer en ejecución para cumplir el horario.
