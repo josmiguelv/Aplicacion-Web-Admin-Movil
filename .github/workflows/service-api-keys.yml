@@ -58,3 +58,5 @@ jobs:
         run: node --test server/load-local-env.test.mjs
       - name: Focused weekly scheduled marketing campaigns
         run: node server/recurring-notifications.test.mjs
+      - name: Focused notification navigation and status classification
+        run: node --test server/notification-views.test.mjs

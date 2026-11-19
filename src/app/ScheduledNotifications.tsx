@@ -1,5 +1,6 @@
 import {useEffect,useState,type FormEvent} from 'react'
-import {Bell,CalendarClock,ImagePlus,Trash2} from 'lucide-react'
+import {ArrowLeft,Bell,CalendarClock,History,ImagePlus,RefreshCw,Trash2} from 'lucide-react'
+import {groupNotifications,notificationSections,type NoticeSection} from './notification-views.mjs'
 
 type App = {app_id:string;enabled:boolean}
 type CatalogProduct = {id:string;name:string;active:boolean;price_pen:number|string}
@@ -78,6 +79,17 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
  const [confirmId,setConfirmId]=useState('')
  const [uploading,setUploading]=useState(false)
  const [ready,setReady]=useState(false)
+ const [view,setView]=useState<NoticeSection>('running')
+ const groups=groupNotifications(items)
+ const viewItems=view==='running'?groups.running:view==='scheduled'?groups.scheduled:groups.history
+ const sectionCounts:Record<NoticeSection,number>={
+  running:groups.running.length,scheduled:groups.scheduled.length,
+  series:series.length,history:groups.history.length
+ }
+ const activeSection=notificationSections.find(section=>section.id===view)??notificationSections[0]
+ const switchView=(next:NoticeSection)=>{
+  setView(next);setEditor(false);setConfirmId('');setNotice('');setError('')
+ }
  const refresh=async()=>{
   const [notices,recurrences]=await Promise.all([
    api<{items:Notification[]}>(root+'/notifications'),
@@ -88,7 +100,7 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
  }
  useEffect(()=>{
   let cancelled=false
-  setReady(false);setItems([]);setSeries([]);setEditor(false);setConfirmId('');setSeriesId('');setFrequency('once')
+  setReady(false);setItems([]);setSeries([]);setEditor(false);setConfirmId('');setSeriesId('');setFrequency('once');setView('running')
   setDraft(initial(apps[0]?.app_id))
   void Promise.all([
    api<{items:Notification[]}>(root+'/notifications'),
@@ -122,7 +134,7 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
      productId:draft.productId||null,imageId:draft.imageId,slots,startDate,
      untilDate:untilDate||null,timeZone:'America/Lima'
     })
-    await refresh();setSeriesId(result.id);setEditor(true)
+    await refresh();setSeriesId(result.id);setEditor(false);setView('series')
     setNotice('Secuencia guardada: un envío por día y franja configurados, sin duplicados al reiniciar.')
    }else{
     if(!draft.scheduledAt)throw Error('Indica cuándo estará disponible la notificación.')
@@ -133,7 +145,7 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
      scheduledAt:new Date(draft.scheduledAt).toISOString(),
      expiresAt:draft.expiresAt?new Date(draft.expiresAt).toISOString():null
     })
-    await refresh();setEditor(true);setDraft({...draft,id:result.id})
+    await refresh();setEditor(false);setView('scheduled');setDraft({...draft,id:result.id})
     setNotice('Notificación guardada. Estará disponible por API en la fecha indicada y se enviará por FCM si está habilitado en el servidor.')
    }
   })
@@ -183,21 +195,46 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
   else await api(root+'/notifications/'+item.id,'DELETE',{confirm:true})
   if(draft.id===item.id){setDraft(initial(apps[0]?.app_id));setEditor(false)}
   await refresh();setConfirmId('')
-  setNotice(mode==='cancel'?'Notificación cancelada. No estará disponible por API.':'Notificación eliminada del administrador.')
+  if(mode==='cancel')setView('history')
+  setNotice(mode==='cancel'?'Notificación cancelada. Puedes consultarla en el historial.':'Notificación eliminada del administrador.')
  })
- return <section className="ops-panel ops-record-section" aria-label="Programación de notificaciones">
+ return <section className="ops-panel ops-record-section ops-notification-center" aria-label="Centro de notificaciones">
   <div className="ops-store-toolbar">
-   <div><h2><Bell size={20}/> Notificaciones programadas</h2>
-    <p>Crea avisos con imagen y texto para una aplicación específica.</p></div>
-   <button className="button button-primary" type="button" disabled={busy||apps.length===0}
-    onClick={()=>newNotice('once')}>Notificación única</button>
-   <button className="button button-secondary" type="button" disabled={busy||apps.length===0}
-    onClick={()=>newNotice('weekly')}>Nueva secuencia semanal</button>
+   <div><h2><Bell size={20}/> Centro de notificaciones</h2>
+    <p>Consulta la actividad, organiza campañas y revisa los resultados de envío desde un solo lugar.</p></div>
+   {editor?<button className="button button-secondary" type="button" disabled={busy||uploading}
+     onClick={()=>{setEditor(false);setError('');setNotice('')}}><ArrowLeft size={15}/> Volver al listado</button>:
+    <div className="ops-record-actions">
+     <button className="button button-secondary" type="button" disabled={busy||!ready}
+      onClick={()=>void run(async()=>{await refresh();setNotice('Información actualizada.')})}>
+      <RefreshCw size={15}/> Actualizar</button>
+     <button className="button button-primary" type="button" disabled={busy||apps.length===0}
+      onClick={()=>newNotice('once')}>Nueva notificación</button>
+     <button className="button button-secondary" type="button" disabled={busy||apps.length===0}
+      onClick={()=>newNotice('weekly')}>Nueva secuencia</button>
+    </div>}
   </div>
-  <p className="ops-hint">Los avisos se publican por API a su hora programada. El envío FCM se ejecutará únicamente cuando el servidor tenga habilitada y configurada la cuenta de servicio privada. «Aceptada por Firebase» no garantiza entrega en todos los teléfonos.</p>
   {apps.length===0&&<p className="ops-empty">Primero registra una aplicación en la sección Publicar para asociar las notificaciones.</p>}
-  <h3>Secuencias semanales</h3>
-  {ready&&series.length===0&&<p className="ops-empty">No hay secuencias semanales configuradas.</p>}
+  {!editor&&<>
+   <nav className="ops-notification-tabs" aria-label="Vistas de notificaciones">
+    {notificationSections.map(section=><button key={section.id} type="button"
+     className={'ops-notification-tab'+(view===section.id?' is-active':'')}
+     aria-current={view===section.id?'page':undefined}
+     onClick={()=>switchView(section.id)}>
+     <span className="ops-notification-tab-label">{section.id==='history'&&<History size={15}/>}
+      {section.label}</span>
+     <span className="ops-notification-tab-count">{sectionCounts[section.id]}</span>
+    </button>)}
+   </nav>
+   <div className="ops-notification-view-heading">
+    <div><h3>{activeSection.label}</h3><p>{activeSection.description}</p></div>
+    <small>{view==='history'?'Un aviso vigente enviado también figura aquí como registro de FCM.':'Horarios y fechas según la programación de cada aviso.'}</small>
+   </div>
+   {notice&&<p className="ops-success ops-action-feedback" role="status">{notice}</p>}
+   {error&&<p className="ops-error ops-action-feedback" role="alert">{error}</p>}
+   {view==='series'&&<>
+
+  {ready&&series.length===0&&<p className="ops-empty">Todavía no hay secuencias. Crea una para repetir las promociones automáticamente.</p>}
   {ready&&series.length>0&&<div className="ops-record-list">
    {series.map(item=><article key={item.id} className="ops-record-row ops-notification-card">
     <img className="ops-notification-thumb" src={imagePreview(item.imageId)} loading="lazy" alt={'Imagen de '+item.title}/>
@@ -226,11 +263,12 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
     </div>}
    </article>)}
   </div>}
-  <h3>Notificaciones individuales e historial de envíos</h3>
-  {!ready?<p className="ops-empty">Cargando notificaciones...</p>:items.length===0?
-   <p className="ops-empty">Todavía no hay notificaciones programadas.</p>:
+  </>}
+  {view!=='series'&&(!ready?<p className="ops-empty">Cargando notificaciones...</p>:viewItems.length===0?
+   <p className="ops-empty">{view==='running'?'No hay avisos disponibles en este momento.':
+    view==='scheduled'?'No hay notificaciones pendientes.':'Todavía no hay registros históricos de envío o avisos finalizados.'}</p>:
    <div className="ops-record-list">
-    {items.map(item=><article className="ops-record-row ops-notification-card" key={item.id}>
+    {viewItems.map(item=><article className="ops-record-row ops-notification-card" key={item.id}>
      <img src={imagePreview(item.imageId)} alt={'Imagen de '+item.title} loading="lazy" className="ops-notification-thumb"/>
      <div className="ops-record-info">
       <strong>{item.title}</strong><small>{item.message}</small>
@@ -258,9 +296,9 @@ export default function ScheduledNotifications({tenantId,apps,products}:{tenantI
       </div>
      </div>}
     </article>)}
-   </div>}
-  {!editor&&notice&&<p className="ops-success ops-action-feedback" role="status">{notice}</p>}
-  {!editor&&error&&<p className="ops-error ops-action-feedback" role="alert">{error}</p>}
+   </div>)}
+   {!ready&&<p className="ops-empty">Cargando campañas...</p>}
+  </>}
   {editor&&<form className="ops-record-editor" onSubmit={save}>
    <h3><CalendarClock size={17}/>{frequency==='weekly'?(seriesId?'Editar secuencia semanal':'Nueva secuencia semanal'):(draft.id?'Editar programación':'Nueva notificación')}</h3>
    <label>Frecuencia

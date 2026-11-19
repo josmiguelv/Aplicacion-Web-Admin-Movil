@@ -444,3 +444,25 @@ las secuencias antiguas y registra su primer horario en la tabla nueva.
 El backend debe quedar encendido dentro de los horarios de promoción.
 Las notificaciones existentes siguen consultándose por la API pública;
 no requiere actualización Android ni modificaciones en TU VERSO.
+
+
+### Centro de notificaciones: navegación por estado (solo interfaz)
+
+La sección **Notificaciones** del administrador distribuye la operación en
+cuatro vistas, sin duplicar pantallas de administración ni modificar las
+tablas/contratos de envío:
+
+- **En curso:** avisos con estado `AVAILABLE`, actualmente disponibles por API.
+- **Programadas:** notificaciones únicas con estado `SCHEDULED`, todavía pendientes.
+- **Secuencias:** campañas recurrentes `ACTIVE` y `PAUSED`, con horarios,
+  edición, pausa/reanudación y eliminación.
+- **Historial:** avisos vencidos/cancelados y registros FCM `SENT`,
+  `FAILED`, `UNKNOWN` o `SKIPPED`. Una notificación todavía vigente puede
+  aparecer también en Historial como constancia de envío: **FCM aceptó**
+  no significa que el teléfono la recibió.
+
+La creación y edición se realizan en una vista independiente con un botón
+para volver, mientras que la navegación presenta contadores y un control
+manual **Actualizar**. Los filtros solo organizan los últimos resultados
+disponibles en la API administrativa; no borran ni cambian registros.
+No hay migraciones nuevas ni actualización de la app móvil para este cambio.
