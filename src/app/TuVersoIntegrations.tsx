@@ -4,7 +4,7 @@ type Store={id:string;name:string;code:string}
 type Binding={id:string;storeId:string;storeName:string;storeCode:string;externalLocationId:string;purpose:string;queueReference:string|null}
 type Check={httpStatus:number|null;result:string|null;errorCode:string|null;message:string;checkedAt:string;simulation:boolean;bindingId:string}
 type Integration={id:string;name:string;hasCredential:boolean;credentialHint:string|null;expiresAt:string|null;status:string;suspended:boolean;connectionMode:string;lastCheck:Check|null;bindings?:Binding[]}
-const statuses:Record<string,string>={UNCONFIGURED:'SIN CONFIGURAR',CONFIGURED:'CLAVE GUARDADA · SIN COMPROBAR',QUERY_CONNECTED:'CONECTADA PARA CONSULTAS',AUTH_ERROR:'CLAVE O PERMISOS RECHAZADOS',EXPIRED:'CLAVE VENCIDA',SUSPENDED:'CONEXIÓN SUSPENDIDA'}
+const statuses:Record<string,string>={UNCONFIGURED:'SIN CONFIGURAR',CONFIGURED:'PENDIENTE DE VERIFICAR CONEXIÓN',QUERY_CONNECTED:'CONECTADA PARA CONSULTAS',AUTH_ERROR:'NO SE PUDO CONECTAR CON TU VERSO',EXPIRED:'CLAVE VENCIDA',SUSPENDED:'DESACTIVADA EN ESTE ADMINISTRADOR'}
 const date=(value:string|null)=>value?new Date(value).toLocaleString('es-PE'):'Sin comprobación'
 const localDate=(value:string|null)=>{if(!value)return '';const d=new Date(value);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)}
 const purposeLabel=(purpose:string)=>purpose==='ORDER_REQUEST'?'Atención de pedidos':purpose
@@ -19,7 +19,7 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
  const [items,setItems]=useState<Integration[]>([]),[stores,setStores]=useState<Store[]>([]),[selectedId,setSelectedId]=useState(''),[detail,setDetail]=useState<Integration|null>(null)
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[loadingDetail,setLoadingDetail]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[mode,setMode]=useState('DISABLED')
  const [binding,setBinding]=useState({storeId:'',purpose:'',externalLocationId:'',authorizationConfirmed:false}),[customPurpose,setCustomPurpose]=useState(false)
- const [bindingId,setBindingId]=useState(''),[authorizeCheck,setAuthorizeCheck]=useState(false),[confirmDelete,setConfirmDelete]=useState(false)
+ const [bindingId,setBindingId]=useState(''),[authorizeCheck,setAuthorizeCheck]=useState(false),[confirmDelete,setConfirmDelete]=useState(false),[confirmDeactivate,setConfirmDeactivate]=useState(false)
  const secretForm=useRef<HTMLFormElement>(null)
  const selectedStore=stores.find(store=>store.id===binding.storeId)
  useEffect(()=>{
@@ -30,7 +30,7 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
   return()=>controller.abort()
  },[root,tenantId])
  useEffect(()=>{
-  setDetail(null);setAuthorizeCheck(false);setBindingId('');setConfirmDelete(false);setBinding({storeId:'',purpose:'',externalLocationId:'',authorizationConfirmed:false});setCustomPurpose(false);secretForm.current?.reset()
+  setDetail(null);setAuthorizeCheck(false);setBindingId('');setConfirmDelete(false);setConfirmDeactivate(false);setBinding({storeId:'',purpose:'',externalLocationId:'',authorizationConfirmed:false});setCustomPurpose(false);secretForm.current?.reset()
   if(!selectedId)return
   const controller=new AbortController();setLoadingDetail(true)
   void api<Integration>(root+'/'+selectedId,'GET',undefined,controller.signal).then(setDetail)
@@ -73,8 +73,31 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
    {detail&&<>
     <section className="portal-panel"><h2>Estado de la conexión</h2><p><strong>{statuses[detail.status]}</strong>{detail.lastCheck?.simulation?' · Resultado simulado, sin conexión real':''}</p>
      <p className="portal-muted">Última comprobación: {date(detail.lastCheck?.checkedAt||null)}{detail.expiresAt?' · La clave vence el '+date(detail.expiresAt):''}</p>
-     {detail.lastCheck&&<p>{detail.lastCheck.message}</p>}
-     <button className="portal-outline" type="button" disabled={busy} onClick={()=>void run(async()=>{await api(root+'/'+selectedId+'/suspension','POST',{suspended:!detail.suspended});await refresh();setNotice(detail.suspended?'Conexión habilitada localmente. Debes volver a comprobarla.':'Conexión suspendida solo en este administrador.')})}>{detail.suspended?'Retirar suspensión local':'Suspender conexión local'}</button>
+     {detail.status==='AUTH_ERROR'&&detail.lastCheck?.httpStatus===401
+       ? <p role="status">TU VERSO rechazó la conexión (HTTP 401). Revisa la clave y los permisos de la integración.</p>
+       : detail.lastCheck&&<p>{detail.lastCheck.message}</p>}
+     <p className="portal-muted">{detail.suspended
+      ? 'Esta conexión está desactivada solo en este administrador. Puedes activarla para volver a comprobarla; no se ha cambiado nada en TU VERSO.'
+      : 'Si la desactivas, este administrador dejará de consultar TU VERSO. La clave seguirá guardada y la configuración en TU VERSO no cambiará.'}</p>
+     {detail.suspended
+      ? <button className="portal-outline" type="button" disabled={busy} onClick={()=>void run(async()=>{
+          await api(root+'/'+selectedId+'/suspension','POST',{suspended:false})
+          await refresh();setConfirmDeactivate(false)
+          setNotice('Conexión activada en este administrador. Comprueba nuevamente la disponibilidad para verificar el acceso.')
+         })}>Activar conexión con TU VERSO</button>
+      : confirmDeactivate
+       ? <div className="integration-details" role="group" aria-label="Confirmar desactivación de conexión">
+           <p><strong>¿Desactivar la conexión en este administrador?</strong> Se detendrán las consultas desde aquí; no se revocará la clave ni se desactivará TU VERSO.</p>
+           <div className="integration-actions">
+            <button className="portal-outline" type="button" disabled={busy} onClick={()=>void run(async()=>{
+              await api(root+'/'+selectedId+'/suspension','POST',{suspended:true})
+              await refresh();setConfirmDeactivate(false)
+              setNotice('Conexión desactivada en este administrador. TU VERSO no se ha modificado.')
+             })}>Sí, desactivar conexión</button>
+            <button className="portal-outline" type="button" disabled={busy} onClick={()=>setConfirmDeactivate(false)}>Cancelar</button>
+           </div>
+         </div>
+       : <button className="portal-outline" type="button" disabled={busy} onClick={()=>setConfirmDeactivate(true)}>Desactivar conexión con TU VERSO</button>}
     </section>
     <section className="portal-panel"><h2>2. Sede y propósito</h2>
      <p className="portal-muted">Selecciona una sede y un propósito que ya estén autorizados para esta clave en TU VERSO.</p>
@@ -98,7 +121,7 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
      {mode==='SIMULATED'&&<p className="portal-muted">Prueba simulada. No comprueba una conexión real.</p>}
      <label>Sede para comprobar<select aria-label="Sede para comprobar" required value={bindingId} onChange={e=>{setBindingId(e.target.value);setAuthorizeCheck(false)}}><option value="">Selecciona una sede y propósito guardados</option>{detail.bindings?.map(b=><option key={b.id} value={b.id}>{b.storeName} · {purposeLabel(b.purpose)}</option>)}</select></label>
      <label className="integration-check"><input type="checkbox" required checked={authorizeCheck} onChange={e=>setAuthorizeCheck(e.target.checked)}/>Autorizo esta consulta de disponibilidad.</label>
-     <button className="portal-primary" disabled={busy||mode==='DISABLED'||!detail.hasCredential||detail.suspended||detail.status==='EXPIRED'||!bindingId||!authorizeCheck}>Probar conexión</button>
+     <button className="portal-primary" disabled={busy||mode==='DISABLED'||!detail.hasCredential||detail.suspended||detail.status==='EXPIRED'||!bindingId||!authorizeCheck}>{detail.lastCheck?'Probar nuevamente':'Probar conexión'}</button>
      <p className="portal-muted">Solo comprueba si hay atención disponible. No reserva agentes ni activa mensajes o conversaciones.</p>
      {detail.lastCheck&&<details className="integration-details"><summary>Detalle de la última comprobación</summary><p>HTTP {detail.lastCheck.httpStatus??'sin respuesta'} · {detail.lastCheck.result||detail.lastCheck.errorCode}</p></details>}
     </form>

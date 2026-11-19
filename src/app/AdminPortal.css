@@ -95,3 +95,10 @@
 .service-revoke-confirm p{font-size:12px;color:#72423e;margin:0 0 10px}
 .service-revoke-confirm button{margin:0 8px 6px 0}
 @media(max-width:650px){.service-key-form{grid-template-columns:1fr}.service-secret input{flex-basis:100%}.service-key-head{align-items:flex-start}}
+
+
+/* Confirmación explícita de desactivación de la conexión TU VERSO. */
+.integration-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.integration-actions button{max-width:100%}
+.integration-details[role="group"]{margin:12px 0}
+.integration-details[role="group"] p{margin:0 0 12px;font-size:13px;line-height:1.55}
