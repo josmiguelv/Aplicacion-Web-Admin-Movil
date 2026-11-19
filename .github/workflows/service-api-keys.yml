@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Check edited backend syntax
-        run: node --check server/service-api-keys.mjs && node --check server/static-path-policy.mjs && node --check server/index.mjs
+        run: node --check server/service-api-keys.mjs && node --check server/static-path-policy.mjs && node --check server/scheduled-notifications.mjs && node --check server/index.mjs
       - name: Validate Windows and Railway static paths
         run: node --test server/static-path-policy.test.mjs
       - name: Validate tunnel login origin policy
@@ -50,3 +50,5 @@ jobs:
         run: node server/catalog-operations.test.mjs
       - name: Focused commercial CRUD — payments, promotions, catalog, apps and accounts
         run: node server/commercial-crud.test.mjs
+      - name: Focused scheduled notification API and image access
+        run: node server/scheduled-notifications.test.mjs

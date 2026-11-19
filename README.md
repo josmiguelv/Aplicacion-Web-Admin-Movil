@@ -203,3 +203,52 @@ Eliminaciones en borrador (todas con sesión autorizada y `{"confirm":true}`):
 `DELETE .../vacancies/{id}`. Se auditan y requieren una nueva publicación
 para afectar la aplicación. No se tocan los proyectos TU VERSO ni Android.
 Sin migraciones de esquema.
+
+## Notificaciones programadas (API de lectura, no push)
+
+Desde **Configuración comercial → Notificaciones** se registra aplicación de
+destino, título, texto, imagen y fecha/hora, con vencimiento opcional.
+Las notificaciones se guardan en PostgreSQL y se aíslan por empresa.
+Los estados son `SCHEDULED`, `AVAILABLE`, `CANCELLED` y `EXPIRED`.
+`AVAILABLE` no significa que se haya enviado un push al teléfono.
+
+### API pública
+`GET /api/v1/mobile/notifications?appId=com.integrab2g.pollosb3`
+
+Ejemplo de respuesta desde la fecha programada:
+```json
+{"ready":true,"notifications":[{"id":"UUID","title":"Promoción",
+"message":"Mensaje de la empresa","imageUrl":"/api/v1/mobile/notification-images/UUID?appId=com.integrab2g.pollosb3",
+"scheduledAt":"2026-11-19T20:30:00.000Z","expiresAt":null}]}
+```
+
+El consumidor deduplica por `id`. La API omite notificaciones programadas
+para el futuro, canceladas, vencidas o de aplicaciones no habilitadas.
+Retorna hasta 100 registros ordenados por fecha; la imagen se libera
+únicamente desde la fecha programada y para la aplicación correspondiente.
+
+### API administrativa (requiere sesión y autorización por tenant)
+- `GET /api/admin/tenants/{tenantId}/notifications`: listar.
+- `POST /api/admin/tenants/{tenantId}/notifications`: crear/editar con
+  `appId`, `title`, `message`, `imageId`, `scheduledAt`, `expiresAt` y
+  `id` opcional para editar exclusivamente una notificación pendiente.
+- `POST /api/admin/tenants/{tenantId}/notifications/{id}/cancel`
+  con `{"confirm":true}`: cancelar una notificación todavía pendiente.
+- `DELETE /api/admin/tenants/{tenantId}/notifications/{id}`
+  con `{"confirm":true}`: eliminar y retirar de la API.
+- `POST /api/admin/tenants/{tenantId}/images`: subir JPEG, PNG o WebP
+  real de máximo 4 MB; devuelve ID de imagen.
+- `GET /api/admin/tenants/{tenantId}/images/{imageId}`: previsualizar
+  de forma privada una imagen de la misma empresa.
+
+Las horas del navegador se convierten a UTC (`TIMESTAMPTZ`) antes de guardar.
+**BD existente:** aplicar solamente
+`server/migrations/006-scheduled-notifications.sql`.
+Es una migración aditiva e idempotente; en bases nuevas, `server/schema.sql`
+ya incluye la tabla. No reinicializar bases existentes.
+
+**Límite funcional:** no se ejecutan envíos push automáticos ni se integra
+Firebase Cloud Messaging o APNs. Android debe consultar la API y
+deduplicar avisos por `id`; para mostrar push fuera de la aplicación
+se necesitaría una integración adicional de transporte push.
+No se modificó Android, TU VERSO ni Railway.

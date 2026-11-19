@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Building2, Check, Copy, CreditCard, Package, Send, Store, Smartphone, ChevronRight, Settings2, UsersRound } from 'lucide-react'
+import { Building2, Check, Copy, CreditCard, Package, Send, Store, Smartphone, ChevronRight, Settings2, UsersRound, Bell } from 'lucide-react'
+import ScheduledNotifications from './ScheduledNotifications'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
@@ -15,12 +16,13 @@ type AdminUserRow = {id:string;email:string;active:boolean;created_at:string}
 type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;schedule:string;employment_type:string;location_label:string;image_url:string|null;whatsapp_phone:string;active:boolean}
 const modes = [{key:'delivery',name:'Delivery'},{key:'pickup',name:'Recojo'},{key:'dine_in',name:'Comer en tienda'}]
 const payments = [{key:'yape',name:'Yape'},{key:'plin',name:'Plin'},{key:'card',name:'Tarjeta'},{key:'cash',name:'Efectivo'}]
-type OperationsTab = 'stores'|'catalog'|'payments'|'extras'|'publish'|'access'
+type OperationsTab = 'stores'|'catalog'|'payments'|'extras'|'notifications'|'publish'|'access'
 const operationTabs = [
  {id:'stores',label:'Locales',subtitle:'Sedes y horarios',icon:Store},
  {id:'catalog',label:'Carta',subtitle:'Productos y promociones',icon:Package},
  {id:'payments',label:'Pagos',subtitle:'Por sede',icon:CreditCard},
  {id:'extras',label:'Más opciones',subtitle:'Vacantes y reclamaciones',icon:Settings2},
+ {id:'notifications',label:'Notificaciones',subtitle:'Imagen, texto y fecha',icon:Bell},
  {id:'publish',label:'Publicar',subtitle:'Actualizar aplicaciones',icon:Send},
 ] as const
 async function api<T>(path: string, method: 'GET'|'POST'|'PUT'|'DELETE'='GET', data?:unknown): Promise<T> {
@@ -138,7 +140,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     aria-current={activeTab==='access'?'page':undefined} onClick={()=>changeTab('access')}><UsersRound size={18}/><span><strong>Usuarios</strong><small>Accesos de empresa</small></span></button>}
   </nav>
   <div className="ops-current-heading">
-   <div><span className="ops-eyebrow">ESTÁS EN</span><h2>{({stores:'Locales y horarios',catalog:'Productos y promociones',payments:'Medios de pago',extras:'Más configuraciones',publish:'Publicación',access:'Usuarios de empresa'} as Record<OperationsTab,string>)[activeTab]}</h2></div>
+   <div><span className="ops-eyebrow">ESTÁS EN</span><h2>{({stores:'Locales y horarios',catalog:'Productos y promociones',payments:'Medios de pago',extras:'Más configuraciones',notifications:'Notificaciones programadas',publish:'Publicación',access:'Usuarios de empresa'} as Record<OperationsTab,string>)[activeTab]}</h2></div>
    {activeTab!=='publish'&&<button type="button" className="ops-publish-shortcut" onClick={()=>changeTab('publish')}>Ir a publicación <ChevronRight size={17}/></button>}
   </div>
   {activeTab==='access'&&session.role==='SUPER_ADMIN'&&!embeddedSession&&<section className="ops-panel ops-record-section">
@@ -514,6 +516,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     </div>}
    </div>}
  </section>}
+ {activeTab==='notifications'&&<ScheduledNotifications tenantId={tenantId} apps={apps}/>}
  {activeTab==='publish'&&<section className="ops-panel ops-record-section">
   <h2><Smartphone size={19}/> Aplicaciones registradas y publicación</h2>
   <p>Elige la aplicación asociada a esta empresa. Los cambios de locales, productos y pagos solo llegan a Android al publicar.</p>

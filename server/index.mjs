@@ -3,6 +3,7 @@ import {mobileWeeklyHours} from './mobile-store-hours.mjs'
 import {isStaticPathAllowed} from './static-path-policy.mjs'
 import {isAllowedAdminOrigin} from './admin-origin-policy.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
+import {adminNotificationRoutes,publicNotificationRoutes} from './scheduled-notifications.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -179,6 +180,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  const user=await session(req);if(req.method!=='GET'&&!sameOrigin(req))throw bad(403,'Origen no autorizado');
  if(await adminApiKeyRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(await integrationRoutes({req,res,url,user,pool,body,json,tenantOf}))return
+ if(/^\/api\/admin\/tenants\/[0-9a-f-]+\/notifications(?:\/|$)/.test(url.pathname))return await adminNotificationRoutes({req,res,url,user,pool,body,json,tenantOf,bad,uuid})
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
  if(url.pathname==='/api/admin/logout'&&req.method==='POST'){await sql('DELETE FROM admin_sessions WHERE token_hash=$1',[digest(cookie(req))]);res.setHeader('Set-Cookie',`b3sid=; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`);return json(res,200,{ok:true})}
  if(url.pathname==='/api/admin/tenants'&&req.method==='GET'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const x=await sql('SELECT id,name,active FROM tenants ORDER BY created_at');return json(res,200,{tenants:x.rows})}
@@ -370,6 +372,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(url.pathname.startsWith('/api/v1/mobile/')){
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
+ if(url.pathname==='/api/v1/mobile/notifications'||url.pathname.startsWith('/api/v1/mobile/notification-images/'))return await publicNotificationRoutes({req,res,url,pool,json,bad,corsHeaders})
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
   const found=await sql(`SELECT i.mime,i.content FROM product_images i WHERE i.id=$1 AND EXISTS(SELECT 1 FROM published_catalogs c JOIN mobile_apps a ON a.app_id=c.app_id JOIN tenants t ON t.id=c.tenant_id WHERE c.tenant_id=i.tenant_id AND a.enabled=true AND t.active=true AND c.payload::text LIKE '%'||$2||'%') LIMIT 1`,[img[1],img[1]]);
