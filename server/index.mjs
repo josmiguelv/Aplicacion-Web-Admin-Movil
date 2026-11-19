@@ -324,7 +324,28 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    if(b.code!==undefined&&b.code!==existing.rows[0].code)throw bad(400,'El ID de la sede no se puede modificar');
   }
   const storeCode=b.code??('sede-'+randomUUID());
-  if(!validateOpeningHours(b.openingHours??null)||!word(b.name,180)||!word(b.address,300)||![b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled].every(bool)||!(b.latitude==null&&b.longitude==null)&&!checkLatLng(b.latitude,b.longitude)||b.radiusKm!=null&&(!safeNumber(b.radiusKm)||b.radiusKm<=0||b.radiusKm>500)||b.deliveryRatePerKmPen!=null&&(!safeNumber(b.deliveryRatePerKmPen)||b.deliveryRatePerKmPen<0||b.deliveryRatePerKmPen>1000)||b.deliveryFeePen!=null&&(!safeNumber(b.deliveryFeePen)||b.deliveryFeePen<0||b.deliveryFeePen>10000)||!['PER_KM','FIXED'].includes(b.deliveryPricingMode??'PER_KM'))throw bad(400,'Datos del local inválidos');
+  if(!word(b.name,180))throw bad(400,'Completa el nombre del local (máximo 180 caracteres)');
+  if(!word(b.address,300))throw bad(400,'Completa la dirección del local (máximo 300 caracteres)');
+  if(![b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled].every(bool))
+   throw bad(400,'El estado del local y las modalidades de atención deben ser válidos');
+  if((b.latitude==null)!==(b.longitude==null))
+   throw bad(400,'Completa ambas coordenadas GPS (latitud y longitud) o deja ambas vacías');
+  if(b.latitude!=null&&!checkLatLng(b.latitude,b.longitude))
+   throw bad(400,'Coordenadas GPS inválidas. Usa latitud de -90 a 90 y longitud de -180 a 180');
+  if(b.radiusKm!=null&&(!safeNumber(b.radiusKm)||b.radiusKm<=0||b.radiusKm>500))
+   throw bad(400,'Cobertura máxima inválida: indica kilómetros mayores que 0 y hasta 500, o deja el campo vacío');
+  if(b.deliveryRatePerKmPen!=null&&(!safeNumber(b.deliveryRatePerKmPen)||b.deliveryRatePerKmPen<0||b.deliveryRatePerKmPen>1000))
+   throw bad(400,'Tarifa por kilómetro inválida: indica un importe entre S/ 0 y S/ 1000');
+  if(b.deliveryFeePen!=null&&(!safeNumber(b.deliveryFeePen)||b.deliveryFeePen<0||b.deliveryFeePen>10000))
+   throw bad(400,'Costo fijo de delivery inválido: indica un importe entre S/ 0 y S/ 10000');
+  if(!['PER_KM','FIXED'].includes(b.deliveryPricingMode??'PER_KM'))
+   throw bad(400,'Modalidad de tarifa de delivery inválida');
+  if(!validateOpeningHours(b.openingHours??null)){
+   const dayLabels={mon:'lunes',tue:'martes',wed:'miércoles',thu:'jueves',fri:'viernes',sat:'sábado',sun:'domingo'};
+   const wrong=Object.entries(b.openingHours||{}).find(([day,h])=>!validateOpeningHours({[day]:h}));
+   throw bad(400,'Horario de atención inválido'+(wrong?' para el '+(dayLabels[wrong[0]]||wrong[0]):'')+
+    ': completa apertura y cierre en formato HH:MM, o marca Cerrado');
+  }
   const args=[tenantId,b.name.trim(),b.address.trim(),b.latitude??null,b.longitude??null,b.radiusKm??null,b.deliveryRatePerKmPen??null,b.deliveryFeePen??null,b.deliveryPricingMode??'PER_KM',b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,b.openingHours??null];
   result=b.id&&uuid(b.id)?await client.query(`UPDATE stores SET name=$2,address=$3,latitude=$4,longitude=$5,radius_km=$6,delivery_rate_per_km_pen=$7,delivery_fee_pen=$8,delivery_pricing_mode=$9,active=$10,delivery_enabled=$11,pickup_enabled=$12,dine_in_enabled=$13,opening_hours=$14,updated_at=now() WHERE tenant_id=$1 AND id=$15 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO stores(tenant_id,name,address,latitude,longitude,radius_km,delivery_rate_per_km_pen,delivery_fee_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,[...args,storeCode])
  }else if(resource==='vacancies'){

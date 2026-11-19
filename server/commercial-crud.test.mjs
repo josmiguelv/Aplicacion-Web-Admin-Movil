@@ -51,7 +51,24 @@ try{
  const otherCookie=(await request('/api/admin/login',{method:'POST',data:{email:otherEmail,password}})).cookie
  assert.ok(cookie&&superCookie&&otherCookie,'sesiones autenticadas')
  const root='/api/admin/tenants/'+tA,params={cookie}
- const storeSaved=await requireStatus(root+'/stores',{...params,method:'POST',data:store('crud-'+nonce)})
+ const invalidHours=await request(root+'/stores',{...params,method:'POST',data:{
+  ...store('crud-'+nonce),openingHours:{mon:{open:'11:00',close:''}}
+ }})
+ assert.equal(invalidHours.status,400)
+ assert.match(invalidHours.body.error,/Horario de atención inválido para el lunes/)
+ const incompleteGps=await request(root+'/stores',{...params,method:'POST',data:{
+  ...store('crud-'+nonce),latitude:-12.04,longitude:null
+ }})
+ assert.equal(incompleteGps.status,400)
+ assert.match(incompleteGps.body.error,/ambas coordenadas GPS/)
+ const invalidCoverage=await request(root+'/stores',{...params,method:'POST',data:{
+  ...store('crud-'+nonce),radiusKm:600
+ }})
+ assert.equal(invalidCoverage.status,400)
+ assert.match(invalidCoverage.body.error,/Cobertura máxima inválida/)
+ const storeSaved=await requireStatus(root+'/stores',{...params,method:'POST',data:{
+  ...store('crud-'+nonce),openingHours:{mon:{open:'11:00',close:'23:00'}}
+ }})
  const storeId=storeSaved.id
  const pay={storeId,mode:'pickup',method:'yape',enabled:true}
  assert.equal((await requireStatus(root+'/payments',{...params,method:'POST',data:pay})).enabled,true)
