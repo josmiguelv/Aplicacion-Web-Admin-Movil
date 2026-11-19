@@ -59,8 +59,10 @@ export function createFcmSender({env=process.env,fetchImpl=fetch,readFileImpl=re
   const secs=notice.expiresAt?Math.max(1,Math.min(2419200,Math.floor((new Date(notice.expiresAt).getTime()-Date.now())/1000))):86400
   const message={message:{
    topic:cfg.topic,notification:{title:notice.title,body:notice.message,image:url},
-   android:{ttl:secs+'s',priority:'HIGH',notification:{image:url}},
-   data:{notificationId:String(notice.id),appId:notice.appId,type:'promotion'}}}
+   android:{ttl:secs+'s',priority:'HIGH',notification:{image:url,channel_id:'pollosb3_promotions'}},
+   // Contrato nativo B3FirebaseMessagingService: marketing + title/body.
+   data:{notificationId:String(notice.id),appId:notice.appId,type:'marketing',
+    screen:'notifications',title:notice.title,body:notice.message}}}
   let response
   try{response=await fetchImpl('https://fcm.googleapis.com/v1/projects/'+cfg.projectId+'/messages:send',{
    method:'POST',headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json'},

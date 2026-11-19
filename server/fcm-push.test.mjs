@@ -86,6 +86,11 @@ try{
   assert.equal(m.notification.body,'Oferta')
   assert.ok(m.notification.image.startsWith('https://example.invalid/api/v1/mobile/notification-images/'))
   assert.equal(m.data.notificationId,id)
+  assert.equal(m.data.type,'marketing','Android descarta otros tipos en primer plano')
+  assert.equal(m.data.screen,'notifications','La app abre la pantalla de avisos')
+  assert.equal(m.data.title,'Promo CI')
+  assert.equal(m.data.body,'Oferta')
+  assert.equal(m.android.notification.channel_id,'pollosb3_promotions')
   called++
   return {ok:true,json:async()=>({name:'projects/pollosb3-84297/messages/'+called})}
  }
