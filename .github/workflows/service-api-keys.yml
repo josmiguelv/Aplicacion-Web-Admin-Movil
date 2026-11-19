@@ -48,3 +48,5 @@ jobs:
         run: node server/service-api-keys.test.mjs
       - name: Focused store deletion and product preview editing
         run: node server/catalog-operations.test.mjs
+      - name: Focused commercial CRUD — payments, promotions, catalog, apps and accounts
+        run: node server/commercial-crud.test.mjs

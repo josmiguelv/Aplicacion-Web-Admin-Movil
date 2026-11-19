@@ -119,3 +119,40 @@
 .ops-delete-confirm p{font-size:12px;line-height:1.6;margin:0}
 .ops-delete-confirm .ops-inline{margin:0}
 @media(max-width:620px){.ops-products-workspace .ops-product-list{grid-template-columns:1fr}.ops-product-preview{grid-template-columns:1fr}.ops-product-preview .ops-product-photo{max-height:200px}.ops-product-card>.button{align-self:stretch}}
+
+
+/* Gestión comercial CRUD: registros primero, formulario contextual y feedback local. */
+.ops-record-section .ops-store-toolbar{margin-bottom:14px}
+.ops-record-section .ops-store-toolbar h2{margin:0 0 5px}
+.ops-record-section .ops-store-toolbar p{margin:0}
+.ops-record-list{display:grid;gap:10px;margin:15px 0}
+.ops-record-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;border:1px solid #e0e7ec;background:#fff;border-radius:11px;padding:15px}
+.ops-record-row:hover{border-color:#c6d7e2}
+.ops-record-info{display:flex;flex-direction:column;min-width:0;flex:1 1 210px;gap:6px}
+.ops-record-info strong{color:#243f53;line-height:1.45;overflow-wrap:anywhere}
+.ops-record-info small{color:#647789;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.ops-record-status{align-self:flex-start;font-size:11px;font-weight:700;color:#7b5252;background:#f9eff0;border-radius:6px;padding:5px 9px}
+.ops-record-status.enabled{color:#286343;background:#ecf7ef}
+.ops-record-actions{display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.ops-record-actions .button{max-width:100%;min-height:38px}
+.ops-record-row>.ops-delete-confirm{flex-basis:100%;margin:2px 0 0}
+.ops-record-editor{display:grid;gap:15px;background:#f9fbfd;border:1px solid #dee7ef;border-radius:12px;padding:20px;margin-top:17px}
+.ops-record-editor h3{margin:0;font-size:16px;font-weight:750;color:#24455e}
+.ops-record-editor label{max-width:100%}
+.ops-record-editor>.ops-grid{margin:0}
+.ops-record-editor .ops-record-actions{margin-top:2px}
+.ops-record-editor>.ops-action-feedback{margin-top:0!important}
+.ops-record-section>.ops-action-feedback{margin-top:10px!important}
+.ops-record-editor>.ops-record-info{flex:none}
+.ops-record-editor .ops-advanced{margin:0}
+.ops-record-section>details.ops-advanced{margin-top:15px}
+.ops-record-section>details.ops-advanced .ops-record-editor{margin:12px 0 15px}
+.ops-record-section select{width:100%;max-width:680px}
+@media(max-width:680px){
+ .ops-record-row{align-items:flex-start;gap:12px}
+ .ops-record-row>.ops-record-actions{width:100%}
+ .ops-record-row>.ops-record-actions>.button{flex:1 1 115px}
+ .ops-record-editor{padding:14px}
+ .ops-record-editor .ops-record-actions>.button{flex:1 1 140px}
+ .ops-record-section>.ops-store-toolbar>.button{width:100%}
+}

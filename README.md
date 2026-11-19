@@ -170,3 +170,36 @@ fotos de productos todavía en borrador: solo sesiones autorizadas del tenant
 pueden verlas. No se modifica la API pública de Android ni se publican
 productos automáticamente. La visibilidad móvil exige `active=true`
 y publicar una nueva revisión. Ninguna migración de base de datos es necesaria.
+
+
+## Gestión comercial: registros visibles y editables
+
+Todas las secciones muestran sus registros guardados (borradores) antes del
+formulario cuando aplica. Guardar una configuración no reemplaza el catálogo
+público; solo **Publicar cambios** actualiza la revisión móvil.
+
+- **Locales:** lista y edición existentes; eliminación con confirmación.
+- **Carta:** lista de productos con foto y estado; editar y eliminar con confirmación.
+- **Promociones:** lista de promociones activas/inactivas; editar usa el ID del
+  registro existente, eliminar requiere confirmación.
+- **Pagos por local y modalidad:** `GET /api/admin/tenants/{tenantId}/payments`
+  muestra todas las combinaciones guardadas, también las deshabilitadas.
+  El `POST` existente es un UPSERT por `storeId + mode + method`, por lo que
+  habilitar/deshabilitar actualiza sin duplicar. La combinación se fija al
+  editar, para agregar otra se usa **Nuevo medio de pago**.
+  Eliminar: `DELETE /api/admin/tenants/{tenantId}/payments/{storeId}/{mode}/{method}`
+  con JSON `{"confirm":true}`.
+- **Vacantes:** listado de registros activos/inactivos, editar sin duplicar,
+  eliminar bajo confirmación y vista previa privada de imágenes.
+- **Libro de Reclamaciones:** mostrar URL guardada de la aplicación elegida,
+  modificar o quitar enlace de borrador con confirmación.
+- **Aplicaciones:** lista, selección y revisión de publicación. Eliminar el
+  registro solo cuando nunca fue publicado; después se protege con HTTP 409.
+- **Usuarios (SUPER_ADMIN):** lista y edición de correo, estado y contraseña;
+  desactivar cierra sesiones y conserva el registro de auditoría.
+
+Eliminaciones en borrador (todas con sesión autorizada y `{"confirm":true}`):
+`DELETE .../products/{id}`, `DELETE .../promotions/{id}`,
+`DELETE .../vacancies/{id}`. Se auditan y requieren una nueva publicación
+para afectar la aplicación. No se tocan los proyectos TU VERSO ni Android.
+Sin migraciones de esquema.

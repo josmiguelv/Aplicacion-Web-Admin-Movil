@@ -185,6 +185,42 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(url.pathname==='/api/admin/tenants'&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const b=await body(req);if(!word(b.name,180))throw bad(400,'Nombre de empresa inválido');const x=await sql('INSERT INTO tenants(name) VALUES($1) RETURNING id,name,active',[b.name.trim()]);await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[x.rows[0].id,user.id,'TENANT_CREATED',x.rows[0].id]);return json(res,201,x.rows[0])}
  const userMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users$/);
  if(userMatch&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const id=userMatch[1];await tenantOf(user,id);const b=await body(req);if(!word(b.email,254)||!word(b.password,512)||b.password.length<14)throw bad(400,'Correo o clave inválida (mínimo 14 caracteres)');const salt=randomBytes(16).toString('hex'),hash=`scrypt:${salt}:${scryptSync(b.password,salt,64).toString('hex')}`;const x=await sql('INSERT INTO admin_users(email,password_hash,role,tenant_id) VALUES(lower($1),$2,$3,$4) RETURNING id,email',[b.email,hash,'TENANT_ADMIN',id]);return json(res,201,x.rows[0])}
+ const userList=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users$/);
+ if(userList&&req.method==='GET'){
+  if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');
+  await tenantOf(user,userList[1]);
+  const q=await sql("SELECT id,email,active,created_at FROM admin_users WHERE tenant_id=$1 AND role='TENANT_ADMIN' ORDER BY created_at DESC",[userList[1]]);
+  return json(res,200,{items:q.rows});
+ }
+ const accountAction=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users\/([0-9a-f-]{36})$/);
+ if(accountAction&&(req.method==='PUT'||req.method==='DELETE')){
+  if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');
+  const tenantId=accountAction[1],accountId=accountAction[2];
+  await tenantOf(user,tenantId);
+  if(!uuid(accountId))throw bad(400,'Usuario inválido');
+  const b=await body(req);
+  const client=await pool.connect();
+  try{
+   await client.query('BEGIN');
+   const found=await client.query("SELECT id,email,active FROM admin_users WHERE id=$1 AND tenant_id=$2 AND role='TENANT_ADMIN' FOR UPDATE",[accountId,tenantId]);
+   if(!found.rowCount)throw bad(404,'Administrador de empresa no encontrado');
+   let result;
+   if(req.method==='DELETE'){
+    if(b.confirm!==true)throw bad(400,'Confirmación obligatoria');
+    result=await client.query("UPDATE admin_users SET active=false WHERE id=$1 AND tenant_id=$2 AND role='TENANT_ADMIN' RETURNING id,email,active",[accountId,tenantId]);
+    await client.query('DELETE FROM admin_sessions WHERE user_id=$1',[accountId]);
+   }else{
+    if(!word(b.email,254)||typeof b.active!=='boolean'||b.password!==undefined&&(typeof b.password!=='string'||b.password.length<14||b.password.length>512))throw bad(400,'Datos de administrador inválidos');
+    const salt=randomBytes(16).toString('hex');
+    const hash=b.password?'scrypt:'+salt+':'+scryptSync(b.password,salt,64).toString('hex'):null;
+    result=await client.query("UPDATE admin_users SET email=lower($3),active=$4,password_hash=COALESCE($5,password_hash) WHERE id=$1 AND tenant_id=$2 AND role='TENANT_ADMIN' RETURNING id,email,active",[accountId,tenantId,b.email.trim(),b.active,hash]);
+    if(hash||!b.active)await client.query('DELETE FROM admin_sessions WHERE user_id=$1',[accountId]);
+   }
+   await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,req.method==='DELETE'?'TENANT_ADMIN_DISABLED':'TENANT_ADMIN_UPDATED',accountId]);
+   await client.query('COMMIT');
+   return json(res,200,result.rows[0]);
+  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
+ }
  const asset=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/images$/);
  if(asset&&req.method==='POST'){
   const tenantId=asset[1];await tenantOf(user,tenantId);const bytes=await imageBody(req),mime=imageMime(bytes);
@@ -224,6 +260,45 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    await client.query('COMMIT');
    return json(res,200,{deleted:true,id:storeId,name:existing.rows[0].name,requiresPublish:true});
   }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
+ }
+ // Catálogo en borrador: no modifica una publicación vigente hasta Publicar.
+ const removeEntity=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/(products|promotions|vacancies)\/([0-9a-f-]{36})$/);
+ const removePayment=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/payments\/([0-9a-f-]{36})\/(delivery|pickup|dine_in)\/(yape|plin|card|cash)$/);
+ const removeApp=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/apps\/(com\.[a-zA-Z0-9_.]+)$/);
+ if((removeEntity||removePayment||removeApp)&&req.method==='DELETE'){
+  const tenantId=(removeEntity||removePayment||removeApp)[1];
+  await tenantOf(user,tenantId);
+  const b=await body(req);
+  if(b.confirm!==true)throw bad(400,'Debes confirmar la eliminación');
+  const client=await pool.connect();
+  try{
+   await client.query('BEGIN');
+   let result,action,target;
+   if(removeEntity){
+    const table={products:'products',promotions:'promotions',vacancies:'job_vacancies'}[removeEntity[2]];
+    target=removeEntity[3];
+    if(!uuid(target))throw bad(400,'Identificador inválido');
+    result=await client.query('DELETE FROM '+table+' WHERE tenant_id=$1 AND id=$2 RETURNING id',[tenantId,target]);
+    action=removeEntity[2].toUpperCase()+'_DELETED';
+   }else if(removePayment){
+    target=removePayment[2]+'/'+removePayment[3]+'/'+removePayment[4];
+    if(!uuid(removePayment[2]))throw bad(400,'Sede inválida');
+    result=await client.query('DELETE FROM payment_methods WHERE tenant_id=$1 AND store_id=$2 AND mode=$3 AND method=$4 RETURNING store_id',[tenantId,removePayment[2],removePayment[3],removePayment[4]]);
+    action='PAYMENT_DELETED';
+   }else{
+    target=removeApp[2];
+    // No eliminar aplicaciones ya publicadas: dispositivos instalados podrían perder servicio.
+    const registered=await client.query('SELECT published_revision FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2 FOR UPDATE',[tenantId,target]);
+    if(!registered.rowCount)throw bad(404,'Aplicación no encontrada');
+    if(registered.rows[0].published_revision>0)throw bad(409,'La aplicación ya está publicada. No es seguro eliminar su registro.');
+    result=await client.query('DELETE FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2 AND published_revision=0 RETURNING id',[tenantId,target]);
+    action='APP_REGISTRATION_DELETED';
+   }
+   if(!result.rowCount)throw bad(404,'Registro no encontrado');
+   await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,action,target]);
+   await client.query('COMMIT');
+   return json(res,200,{deleted:true,requiresPublish:!removeApp});
+  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
  }
  const m=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/(stores|products|promotions|payments|apps|publish|vacancies|complaints)$/);
  if(!m)throw bad(404,'Ruta no encontrada');const tenantId=m[1],resource=m[2];await tenantOf(user,tenantId);
@@ -265,7 +340,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   if(!word(b.name,180)||!safeNumber(b.pricePen)||b.pricePen<0||!bool(b.active)||b.imageUrl&&(!/^https:\/\//.test(b.imageUrl)&&!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/.test(b.imageUrl)||b.imageUrl.length>1024))throw bad(400,'Producto inválido');const args=[tenantId,b.name,b.description||'',b.category||'',b.pricePen,b.imageUrl||null,b.active];
   result=b.id&&uuid(b.id)?await client.query(`UPDATE products SET name=$2,description=$3,category=$4,price_pen=$5,image_url=$6,active=$7,updated_at=now() WHERE tenant_id=$1 AND id=$8 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO products(tenant_id,name,description,category,price_pen,image_url,active) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,args)
  }else if(resource==='promotions'){
-  if(!word(b.title,180)||!bool(b.active))throw bad(400,'Promoción inválida');const args=[tenantId,b.title,b.startsAt||null,b.endsAt||null,b.active];result=await client.query(`INSERT INTO promotions(tenant_id,title,starts_at,ends_at,active) VALUES($1,$2,$3,$4,$5) RETURNING *`,args)
+  if(!word(b.title,180)||!bool(b.active)||b.id!==undefined&&!uuid(b.id))throw bad(400,'Promoción inválida');const starts=b.startsAt||null,ends=b.endsAt||null;if(starts&&!Number.isFinite(Date.parse(starts))||ends&&!Number.isFinite(Date.parse(ends))||starts&&ends&&Date.parse(ends)<Date.parse(starts))throw bad(400,'Fechas de promoción inválidas');const args=[tenantId,b.title.trim(),starts,ends,b.active];result=b.id?await client.query(`UPDATE promotions SET title=$2,starts_at=$3,ends_at=$4,active=$5 WHERE tenant_id=$1 AND id=$6 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO promotions(tenant_id,title,starts_at,ends_at,active) VALUES($1,$2,$3,$4,$5) RETURNING *`,args)
  }else if(resource==='payments'){
   if(!uuid(b.storeId)||!mode(b.mode)||!method(b.method)||!bool(b.enabled))throw bad(400,'Pago inválido');const exists=await client.query('SELECT id FROM stores WHERE id=$1 AND tenant_id=$2',[b.storeId,tenantId]);if(!exists.rowCount)throw bad(404,'Local no encontrado');result=await client.query(`INSERT INTO payment_methods(tenant_id,store_id,mode,method,enabled) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,store_id,mode,method) DO UPDATE SET enabled=EXCLUDED.enabled RETURNING *`,[tenantId,b.storeId,b.mode,b.method,b.enabled]);
  }else if(resource==='apps'){
