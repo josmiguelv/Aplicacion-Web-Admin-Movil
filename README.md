@@ -365,8 +365,11 @@ Para instalaciones actuales, ejecutar **solo**
 `server/migrations/008-notification-product.sql` antes de actualizar el backend.
 La migración es aditiva e idempotente y no reenvía notificaciones.
 
-**Apertura en Android:** el backend entrega el ID, pero la versión existente
-de la app solo muestra un enlace genérico a la carta. Para abrir la ficha
-del producto y añadirlo al carrito desde la notificación, el cliente móvil
-deberá utilizar `productId` y comprobar su vigencia contra el catálogo
-publicado. No se modifica ni se recompila Android en este cambio.
+**Apertura en Android:** en la rama Pollos B3
+`feat/pollos-b3-v11-webview-fulfillment` se agregó compatibilidad con
+`productId`: la pantalla del aviso muestra **Ver producto y pedir** únicamente
+si está publicado, existe y está disponible en el catálogo; en avisos sin
+producto se mantiene **Explorar la carta**. Reutiliza el flujo normal de
+selección de modalidad, ficha y carrito: no realiza compras automáticas.
+Es necesario generar e instalar una APK con este cambio para verlo en el
+teléfono; una APK previa no se actualiza sola.
