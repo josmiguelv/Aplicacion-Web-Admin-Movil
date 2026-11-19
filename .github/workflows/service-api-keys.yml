@@ -46,3 +46,5 @@ jobs:
         run: node --test server/tuverso-credential-format.test.mjs
       - name: Focused PostgreSQL and HTTP integration tests
         run: node server/service-api-keys.test.mjs
+      - name: Focused store deletion and product preview editing
+        run: node server/catalog-operations.test.mjs

@@ -192,6 +192,39 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'IMAGE_UPLOADED',x.rows[0].id]);
   return json(res,201,{url:'/api/v1/mobile/images/'+x.rows[0].id,id:x.rows[0].id,mime})
  }
+ // Vista previa privada: imágenes aún no publicadas, visibles solo al tenant.
+ const preview=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/images\/([0-9a-f-]{36})$/);
+ if(preview&&req.method==='GET'){
+  const tenantId=preview[1],imageId=preview[2];
+  await tenantOf(user,tenantId);
+  if(!uuid(imageId))throw bad(400,'Imagen inválida');
+  const picture=await sql('SELECT mime,content FROM product_images WHERE tenant_id=$1 AND id=$2',[tenantId,imageId]);
+  if(!picture.rowCount)throw bad(404,'Imagen no encontrada');
+  res.writeHead(200,{'Content-Type':picture.rows[0].mime,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'});
+  return res.end(picture.rows[0].content);
+ }
+ // Eliminación explícita de sedes, sin cascada en autorizaciones TU VERSO.
+ const storeDelete=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/stores\/([0-9a-f-]{36})$/);
+ if(storeDelete&&req.method==='DELETE'){
+  const tenantId=storeDelete[1],storeId=storeDelete[2];
+  await tenantOf(user,tenantId);
+  if(!uuid(storeId))throw bad(400,'Sede inválida');
+  const payload=await body(req);
+  if(payload.confirm!==true)throw bad(400,'Confirma expresamente la eliminación de la sede');
+  const client=await pool.connect();
+  try{
+   await client.query('BEGIN');
+   const existing=await client.query('SELECT id,name FROM stores WHERE tenant_id=$1 AND id=$2 FOR UPDATE',[tenantId,storeId]);
+   if(!existing.rowCount)throw bad(404,'Sede no encontrada');
+   const bindings=await client.query('SELECT 1 FROM integration_bindings WHERE tenant_id=$1 AND store_id=$2 LIMIT 1',[tenantId,storeId]);
+   if(bindings.rowCount)throw bad(409,'La sede tiene asociaciones con TU VERSO. Retíralas antes de eliminarla.');
+   // La FK ON DELETE CASCADE elimina los medios de pago propios de la sede.
+   await client.query('DELETE FROM stores WHERE tenant_id=$1 AND id=$2',[tenantId,storeId]);
+   await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'STORE_DELETED',storeId]);
+   await client.query('COMMIT');
+   return json(res,200,{deleted:true,id:storeId,name:existing.rows[0].name,requiresPublish:true});
+  }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
+ }
  const m=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/(stores|products|promotions|payments|apps|publish|vacancies|complaints)$/);
  if(!m)throw bad(404,'Ruta no encontrada');const tenantId=m[1],resource=m[2];await tenantOf(user,tenantId);
  if(req.method==='GET'){

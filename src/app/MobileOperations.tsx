@@ -7,7 +7,7 @@ type DayHours = {open:string;close:string}|{closed:true}
 type OpeningHours = Partial<Record<'sun'|'mon'|'tue'|'wed'|'thu'|'fri'|'sat',DayHours>>
 const weekdays = [{id:'mon',label:'Lunes'},{id:'tue',label:'Martes'},{id:'wed',label:'Miércoles'},{id:'thu',label:'Jueves'},{id:'fri',label:'Viernes'},{id:'sat',label:'Sábado'},{id:'sun',label:'Domingo'}] as const
 type StoreRow = { code: string; opening_hours: OpeningHours|null; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
-type ProductRow = {id:string;name:string;price_pen:number;active:boolean}
+type ProductRow = {id:string;name:string;description:string;category:string;price_pen:number|string;image_url:string|null;active:boolean}
 type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;schedule:string;employment_type:string;location_label:string;image_url:string|null;whatsapp_phone:string;active:boolean}
 const modes = [{key:'delivery',name:'Delivery'},{key:'pickup',name:'Recojo'},{key:'dine_in',name:'Comer en tienda'}]
 const payments = [{key:'yape',name:'Yape'},{key:'plin',name:'Plin'},{key:'card',name:'Tarjeta'},{key:'cash',name:'Efectivo'}]
@@ -19,7 +19,7 @@ const operationTabs = [
  {id:'extras',label:'Más opciones',subtitle:'Vacantes y reclamaciones',icon:Settings2},
  {id:'publish',label:'Publicar',subtitle:'Actualizar aplicaciones',icon:Send},
 ] as const
-async function api<T>(path: string, method: 'GET'|'POST'|'PUT'='GET', data?:unknown): Promise<T> {
+async function api<T>(path: string, method: 'GET'|'POST'|'PUT'|'DELETE'='GET', data?:unknown): Promise<T> {
  const res=await fetch(path,{method,credentials:'include',headers:data?{'Content-Type':'application/json'}:undefined,body:data?JSON.stringify(data):undefined,cache:'no-store'})
  const result=await res.json().catch(()=>({error:'Respuesta inválida'}))
  if(!res.ok)throw new Error(result.error||`HTTP ${res.status}`)
@@ -31,12 +31,15 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('')
  const [activeTab,setActiveTab]=useState<OperationsTab>('stores')
  const [showStoreEditor,setShowStoreEditor]=useState(false)
+ const [confirmDeleteStore,setConfirmDeleteStore]=useState(false)
+ const [showProductEditor,setShowProductEditor]=useState(false)
  const [feedbackScope,setFeedbackScope]=useState('general')
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
  const [stores,setStores]=useState<StoreRow[]>([]),[products,setProducts]=useState<ProductRow[]>([]),[vacancies,setVacancies]=useState<VacancyRow[]>([])
  const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,openingHours:{} as OpeningHours})
  const [store,setStore]=useState(emptyStore)
- const [product,setProduct]=useState({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false})
+ const emptyProduct=()=>({id:'',name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false})
+ const [product,setProduct]=useState(emptyProduct)
  const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',schedule:'',employmentType:'',locationLabel:'',imageUrl:'',whatsappPhone:'',active:false})
  const [vacancy,setVacancy]=useState(emptyVacancy)
  const [paymentStore,setPaymentStore]=useState(''),[paymentMode,setPaymentMode]=useState('delivery'),[paymentMethod,setPaymentMethod]=useState('yape'),[paymentEnabled,setPaymentEnabled]=useState(true)
@@ -52,9 +55,19 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  useEffect(()=>{if(!session)return;if(session.role==='SUPER_ADMIN'&&!embeddedSession)void api<{tenants:Tenant[]}>('/api/admin/tenants').then(r=>setTenants(r.tenants)).catch(e=>setError(e.message))},[session])
  const refresh=async(id=tenantId)=>{if(!id)return;const [st,pr,jobs,apps]=await Promise.all([api<{items:StoreRow[]}>(`/api/admin/tenants/${id}/stores`),api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`)]);setStores(st.items);setProducts(pr.items);setVacancies(jobs.items);const current=apps.items.find(x=>x.app_id===appId)??(appId===''&&apps.items.length===1?apps.items[0]:undefined);if(current&&appId==='')setAppId(current.app_id);setComplaintsBookUrl(current?.complaints_book_url||'')}
  useEffect(()=>{if(session&&tenantId)void refresh(tenantId).catch(e=>{setFeedbackScope('general');setError(e.message)})},[tenantId,session])
- useEffect(()=>{setActiveTab('stores');setShowStoreEditor(false);setMessage('');setError('');setFeedbackScope('general')},[tenantId])
+ useEffect(()=>{setActiveTab('stores');setShowStoreEditor(false);setShowProductEditor(false);setConfirmDeleteStore(false);setProduct(emptyProduct());setMessage('');setError('');setFeedbackScope('general')},[tenantId])
  const [copiedStoreCode,setCopiedStoreCode]=useState('')
  const [copyError,setCopyError]=useState('')
+ const productPreview=(imageUrl:string|null|undefined)=>{
+  if(!imageUrl)return ''
+  const matched=imageUrl.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/i)
+  return matched?'/api/admin/tenants/'+tenantId+'/images/'+matched[1]:/^https:\/\//.test(imageUrl)?imageUrl:''
+ }
+ const selectProduct=(item:ProductRow)=>{
+  setProduct({id:item.id,name:item.name,description:item.description||'',category:item.category||'',
+   pricePen:String(item.price_pen),imageUrl:item.image_url||'',active:item.active})
+  setShowProductEditor(true);setMessage('');setError('')
+ }
  const copyStoreCode=async(code:string)=>{
   try{await navigator.clipboard.writeText(code);setCopiedStoreCode(code);setCopyError('')}
   catch{setCopyError(code)}
@@ -85,11 +98,96 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   {activeTab==='access'&&session.role==='SUPER_ADMIN'&&!embeddedSession&&<section className="ops-panel"><h2>Acceso del administrador de empresa</h2><p>Solo el superadministrador puede crear credenciales para el tenant seleccionado.</p><div className="ops-inline"><input type="email" placeholder="Correo del administrador" value={newTenantEmail} onChange={e=>setNewTenantEmail(e.target.value)}/><input type="password" placeholder="Contraseña segura (mín. 14)" value={newTenantPassword} onChange={e=>setNewTenantPassword(e.target.value)}/><button className="button button-secondary" disabled={loading} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/users`,'POST',{email:newTenantEmail,password:newTenantPassword});setNewTenantPassword('');setNewTenantEmail('');setMessage('Administrador creado exclusivamente para esta empresa.')},'access')}>Crear administrador</button></div>{feedback('access')}</section>}
   {activeTab==='stores'&&<section className="ops-panel ops-store-workspace">
  <div className="ops-store-toolbar"><div><h2><Store size={19}/> Locales registrados</h2><p>Elige una sede para editarla o crea un local nuevo.</p></div>
- <button className="button button-primary" type="button" onClick={()=>{setStore(emptyStore());setShowStoreEditor(true);setError('');setMessage('')}}>Agregar local</button></div>
- {stores.length>0?<div className="ops-list">{stores.map(s=><div key={s.id} className="ops-store-entry"><button type="button" className="ops-row" onClick={()=>{setStore({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,openingHours:s.opening_hours||{}});setShowStoreEditor(true);setError('');setMessage('')}}><span>{s.name} · ID: {s.code}</span><span>Editar sede</span><small>{s.active?'Activo':'Desactivado'} · D:{s.delivery_enabled?'Sí':'No'} R:{s.pickup_enabled?'Sí':'No'} M:{s.dine_in_enabled?'Sí':'No'}</small></button><button type="button" className="button button-secondary" aria-label={`Copiar ID de ${s.name}`} onClick={()=>void copyStoreCode(s.code)}><Copy size={15}/>{copiedStoreCode===s.code?'Copiado':'Copiar ID'}</button>{copyError===s.code&&<small className="ops-copy-error" role="alert">No se pudo copiar. Selecciona el código y usa Ctrl+C.</small>}</div>)}</div>:<p className="ops-empty">Todavía no hay locales. Agrega el primero para configurar su dirección y horarios.</p>}
- {(showStoreEditor||stores.length===0)&&<div className="ops-store-editor"><div className="ops-inline"><h3>{store.id?'Editar sede':'Nueva sede'}</h3></div><div className="ops-grid"><div className="ops-store-code"><label>ID de la sede<input aria-label="ID de la sede" value={store.code} readOnly={!!store.id} maxLength={80} placeholder="Ej. b3-nogales" onChange={e=>setStore({...store,code:e.target.value})}/><small>{store.id?'ID permanente: no se puede editar.':'Se define al crear y no podrá cambiarse. Usa minúsculas, números y guiones.'}</small></label><button type="button" className="button button-secondary" disabled={!store.code} onClick={()=>void copyStoreCode(store.code)}><Copy size={15}/> {copiedStoreCode===store.code?'Copiado':'Copiar código'}</button>{copyError===store.code&&<small className="ops-copy-error" role="alert">No se pudo copiar. Selecciona el código y usa Ctrl+C.</small>}</div><label>Local<input value={store.name} onChange={e=>setStore({...store,name:e.target.value})}/></label><label>Dirección verificada<input value={store.address} onChange={e=>setStore({...store,address:e.target.value})}/></label></div><details className="ops-advanced"><summary>Ubicación GPS, cobertura y tarifa de delivery</summary><div className="ops-grid"><label>Latitud GPS<input inputMode="decimal" value={store.latitude} onChange={e=>setStore({...store,latitude:e.target.value})}/></label><label>Longitud GPS<input inputMode="decimal" value={store.longitude} onChange={e=>setStore({...store,longitude:e.target.value})}/></label><label>Cobertura máxima (km, vacío = sin límite)<input type="number" min="0.1" max="500" step="0.1" placeholder="Sin límite" value={store.radiusKm} onChange={e=>setStore({...store,radiusKm:e.target.value})}/></label><label>Modalidad de tarifa de Delivery<select value={store.deliveryPricingMode} onChange={e=>setStore({...store,deliveryPricingMode:e.target.value as 'PER_KM'|'FIXED'})}><option value="PER_KM">Por kilómetro</option><option value="FIXED">Costo fijo de Delivery</option></select></label>{store.deliveryPricingMode==='FIXED'?<label>Costo fijo de Delivery (S/)<input type="number" min="0" step="0.01" placeholder="Ej. 10.00" value={store.deliveryFeePen} onChange={e=>setStore({...store,deliveryFeePen:e.target.value})}/></label>:<label>Tarifa por km de Delivery (S/)<input type="number" min="0" step="0.01" placeholder="Ej. 2.50" value={store.deliveryRatePerKmPen} onChange={e=>setStore({...store,deliveryRatePerKmPen:e.target.value})}/></label>}</div></details><div className="ops-switches">{(['active','delivery_enabled','pickup_enabled','dine_in_enabled'] as const).map(k=><label key={k}><input type="checkbox" checked={store[k]} onChange={e=>setStore({...store,[k]:e.target.checked})}/>{({active:'Local activo',delivery_enabled:'Delivery',pickup_enabled:'Recojo',dine_in_enabled:'Comer en tienda'})[k]}</label>)}</div><details className="ops-advanced ops-hours"><summary>Horarios de atención {Object.keys(store.openingHours).length?'· Configurados':''}</summary><p>Solo los días que completes se mostrarán en la aplicación. Los campos vacíos no se publican. Marca «Cerrado» cuando el local no atienda ese día.</p><div className="ops-grid">{weekdays.map(day=>{const h=store.openingHours[day.id];const closed=!!h&&'closed' in h;const setHours=(next:DayHours|undefined)=>setStore(prev=>{const hours={...prev.openingHours};if(next)hours[day.id]=next;else delete hours[day.id];return {...prev,openingHours:hours}});return <div key={day.id} className="ops-row"><strong>{day.label}</strong><label className="ops-check"><input type="checkbox" checked={closed} onChange={e=>setHours(e.target.checked?{closed:true}:undefined)}/>Cerrado</label><label>Apertura<input type="time" disabled={closed} value={h&&!closed&&'open' in h?h.open:''} onChange={e=>{const v=e.target.value;if(!v){setHours(undefined);return}setHours({open:v,close:h&&!closed&&'close' in h?h.close:''})}}/></label><label>Cierre<input type="time" disabled={closed} value={h&&!closed&&'close' in h?h.close:''} onChange={e=>{const v=e.target.value;if(!v){setHours(undefined);return}setHours({open:h&&!closed&&'open' in h?h.open:'',close:v})}}/></label></div>})}</div></details><button className="button button-primary" disabled={loading} onClick={()=>void act(async()=>{if(!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(store.code)||store.code.length<2||store.code.length>80)throw new Error('Completa el ID de la sede con minúsculas, números y guiones (2 a 80 caracteres)');const saved=await api<StoreRow>(`/api/admin/tenants/${tenantId}/stores`,'POST',{...store,openingHours:Object.keys(store.openingHours).length?store.openingHours:null,latitude:store.latitude?Number(store.latitude):null,longitude:store.longitude?Number(store.longitude):null,radiusKm:store.radiusKm===''?null:Number(store.radiusKm),deliveryRatePerKmPen:store.deliveryPricingMode==='PER_KM'&&store.deliveryRatePerKmPen!==''?Number(store.deliveryRatePerKmPen):null,deliveryFeePen:store.deliveryPricingMode==='FIXED'&&store.deliveryFeePen!==''?Number(store.deliveryFeePen):null});setStore(v=>({...v,id:saved.id,code:saved.code}));await refresh();setMessage('Sede guardada. El ID permanece fijo; puedes editar los demás datos.')},'store')}>Guardar local</button>{feedback('store')}</div>}
+ <button className="button button-primary" type="button" onClick={()=>{setStore(emptyStore());setShowStoreEditor(true);setConfirmDeleteStore(false);setError('');setMessage('')}}>Agregar local</button></div>
+ {stores.length>0?<div className="ops-list">{stores.map(s=><div key={s.id} className="ops-store-entry"><button type="button" className="ops-row" onClick={()=>{setStore({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,openingHours:s.opening_hours||{}});setShowStoreEditor(true);setConfirmDeleteStore(false);setError('');setMessage('')}}><span>{s.name} · ID: {s.code}</span><span>Editar sede</span><small>{s.active?'Activo':'Desactivado'} · D:{s.delivery_enabled?'Sí':'No'} R:{s.pickup_enabled?'Sí':'No'} M:{s.dine_in_enabled?'Sí':'No'}</small></button><button type="button" className="button button-secondary" aria-label={`Copiar ID de ${s.name}`} onClick={()=>void copyStoreCode(s.code)}><Copy size={15}/>{copiedStoreCode===s.code?'Copiado':'Copiar ID'}</button>{copyError===s.code&&<small className="ops-copy-error" role="alert">No se pudo copiar. Selecciona el código y usa Ctrl+C.</small>}</div>)}</div>:<p className="ops-empty">Todavía no hay locales. Agrega el primero para configurar su dirección y horarios.</p>}
+ {feedbackScope==='storeDelete'&&!showStoreEditor&&feedback('storeDelete')}
+ {(showStoreEditor||stores.length===0)&&<div className="ops-store-editor"><div className="ops-inline"><h3>{store.id?'Editar sede':'Nueva sede'}</h3></div><div className="ops-grid"><div className="ops-store-code"><label>ID de la sede<input aria-label="ID de la sede" value={store.code} readOnly={!!store.id} maxLength={80} placeholder="Ej. b3-nogales" onChange={e=>setStore({...store,code:e.target.value})}/><small>{store.id?'ID permanente: no se puede editar.':'Se define al crear y no podrá cambiarse. Usa minúsculas, números y guiones.'}</small></label><button type="button" className="button button-secondary" disabled={!store.code} onClick={()=>void copyStoreCode(store.code)}><Copy size={15}/> {copiedStoreCode===store.code?'Copiado':'Copiar código'}</button>{copyError===store.code&&<small className="ops-copy-error" role="alert">No se pudo copiar. Selecciona el código y usa Ctrl+C.</small>}</div><label>Local<input value={store.name} onChange={e=>setStore({...store,name:e.target.value})}/></label><label>Dirección verificada<input value={store.address} onChange={e=>setStore({...store,address:e.target.value})}/></label></div><details className="ops-advanced"><summary>Ubicación GPS, cobertura y tarifa de delivery</summary><div className="ops-grid"><label>Latitud GPS<input inputMode="decimal" value={store.latitude} onChange={e=>setStore({...store,latitude:e.target.value})}/></label><label>Longitud GPS<input inputMode="decimal" value={store.longitude} onChange={e=>setStore({...store,longitude:e.target.value})}/></label><label>Cobertura máxima (km, vacío = sin límite)<input type="number" min="0.1" max="500" step="0.1" placeholder="Sin límite" value={store.radiusKm} onChange={e=>setStore({...store,radiusKm:e.target.value})}/></label><label>Modalidad de tarifa de Delivery<select value={store.deliveryPricingMode} onChange={e=>setStore({...store,deliveryPricingMode:e.target.value as 'PER_KM'|'FIXED'})}><option value="PER_KM">Por kilómetro</option><option value="FIXED">Costo fijo de Delivery</option></select></label>{store.deliveryPricingMode==='FIXED'?<label>Costo fijo de Delivery (S/)<input type="number" min="0" step="0.01" placeholder="Ej. 10.00" value={store.deliveryFeePen} onChange={e=>setStore({...store,deliveryFeePen:e.target.value})}/></label>:<label>Tarifa por km de Delivery (S/)<input type="number" min="0" step="0.01" placeholder="Ej. 2.50" value={store.deliveryRatePerKmPen} onChange={e=>setStore({...store,deliveryRatePerKmPen:e.target.value})}/></label>}</div></details><div className="ops-switches">{(['active','delivery_enabled','pickup_enabled','dine_in_enabled'] as const).map(k=><label key={k}><input type="checkbox" checked={store[k]} onChange={e=>setStore({...store,[k]:e.target.checked})}/>{({active:'Local activo',delivery_enabled:'Delivery',pickup_enabled:'Recojo',dine_in_enabled:'Comer en tienda'})[k]}</label>)}</div><details className="ops-advanced ops-hours"><summary>Horarios de atención {Object.keys(store.openingHours).length?'· Configurados':''}</summary><p>Solo los días que completes se mostrarán en la aplicación. Los campos vacíos no se publican. Marca «Cerrado» cuando el local no atienda ese día.</p><div className="ops-grid">{weekdays.map(day=>{const h=store.openingHours[day.id];const closed=!!h&&'closed' in h;const setHours=(next:DayHours|undefined)=>setStore(prev=>{const hours={...prev.openingHours};if(next)hours[day.id]=next;else delete hours[day.id];return {...prev,openingHours:hours}});return <div key={day.id} className="ops-row"><strong>{day.label}</strong><label className="ops-check"><input type="checkbox" checked={closed} onChange={e=>setHours(e.target.checked?{closed:true}:undefined)}/>Cerrado</label><label>Apertura<input type="time" disabled={closed} value={h&&!closed&&'open' in h?h.open:''} onChange={e=>{const v=e.target.value;if(!v){setHours(undefined);return}setHours({open:v,close:h&&!closed&&'close' in h?h.close:''})}}/></label><label>Cierre<input type="time" disabled={closed} value={h&&!closed&&'close' in h?h.close:''} onChange={e=>{const v=e.target.value;if(!v){setHours(undefined);return}setHours({open:h&&!closed&&'open' in h?h.open:'',close:v})}}/></label></div>})}</div></details><button className="button button-primary" disabled={loading} onClick={()=>void act(async()=>{if(!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(store.code)||store.code.length<2||store.code.length>80)throw new Error('Completa el ID de la sede con minúsculas, números y guiones (2 a 80 caracteres)');const saved=await api<StoreRow>(`/api/admin/tenants/${tenantId}/stores`,'POST',{...store,openingHours:Object.keys(store.openingHours).length?store.openingHours:null,latitude:store.latitude?Number(store.latitude):null,longitude:store.longitude?Number(store.longitude):null,radiusKm:store.radiusKm===''?null:Number(store.radiusKm),deliveryRatePerKmPen:store.deliveryPricingMode==='PER_KM'&&store.deliveryRatePerKmPen!==''?Number(store.deliveryRatePerKmPen):null,deliveryFeePen:store.deliveryPricingMode==='FIXED'&&store.deliveryFeePen!==''?Number(store.deliveryFeePen):null});setStore(v=>({...v,id:saved.id,code:saved.code}));await refresh();setMessage('Sede guardada. El ID permanece fijo; puedes editar los demás datos.')},'store')}>Guardar local</button>{feedback('store')}
+ {store.id&&<div className="ops-store-danger">
+  {!confirmDeleteStore?<button className="button button-secondary ops-delete-trigger" type="button" disabled={loading}
+    onClick={()=>{setConfirmDeleteStore(true);setError('');setMessage('')}}>Eliminar local</button>
+   : <div className="ops-delete-confirm" role="group" aria-label="Confirmar eliminación de local">
+      <strong>¿Eliminar «{store.name}» definitivamente?</strong>
+      <p>Se eliminarán el local y sus medios de pago configurados. Si tiene asociaciones con TU VERSO, la eliminación se bloqueará. El local seguirá visible en Android hasta que publiques nuevamente.</p>
+      <div className="ops-inline">
+       <button className="button button-secondary ops-delete-trigger" type="button" disabled={loading}
+        onClick={()=>void act(async()=>{
+         await api('/api/admin/tenants/'+tenantId+'/stores/'+store.id,'DELETE',{confirm:true})
+         setConfirmDeleteStore(false);setShowStoreEditor(false);setStore(emptyStore())
+         await refresh();setMessage('Local eliminado. Entra a Publicar cambios para retirarlo de la aplicación.')
+        },'storeDelete')}>Sí, eliminar local</button>
+       <button className="button button-secondary" type="button" disabled={loading}
+        onClick={()=>{setConfirmDeleteStore(false);setError('');setMessage('')}}>Cancelar</button>
+      </div>
+      {feedbackScope==='storeDelete'&&feedback('storeDelete')}
+     </div>}
+ </div>}
+ </div>}
  </section>}
-  {activeTab==='catalog'&&<section className="ops-panel"><h2><Package size={19}/> Catálogo de productos y fotografías</h2><div className="ops-grid"><label>Nombre<input value={product.name} onChange={e=>setProduct({...product,name:e.target.value})}/></label><label>Categoría<input value={product.category} onChange={e=>setProduct({...product,category:e.target.value})}/></label><label>Precio S/<input type="number" step="0.01" min="0" value={product.pricePen} onChange={e=>setProduct({...product,pricePen:e.target.value})}/></label><label>Descripción<input value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label><label>Imagen <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{const res=await fetch(`/api/admin/tenants/${tenantId}/images`,{method:'POST',credentials:'include',body:file});const data=await res.json();if(!res.ok)throw new Error(data.error||'No se pudo subir');setProduct(v=>({...v,imageUrl:data.url}));setMessage('Foto cargada. Guarda y publica el producto para mostrarla en Android.')},'productImage')}}/>{feedback('productImage')}</label><label>URL de imagen cargada<input readOnly value={product.imageUrl}/></label></div><label className="ops-check"><input type="checkbox" checked={product.active} onChange={e=>setProduct({...product,active:e.target.checked})}/>Producto disponible</label><button className="button button-primary" disabled={loading} onClick={()=>void act(async()=>{if(!product.name||product.pricePen==='')throw new Error('Completa el nombre y precio');await api(`/api/admin/tenants/${tenantId}/products`,'POST',{...product,pricePen:Number(product.pricePen)});setProduct({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false});await refresh();setMessage('Producto guardado como borrador.')},'product')}>Guardar producto</button>{feedback('product')}<p className="ops-hint">{products.length} productos registrados en esta empresa.</p></section>}
+  {activeTab==='catalog'&&<section className="ops-panel ops-products-workspace">
+   <div className="ops-store-toolbar"><div><h2><Package size={19}/> Productos guardados</h2>
+    <p>Consulta los productos, revisa sus imágenes y edítalos antes de publicarlos.</p></div>
+    <button className="button button-primary" type="button" disabled={loading}
+     onClick={()=>{setProduct(emptyProduct());setShowProductEditor(true);setMessage('');setError('')}}>Agregar producto</button>
+   </div>
+   <div className="ops-product-list">
+    {products.length===0?<p className="ops-empty">Todavía no hay productos. Puedes registrar el primero.</p>:
+     products.map(item=><article className="ops-product-card" key={item.id}>
+      <div className="ops-product-photo">
+       {productPreview(item.image_url)?<img src={productPreview(item.image_url)} alt={'Foto de '+item.name} loading="lazy"/>:<span>Sin fotografía</span>}
+      </div>
+      <div className="ops-product-info">
+       <strong>{item.name}</strong><small>{item.category||'Sin categoría'}</small>
+       <b>S/ {Number(item.price_pen).toFixed(2)}</b>
+       <span className={item.active?'ops-product-status active':'ops-product-status'}>
+        {item.active?'Disponible · pendiente de publicación':'No disponible'}
+       </span>
+      </div>
+      <button className="button button-secondary" type="button" onClick={()=>selectProduct(item)}>Editar</button>
+     </article>)}
+   </div>
+   {(showProductEditor||products.length===0)&&<div id="ops-product-editor" className="ops-store-editor">
+    <div className="ops-section-toolbar"><h3>{product.id?'Editar producto':'Nuevo producto'}</h3>
+     {products.length>0&&<button type="button" className="button button-secondary" onClick={()=>{setProduct(emptyProduct());setShowProductEditor(false);setMessage('');setError('')}}>Cerrar edición</button>}
+    </div>
+    <div className="ops-grid">
+     <label>Nombre<input value={product.name} maxLength={180} onChange={e=>setProduct({...product,name:e.target.value})}/></label>
+     <label>Categoría<input value={product.category} onChange={e=>setProduct({...product,category:e.target.value})}/></label>
+     <label>Precio (S/)<input type="number" step="0.01" min="0" value={product.pricePen}
+      onChange={e=>setProduct({...product,pricePen:e.target.value})}/></label>
+     <label>Descripción<input value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label>
+     <label>Fotografía del producto<input type="file" accept="image/png,image/jpeg,image/webp"
+      onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{
+       const response=await fetch('/api/admin/tenants/'+tenantId+'/images',{method:'POST',credentials:'include',body:file})
+       const data=await response.json();if(!response.ok)throw new Error(data.error||'No se pudo subir la fotografía')
+       setProduct(p=>({...p,imageUrl:data.url}))
+       setMessage('Fotografía cargada. Guarda el producto para conservar el cambio.')
+      },'productImage')}}/>
+      {feedback('productImage')}
+     </label>
+    </div>
+    <div className="ops-product-preview">
+     <div className="ops-product-photo">
+      {productPreview(product.imageUrl)?<img src={productPreview(product.imageUrl)} alt="Vista previa del producto" />:<span>Sin fotografía</span>}
+     </div>
+     <div><small>VISTA PREVIA EN EL ADMINISTRADOR</small>
+      <strong>{product.name||'Nombre del producto'}</strong>
+      <b>{product.pricePen!==''?'S/ '+Number(product.pricePen).toFixed(2):'Precio sin definir'}</b>
+      <small>Esta vista previa no publica el producto en Android.</small></div>
+    </div>
+    <label className="ops-check"><input type="checkbox" checked={product.active}
+      onChange={e=>setProduct({...product,active:e.target.checked})}/>Producto disponible al publicar</label>
+    <button className="button button-primary" type="button" disabled={loading} onClick={()=>void act(async()=>{
+     if(!product.name.trim()||product.pricePen==='')throw new Error('Completa el nombre y precio.')
+     const wasEditing=Boolean(product.id)
+     const saved=await api<ProductRow>('/api/admin/tenants/'+tenantId+'/products','POST',
+      {...product,pricePen:Number(product.pricePen)})
+     await refresh()
+     setProduct({...product,id:saved.id})
+     setMessage(wasEditing?'Producto actualizado. Revisa su tarjeta y publica cuando corresponda.':'Producto guardado. Ya aparece en la lista; publica cuando quieras mostrarlo en Android.')
+    },'product')}>{product.id?'Guardar cambios':'Guardar producto'}</button>
+    {feedback('product')}
+   </div>}
+  </section>}
   {activeTab==='extras'&&<section className="ops-panel"><h2><Store size={19}/> Trabaja con nosotros · Vacantes</h2>
    <p>Administra imágenes, puestos, requisitos y teléfono de postulaciones. Solo las vacantes activas aparecerán en Android después de publicar el catálogo. Desactiva una vacante para retirarla de la aplicación.</p>
    <div className="ops-grid">

@@ -146,3 +146,27 @@ Validación focalizada: abrir cada sección en escritorio y móvil; seleccionar
 sede existente y verificar que se carguen horarios y tarifa; editar/guardar
 sin alterar el ID de sede; crear/guardar producto; cargar imagen; publicar y
 confirmar el mensaje junto a **Publicar cambios**. No se requieren migraciones.
+
+
+### Eliminar locales con confirmación
+
+En **Configuración comercial → Locales**, elegir una sede, pulsar **Eliminar local**
+y confirmar. Ruta `DELETE /api/admin/tenants/{tenantId}/stores/{storeId}` con
+body `{"confirm":true}`. Requiere sesión autenticada y pertenencia al tenant.
+Las asociaciones con TU VERSO bloquean la operación (HTTP 409), sin cambios
+en TU VERSO. Los medios de pago propios del local se eliminan mediante
+la relación existente. Se registra `STORE_DELETED` en la auditoría.
+El catálogo previamente publicado sigue igual hasta **Publicar cambios**.
+
+### Productos guardados: listado, edición y vista previa
+
+**Carta** muestra todos los productos registrados de la empresa, tanto activos
+como inactivos, con imagen, nombre, categoría, precio y estado. Seleccionar
+**Editar** recupera los valores y envía el mismo `id` al POST de productos;
+la operación modifica ese registro y evita crear duplicados.
+
+Se utiliza `GET /api/admin/tenants/{tenantId}/images/{imageId}` para mostrar
+fotos de productos todavía en borrador: solo sesiones autorizadas del tenant
+pueden verlas. No se modifica la API pública de Android ni se publican
+productos automáticamente. La visibilidad móvil exige `active=true`
+y publicar una nueva revisión. Ninguna migración de base de datos es necesaria.
