@@ -27,7 +27,7 @@ function metadata(b,existing={}){
 }
 const attempts=new Map()
 export async function integrationRoutes({req,res,url,user,pool,body,json,tenantOf}){
- const route=url.pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/integrations(?:\/([^/]+))?(?:\/(credential|credential-delete|bindings|test|suspension))?(?:\/([^/]+)\/delete)?$/)
+ const route=url.pathname.match(/^\/api\/admin\/tenants\/([^/]+)\/integrations(?:\/([^/]+))?(?:\/(credential|credential-delete|bindings|test|suspension|delete))?(?:\/([^/]+)\/delete)?$/)
  // Fail closed for malformed integration subroutes as well.
  if(!url.pathname.includes('/integrations'))return false
  if(user.role!=='SUPER_ADMIN'){json(res,403,{error:'Solo el Super Administrador puede gestionar integraciones'});return true}
@@ -35,6 +35,7 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
  try{
   if(!route)throw fail(404,'Ruta de integración no encontrada')
   const [,tenantId,id,action,bindingToDelete]=route
+  if(bindingToDelete&&action!=='bindings')throw fail(404,'Ruta de integración no encontrada')
   if(!uuid(tenantId)||id&&!uuid(id)||bindingToDelete&&!uuid(bindingToDelete))throw fail(400,'Identificador inválido')
   await tenantOf(user,tenantId)
   if(!['GET','POST','PUT'].includes(req.method))throw fail(405,'Método no permitido')
@@ -75,6 +76,14 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
    return await finish(200,{ok:true},'METADATA_UPDATED')
   }
   if(req.method!=='POST')throw fail(405,'Usa POST para esta operación')
+  if(action==='delete'){
+   keys(b,['confirm']);if(b.confirm!==true)throw fail(400,'Confirma la eliminación de esta conexión guardada')
+   // Binding FK cascades only within this integration. Audit remains in admin_audit.
+   await client.query('DELETE FROM tenant_integrations WHERE tenant_id=$1 AND id=$2',[tenantId,id])
+   const result=await finish(200,{ok:true},'CONNECTION_DELETED')
+   attempts.delete(id)
+   return result
+  }
   if(action==='credential'){
    keys(b,['token','credentialReference','expiresAt'])
    const token=normalizeTuVersoCredential(b.token)

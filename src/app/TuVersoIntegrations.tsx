@@ -20,6 +20,7 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
  const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[loadingDetail,setLoadingDetail]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[mode,setMode]=useState('DISABLED')
  const [binding,setBinding]=useState({storeId:'',purpose:'',externalLocationId:'',authorizationConfirmed:false}),[customPurpose,setCustomPurpose]=useState(false)
  const [bindingId,setBindingId]=useState(''),[authorizeCheck,setAuthorizeCheck]=useState(false),[confirmDelete,setConfirmDelete]=useState(false),[confirmDeactivate,setConfirmDeactivate]=useState(false)
+ const [removeId,setRemoveId]=useState('')
  const secretForm=useRef<HTMLFormElement>(null)
  const selectedStore=stores.find(store=>store.id===binding.storeId)
  useEffect(()=>{
@@ -30,7 +31,7 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
   return()=>controller.abort()
  },[root,tenantId])
  useEffect(()=>{
-  setDetail(null);setAuthorizeCheck(false);setBindingId('');setConfirmDelete(false);setConfirmDeactivate(false);setBinding({storeId:'',purpose:'',externalLocationId:'',authorizationConfirmed:false});setCustomPurpose(false);secretForm.current?.reset()
+  setDetail(null);setRemoveId('');setAuthorizeCheck(false);setBindingId('');setConfirmDelete(false);setConfirmDeactivate(false);setBinding({storeId:'',purpose:'',externalLocationId:'',authorizationConfirmed:false});setCustomPurpose(false);secretForm.current?.reset()
   if(!selectedId)return
   const controller=new AbortController();setLoadingDetail(true)
   void api<Integration>(root+'/'+selectedId,'GET',undefined,controller.signal).then(setDetail)
@@ -39,6 +40,12 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
  },[root,selectedId])
  const refresh=async(id=selectedId)=>{const list=await api<{integrations:Integration[];connectionMode:string}>(root);setItems(list.integrations);setMode(list.connectionMode);if(id)setDetail(await api<Integration>(root+'/'+id))}
  const run=async(work:()=>Promise<void>)=>{setBusy(true);setError('');setNotice('');try{await work()}catch(e){setError(e instanceof Error?e.message:'No se pudo completar la operación')}finally{setBusy(false)}}
+ const removeConnection=(id:string)=>void run(async()=>{
+  await api(root+'/'+id+'/delete','POST',{confirm:true})
+  setItems(values=>values.filter(item=>item.id!==id));setRemoveId('')
+  if(selectedId===id){setSelectedId('');setDetail(null);secretForm.current?.reset()}
+  setNotice('Conexión eliminada de este administrador. No se ha revocado la clave ni cambiado nada en TU VERSO.')
+ })
  const saveKey=(event:FormEvent<HTMLFormElement>)=>{
   event.preventDefault();const dom=event.currentTarget,data=new FormData(dom),name=String(data.get('name')||'').trim()
   // Keep the secret out of React state and browser storage; clear the input immediately.
@@ -58,7 +65,13 @@ export default function TuVersoIntegrations({tenantId,tenantName}:{tenantId:stri
   <div className="portal-title"><div><h1>Integraciones → TU VERSO</h1><p className="portal-muted">Empresa: <strong>{tenantName}</strong></p></div></div>
   <p className="portal-muted">Consulta si hay atención disponible. Esta conexión no envía mensajes, no crea conversaciones ni confirma pedidos.</p>
   {error&&<p className="portal-error" role="alert">{error}</p>}{notice&&<p className="portal-notice" role="status">{notice}</p>}
-  {items.length>0&&<section className="portal-panel"><h2>Conexiones guardadas</h2><div className="portal-company-list">{items.map(item=><div className="portal-company" key={item.id}><div><strong>{item.name}</strong><small>{statuses[item.status]}{item.lastCheck?.simulation?' · prueba simulada':''}</small></div><button className="portal-outline" type="button" disabled={busy||loadingDetail} onClick={()=>{setSelectedId(item.id);setError('');setNotice('')}}>Configurar {item.name}</button></div>)}</div><button className="portal-outline" type="button" disabled={busy||loadingDetail} onClick={()=>{setSelectedId('');setError('');setNotice('');secretForm.current?.reset()}}>Nueva conexión</button></section>}
+  {items.length>0&&<section className="portal-panel"><h2>Conexiones guardadas</h2><div className="portal-company-list">{items.map(item=><div key={item.id} data-connection-id={item.id}>
+   <div className="portal-company"><div><strong>{item.name}</strong><small>{statuses[item.status]}{item.lastCheck?.simulation?' · prueba simulada':''}</small></div><button className="portal-outline" type="button" disabled={busy||loadingDetail} onClick={()=>{setRemoveId('');setSelectedId(item.id);setError('');setNotice('')}}>Configurar {item.name}</button><button className="portal-outline" type="button" disabled={busy||loadingDetail} onClick={()=>{setRemoveId(item.id);setError('');setNotice('')}}>Eliminar conexión</button></div>
+   {removeId===item.id&&<section className="integration-delete-confirm" role="alertdialog" aria-label={'Eliminar conexión '+item.name}>
+    <p><strong>¿Eliminar la conexión «{item.name}»?</strong></p><p>Se eliminarán su configuración, la clave guardada y las sedes asociadas a esta conexión. Las sedes de la empresa y las demás conexiones se conservan. Esto no cambia nada en TU VERSO.</p>
+    <div className="portal-inline"><button className="portal-primary" type="button" disabled={busy} onClick={()=>removeConnection(item.id)}>Confirmar eliminación</button><button className="portal-outline" type="button" disabled={busy} onClick={()=>setRemoveId('')}>Cancelar</button></div>
+   </section>}
+  </div>)}</div><button className="portal-outline" type="button" disabled={busy||loadingDetail} onClick={()=>{setRemoveId('');setSelectedId('');setError('');setNotice('');secretForm.current?.reset()}}>Nueva conexión</button></section>}
   {loadingDetail?<p>Consultando conexión...</p>:<>
    <form key={selectedId||'new'} ref={secretForm} className="portal-panel portal-form" onSubmit={saveKey}>
     <h2>{detail?.hasCredential?'1. Sustituir clave de conexión':'1. Clave de integración'}</h2>

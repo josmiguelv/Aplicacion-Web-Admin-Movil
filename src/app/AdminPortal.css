@@ -61,6 +61,7 @@
 .integration-details{border:1px solid #e1e5e9;border-radius:7px;padding:14px;min-width:0}
 .integration-details>summary{cursor:pointer;color:#31516b;font-size:13px;font-weight:600}
 .integration-details[open]>summary{margin-bottom:16px}
+.integration-delete-confirm{border:1px solid #f0cdc9;background:#fff6f5;padding:14px;border-radius:7px;margin:8px 0 14px;font-size:13px;line-height:1.5}
 .portal-context{margin:0 0 16px;max-width:340px}
 .portal-content>.ops-wrapper{max-width:none;padding:5px 0 40px}
 @media(max-width:700px){.portal-header{padding:15px 20px;align-items:flex-start}.portal-role{display:none}.portal-company{flex-wrap:wrap}.portal-company>div{flex-basis:100%}.portal-title{display:block}.portal-panel{padding:17px}.portal-inline label,.portal-inline .portal-primary{flex-basis:100%}.portal-auth{padding:12px}.portal-login{padding:25px}.portal-body{padding:14px 12px 45px}.portal-tab{padding:12px 8px;font-size:12px}}

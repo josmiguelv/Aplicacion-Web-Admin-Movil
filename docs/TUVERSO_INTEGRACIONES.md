@@ -121,6 +121,7 @@ sesión real SUPER_ADMIN y tenant activo. UUID ajeno al tenant devuelve 404.
 | `PUT P/{id}` | Actualiza metadatos proporcionados, conserva los omitidos e invalida comprobación anterior. |
 | `POST P/{id}/credential` | `{token,credentialReference?,expiresAt?}`: cifra y guarda/sustituye; devuelve solo `{ok:true}`. |
 | `POST P/{id}/credential-delete` | `{confirm:true}`: elimina únicamente la credencial almacenada localmente. |
+| `POST P/{id}/delete` | `{confirm:true}`: elimina la conexión local completa, su clave cifrada y sus asociaciones. Solo SUPER_ADMIN; audita `TUVERSO_CONNECTION_DELETED`. |
 | `POST P/{id}/bindings` | `{storeId,purpose,authorizationConfirmed:true}`. externalLocationId y queueReference son opcionales. |
 | `POST P/{id}/bindings/{bindingId}/delete` | `{confirm:true}`: elimina la asociación local. |
 | `POST P/{id}/test` | `{bindingId,authorizeCheck:true}`: consulta 1A desde backend. |
@@ -155,6 +156,12 @@ bindingId, indicación de simulación y `phase1BEnabled:false`.
 Un HTTP interno 200 no significa que la prueba externa tuvo éxito.
 
 ## Estado y comprobación 1A
+
+En **Conexiones guardadas**, **Eliminar conexión** pide una segunda confirmación
+y permite cancelar. La eliminación se limita al tenant y conexión seleccionados,
+se ejecuta en una transacción y conserva la auditoría. Las sedes comerciales y las
+otras conexiones no se eliminan. También permite retirar configuraciones creadas
+por error que no tengan clave. No llama a TU VERSO ni revoca allí credenciales.
 
 | Estado visible | Criterio |
 | --- | --- |
