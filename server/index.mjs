@@ -1,6 +1,7 @@
 import {integrationRoutes} from './integrations.mjs'
 import {mobileWeeklyHours} from './mobile-store-hours.mjs'
 import {isStaticPathAllowed} from './static-path-policy.mjs'
+import {isAllowedAdminOrigin} from './admin-origin-policy.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
@@ -35,7 +36,7 @@ async function imageBody(req){const chunks=[];let size=0;for await (const chunk 
 function imageMime(data){if(data.length<12)return null;if(data[0]===0xff&&data[1]===0xd8&&data[2]===0xff)return'image/jpeg';if(data.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))return'image/png';if(data.toString('ascii',0,4)==='RIFF'&&data.toString('ascii',8,12)==='WEBP')return'image/webp';return null}
 async function body(req){let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>65536)throw bad(413,'Solicitud demasiado grande')}try{return JSON.parse(raw||'{}')}catch{throw bad(400,'JSON inválido')}}
 function cookie(req){const all=req.headers.cookie||'';return all.split(';').map(x=>x.trim()).find(x=>x.startsWith('b3sid='))?.slice(6)||''}
-function sameOrigin(req){const origin=req.headers.origin;if(!origin)return !prod; const expected=process.env.ADMIN_ORIGIN;return !!expected&&origin===expected}
+function sameOrigin(req){return isAllowedAdminOrigin(req.headers.origin,{adminOrigin:process.env.ADMIN_ORIGIN,extraOrigins:allowedOrigins,production:prod})}
 async function session(req){const token=cookie(req);if(!/^[a-f0-9]{64}$/.test(token))throw bad(401,'Inicia sesión');const q=await sql(`SELECT u.id,u.role,u.tenant_id FROM admin_sessions s JOIN admin_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active=true`,[digest(token)]);if(!q.rowCount)throw bad(401,'Sesión expirada');return q.rows[0]}
 async function tenantOf(auth,id){if(!uuid(id))throw bad(400,'Empresa inválida');if(auth.role!=='SUPER_ADMIN'&&auth.tenant_id!==id)throw bad(403,'No tienes acceso a esta empresa');const row=await sql('SELECT id FROM tenants WHERE id=$1 AND active=true',[id]);if(!row.rowCount)throw bad(404,'Empresa no disponible')}
 function checkLatLng(lat,lng){return safeNumber(lat)&&safeNumber(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180}

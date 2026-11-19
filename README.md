@@ -98,3 +98,24 @@ La app Android consulta esta API usando el `appId` registrado. Su
 `localhost:4000` solo sirve para probar la API desde el propio PC, **no desde
 Android**. La APK debe compilarse con esa dirección y no debe incluir
 API Keys secretas. Ningún repositorio Android o TU VERSO fue modificado.
+
+
+### Inicio de sesión desde un túnel HTTPS temporal (solo desarrollo)
+
+El origen del navegador al usar Cloudflare Quick Tunnel no coincide con
+`ADMIN_ORIGIN=http://localhost:3000`. Por eso el login remoto devolvía
+`HTTP 403 Origen no autorizado` incluso con credenciales correctas.
+
+Para permitir **solo un dominio exacto** de túnel, mantener
+`ADMIN_ORIGIN=http://localhost:3000` y configurar en el archivo `.env`
+local `ALLOWED_ORIGINS=https://<dominio-asignado>.trycloudflare.com`,
+sin barra final. Reiniciar backend local. Las sesiones y las acciones
+administrativas usarán la lista de orígenes aprobados; todos los demás
+se rechazan. **En producción, solo se admite ADMIN_ORIGIN**.
+
+Seguridad: un Quick Tunnel sin protección expone también el login público.
+Es adecuado únicamente para pruebas puntuales, no para una administración
+pública permanente; cerrar el túnel al finalizar o utilizar un túnel
+nombrado con Cloudflare Access (y rate limiting) antes de abrir a usuarios.
+Para comprobar sedes desde Android no es necesario abrir el login remoto;
+puede administrarse desde localhost y usar HTTPS solo para lectura de API.

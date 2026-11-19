@@ -36,6 +36,8 @@ jobs:
         run: node --check server/service-api-keys.mjs && node --check server/static-path-policy.mjs && node --check server/index.mjs
       - name: Validate Windows and Railway static paths
         run: node --test server/static-path-policy.test.mjs
+      - name: Validate tunnel login origin policy
+        run: node --test server/admin-origin-policy.test.mjs
       - name: Build frontend
         run: pnpm build
       - name: Mobile weekly store hours contract (focused)
