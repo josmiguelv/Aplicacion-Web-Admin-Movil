@@ -72,7 +72,7 @@ export async function adminNotificationRoutes({req,res,url,user,pool,body,json,t
    if(payload.id){
     if(!uuid(payload.id))throw bad(400,'Notificación inválida');
     q=await client.query(
-     'UPDATE scheduled_notifications SET app_id=$3,title=$4,message=$5,image_id=$6,send_at=$7,expires_at=$8,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND enabled=true AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id',
+     "UPDATE scheduled_notifications SET app_id=$3,title=$4,message=$5,image_id=$6,send_at=$7,expires_at=$8,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND enabled=true AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id",
      [tenantId,payload.id,appId,title.trim(),message.trim(),imageId,schedule,payload.expiresAt||null]);
     if(!q.rowCount)throw bad(409,'Solo puedes editar notificaciones pendientes');
    }else{
@@ -93,7 +93,7 @@ export async function adminNotificationRoutes({req,res,url,user,pool,body,json,t
   const client=await pool.connect();
   try{
    await client.query('BEGIN');
-   const q=await client.query('UPDATE scheduled_notifications SET enabled=false,cancelled_at=now(),updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id',[tenantId,notificationId]);
+   const q=await client.query("UPDATE scheduled_notifications SET enabled=false,cancelled_at=now(),updated_at=now() WHERE tenant_id=$1 AND id=$2 AND cancelled_at IS NULL AND send_at>now() AND push_status IN ('PENDING','RETRY','SKIPPED') RETURNING id",[tenantId,notificationId]);
    if(!q.rowCount)throw bad(409,'No se puede cancelar: la notificación ya estaba disponible o no existe');
    await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'NOTIFICATION_CANCELLED',notificationId]);
    await client.query('COMMIT');
