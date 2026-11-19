@@ -68,6 +68,9 @@ try{
  assert.throws(()=>decryptCredential(stored,tenantIds[0],id,randomBytes(32)))
  const rotatedKey=randomBytes(32),rotated=encryptCredential(decryptCredential(stored,tenantIds[0],id,key),tenantIds[0],id,rotatedKey);assert.equal(decryptCredential(rotated,tenantIds[0],id,rotatedKey),token)
  const detail=await call(path);assert.equal(detail.data.status,'CONFIGURED');assert.ok(detail.data.hasCredential);assert.ok(!JSON.stringify(detail).includes('encrypted_credential'))
+ assert.equal((await call(path,'PUT',{name:'PRUEBA renombrada '+tag})).status,200)
+ const preserved=(await call(path)).data
+ assert.equal(preserved.externalTenantId,metadata.externalTenantId);assert.equal(preserved.channelAccountId,metadata.channelAccountId);assert.equal(preserved.instanceKey,metadata.instanceKey);assert.deepEqual(preserved.scopes,metadata.scopes);assert.equal(preserved.credentialReference,metadata.credentialReference)
  assert.equal((await call(path,'PUT',{...metadata,channelAccountId:randomUUID()})).status,409)
  pass('AES-256-GCM ciphertext persisted; AAD prevents transplantation; tamper/wrong key rejected; no secret readback; re-encryption verified')
  // Session-temporary tables shadow the public tables: prove the maintenance transaction
@@ -104,6 +107,16 @@ try{
  assert.equal((await call(path+'/credential-delete','POST',{confirm:false})).status,400)
  await call(path+'/credential-delete','POST',{confirm:true});assert.equal((await call(path)).data.status,'UNCONFIGURED');assert.equal((await pool.query('SELECT encrypted_credential FROM tenant_integrations WHERE id=$1',[id])).rows[0].encrypted_credential,null)
  pass('Replacement clears stale proof; expiration, suspension, resume and controlled local secret deletion enforced')
+ const minimal=await call(root,'POST',{});assert.equal(minimal.status,201)
+ const minimalPath=root+'/'+minimal.data.id
+ assert.equal((await call(minimalPath+'/credential','POST',{token})).status,200)
+ const minimalBinding=await call(minimalPath+'/bindings','POST',{storeId:storeIds[0],purpose:'ORDER_REQUEST',authorizationConfirmed:true});assert.equal(minimalBinding.status,201)
+ const minimalDetail=(await call(minimalPath)).data
+ for(const field of ['externalTenantId','channelAccountId','channelType','instanceKey'])assert.equal(minimalDetail[field],null)
+ assert.equal(minimalDetail.bindings[0].externalLocationId,'prueba-integracion');assert.equal(minimalDetail.bindings[0].queueReference,null)
+ await scenario('AVAILABLE')
+ const minimalCheck=await call(minimalPath+'/test','POST',{bindingId:minimalBinding.data.id,authorizeCheck:true});assert.equal(minimalCheck.status,200);assert.equal(minimalCheck.data.result,'AVAILABLE')
+ pass('Minimal setup accepts only key, tenant-owned store and authorized purpose; no fabricated remote IDs or queue reference; existing optional metadata preserved')
  const audit=(await pool.query("SELECT action FROM admin_audit WHERE tenant_id=$1 AND action LIKE 'TUVERSO_%'",[tenantIds[0]])).rows.map(r=>r.action)
  for(const event of ['CREATED','CREDENTIAL_SAVED','CREDENTIAL_REPLACED','CONNECTION_CHECKED','SUSPENDED','CREDENTIAL_REMOVED'])assert.ok(audit.includes('TUVERSO_'+event))
  const stats=await(await fetch('http://127.0.0.1:4410/tuverso/__stats')).json();assert.ok(stats.calls.length>=11);assert.ok(stats.calls.every(c=>c.correct));assert.ok(!JSON.stringify(stats).includes(token));pass('Simulation observed real backend HTTP calls with exactly documented query and no Origin/cookies; audit contains no tokens')

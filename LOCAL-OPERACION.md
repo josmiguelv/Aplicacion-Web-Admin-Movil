@@ -98,7 +98,10 @@ Resultados: `.local/store-code-results.json`.
 
 ## Integraciones TU VERSO
 
-La migración local `003-tuverso-integrations.sql` ya fue aplicada. La clave
+Las migraciones locales `003-tuverso-integrations.sql` y
+`004-minimal-tuverso-configuration.sql` ya fueron aplicadas. El formulario pide
+solo clave, sede y propósito autorizado; los datos técnicos anteriores se conservan.
+La clave
 maestra privada se conserva únicamente en `.env`; no perderla ni publicarla.
 `TUVERSO_LIVE_CHECKS_ENABLED=false` mantiene bloqueadas las consultas externas.
 El acceso es exclusivo de SUPER_ADMIN desde cada empresa. La configuración

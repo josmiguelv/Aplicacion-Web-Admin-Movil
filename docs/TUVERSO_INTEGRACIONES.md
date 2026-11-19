@@ -14,6 +14,16 @@ entra a Empresas → Integraciones → TU VERSO. Puede registrar varias cuentas 
 instancias por empresa. TENANT_ADMIN no tiene acceso a ninguna ruta de este módulo,
 incluidas las de su propia empresa. Android, WEB, TU VERSO y Railway no cambian.
 
+El formulario mínimo pide **clave de integración, sede y propósito autorizado**.
+La clave está visible desde el inicio y su guardado crea la configuración local,
+sin exigir un paso previo de metadatos. Nombre y vencimiento son opcionales.
+La sede se selecciona del tenant y su código se toma del servidor; solo si TU VERSO
+autorizó un código diferente se introduce ese valor en una opción plegable.
+No se piden códigos de empresa/cuenta/instancia, cola, referencia de credencial ni
+scopes. La interfaz explica la única función disponible: consultar disponibilidad,
+sin mensajes, conversaciones ni confirmación de pedidos. Los metadatos previamente
+registrados se conservan y las validaciones de sesión/tenant no cambian.
+
 ## Modelo y aislamiento
 
 `tenant_integrations` referencia el tenant local y guarda nombre, proveedor,
@@ -24,7 +34,7 @@ arbitraria que pueda recibir el bearer. Una combinación proveedor/tenant extern
 cuenta/instancia no puede asignarse a dos empresas locales distintas.
 
 `integration_bindings` guarda sede, externalLocationId, purpose y referencia UUID
-de cola, con confirmación humana, actor y fecha. Las claves foráneas compuestas
+opcional de cola, con confirmación humana, actor y fecha. Las claves foráneas compuestas
 impiden cruzar una integración o sede con otro tenant local. La pareja ubicación/
 propósito es única dentro de cada integración. El ID visible de sede y su UUID
 local se mantienen; externalLocationId es el identificador que TU VERSO autorizó
@@ -49,7 +59,7 @@ tag de autenticación y AAD que incluye versión, proveedor, tenant e integraci�
 El sobre cifrado contiene versión, ID no secreto de clave, IV, tag y ciphertext.
 Trasplantar el sobre entre tenants/integraciones, alterar el tag o usar otra clave
 impide descifrarlo. La clave maestra nunca se almacena en PostgreSQL ni en Git.
-La referencia mostrada es una huella parcial SHA-256 del token, no su contenido.
+La API ofrece como referencia una huella parcial SHA-256 del token, nunca su contenido.
 
 Las escrituras exigen la sesión SUPER_ADMIN existente, Origin igual a ADMIN_ORIGIN
 y Content-Type application/json. Las cookies existentes son HttpOnly/SameSite=Strict.
@@ -84,6 +94,10 @@ No usar variables VITE ni pegar claves en comandos que queden en el historial.
 La migración aditiva e idempotente `server/migrations/003-tuverso-integrations.sql`
 crea únicamente dos tablas e índices/restricciones. El esquema inicial también
 incluye estas estructuras. No ejecutarla automáticamente al iniciar la API.
+`004-minimal-tuverso-configuration.sql` permite omitir la identificación externa
+y la referencia de cola: solo retira NOT NULL de esos metadatos. No elimina ni
+inventa datos; conserva el tenant local obligatorio y todas sus relaciones.
+El script local aplica ambas migraciones en orden.
 
 Solo sobre la base Docker local autorizada:
 
@@ -102,26 +116,31 @@ sesión real SUPER_ADMIN y tenant activo. UUID ajeno al tenant devuelve 404.
 | Método y ruta | Operación y cuerpo |
 | --- | --- |
 | `GET P` | Lista sin secretos; incluye connectionMode. |
-| `POST P` | Crea metadatos; devuelve 201. |
+| `POST P` | Crea configuración local; `{}` es válido, con nombre TU VERSO y permiso de consulta por defecto. Devuelve 201. |
 | `GET P/{id}` | Detalle seguro, estado y asociaciones manuales. |
-| `PUT P/{id}` | Sustituye metadatos; invalida comprobación anterior. |
+| `PUT P/{id}` | Actualiza metadatos proporcionados, conserva los omitidos e invalida comprobación anterior. |
 | `POST P/{id}/credential` | `{token,credentialReference?,expiresAt?}`: cifra y guarda/sustituye; devuelve solo `{ok:true}`. |
 | `POST P/{id}/credential-delete` | `{confirm:true}`: elimina únicamente la credencial almacenada localmente. |
-| `POST P/{id}/bindings` | `{storeId,externalLocationId,purpose,queueReference,authorizationConfirmed:true}`. |
+| `POST P/{id}/bindings` | `{storeId,purpose,authorizationConfirmed:true}`. externalLocationId y queueReference son opcionales. |
 | `POST P/{id}/bindings/{bindingId}/delete` | `{confirm:true}`: elimina la asociación local. |
 | `POST P/{id}/test` | `{bindingId,authorizeCheck:true}`: consulta 1A desde backend. |
 | `POST P/{id}/suspension` | `{suspended:boolean}`: suspende o retira suspensión local; no cambia TU VERSO. |
 
-Metadatos obligatorios: `name` (1–180), `externalTenantId` (texto 1–180, sin imponer un formato que el PDF no especifica),
-`channelAccountId` UUID, `channelType` MOBILE_APP/WEB, `instanceKey` (1–180),
-`scopes` sin duplicados e incluyendo `queue.availability.read`.
-Opcionales: `baseUrl` (solo la fija), `credentialReference` (hasta 180) y
+No se exige identificación externa para guardar una clave ni para consultar 1A.
+Los campos técnicos siguen siendo compatibles con clientes anteriores: `name`
+(1–180, por defecto TU VERSO), `externalTenantId` (texto 1–180), `channelAccountId`
+UUID, `channelType` MOBILE_APP/WEB e `instanceKey` (1–180). Se guardan como NULL
+si no se proporcionan, sin inventar identificadores de TU VERSO. `scopes` usa por
+defecto `queue.availability.read`; si se proporciona debe incluirlo, sin duplicados.
+También se admiten `baseUrl` (solo la fija), `credentialReference` (hasta 180) y
 `expiresAt` ISO 8601 o null. Solo se admiten los seis scopes del PDF; registrar
 scopes 1B no los activa. El token requiere prefijo `tvi_v1_` y nunca se acepta
 como credencial de sesión local. Una nueva credencial ya vencida se rechaza.
 
-`externalLocationId`: 1–180; `purpose`: `[A-Z][A-Z0-9_]*`, hasta 80;
-`queueReference`: UUID declarado por el administrador TU VERSO.
+`externalLocationId`: 1–180, o se toma del código real de la sede cuando se omite;
+`purpose`: `[A-Z][A-Z0-9_]*`, hasta 80; `queueReference`: UUID opcional que no se
+envía en la consulta. La autorización remota de cola la resuelve TU VERSO a partir
+de la clave y sus vínculos. El usuario debe confirmar la autorización previa.
 No se admiten campos arbitrarios en las operaciones ni referencias de otras sedes.
 
 La API interna distingue errores propios 400/401/403/404/409/415/429/503 de una
@@ -173,7 +192,7 @@ UNAVAILABLE con HTTP 200 es una consulta autorizada sin capacidad elegible.
    no ejecuta ninguna de esas rutas**, no automatiza cookies ni simula sesiones.
 3. Transfiere el token mostrado una sola vez por un canal seguro al Super
    Administrador de INTEGRA, quien lo registra en este formulario junto con
-   referencia, vencimiento y asociaciones autorizadas. No usar correo/tickets/logs.
+   vencimiento si lo conoce y sede/propósito autorizados. No usar correo/tickets/logs.
 4. Con autorización explícita para la prueba real, el operador del entorno habilita
    la variable privada de consultas y reinicia la API; el Super Administrador
    selecciona la asociación, autoriza el intento y pulsa Probar conexión.

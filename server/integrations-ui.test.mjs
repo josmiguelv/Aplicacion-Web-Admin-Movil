@@ -1,22 +1,51 @@
-const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'../.local/browser/node_modules/playwright/index.mjs');import pg from 'pg';import{randomBytes,randomUUID,scryptSync}from'node:crypto';import assert from'node:assert/strict';
-const u=new URL(process.env.DATABASE_URL);assert.equal(u.hostname,'127.0.0.1');assert.equal(u.port,'55432');assert.equal(u.pathname,'/integra_admin');
-const pool=new pg.Pool({connectionString:u.href}),tag=randomUUID(),password=randomBytes(24).toString('hex'),token='tvi_v1_'+randomBytes(32).toString('hex'),replacement='tvi_v1_'+randomBytes(32).toString('hex'),salt=randomBytes(16).toString('hex'),email=`ui-integration-${tag}@example.invalid`,hash=`scrypt:${salt}:${scryptSync(password,salt,64).toString('hex')}`;let browser,tenantId,userId;
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'../.local/browser/node_modules/playwright/index.mjs')
+import pg from 'pg'
+import {randomBytes,randomUUID,scryptSync} from 'node:crypto'
+import assert from 'node:assert/strict'
+const u=new URL(process.env.DATABASE_URL);assert.equal(u.hostname,'127.0.0.1');assert.equal(u.port,'55432');assert.equal(u.pathname,'/integra_admin')
+const pool=new pg.Pool({connectionString:u.href}),tag=randomUUID(),password=randomBytes(24).toString('hex'),token='tvi_v1_'+randomBytes(32).toString('hex'),replacement='tvi_v1_'+randomBytes(32).toString('hex'),salt=randomBytes(16).toString('hex'),email=`ui-integration-${tag}@example.invalid`,hash=`scrypt:${salt}:${scryptSync(password,salt,64).toString('hex')}`
+let browser,tenantId,userId
 try{
- tenantId=(await pool.query('INSERT INTO tenants(name) VALUES($1) RETURNING id',['PRUEBA UI INTEGRACIONES '+tag])).rows[0].id;userId=(await pool.query("INSERT INTO admin_users(email,password_hash,role) VALUES($1,$2,'SUPER_ADMIN') RETURNING id",[email,hash])).rows[0].id;
- const storeId=(await pool.query("INSERT INTO stores(tenant_id,code,name,address) VALUES($1,'prueba-ui-integracion','Sede prueba UI','Solo local') RETURNING id",[tenantId])).rows[0].id;
- browser=await chromium.launch({channel:'msedge',headless:true});const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto('http://localhost:3000');await page.getByLabel('Correo electrónico').fill(email);await page.getByLabel('Contraseña',{exact:true}).fill(password);await page.getByRole('button',{name:'Iniciar sesión'}).click();
- const row=page.locator('.portal-company').filter({hasText:'PRUEBA UI INTEGRACIONES '+tag});await row.getByRole('button',{name:'Integraciones',exact:true}).click();await page.getByRole('heading',{name:'Integraciones → TU VERSO'}).waitFor();await page.getByText('Esta empresa todavía no tiene integraciones TU VERSO.').waitFor();
- await page.getByLabel('Nombre de integración',{exact:true}).fill('Integración prueba UI');await page.getByLabel('Tenant ID de TU VERSO').fill(randomUUID());await page.getByLabel('Identificador de cuenta de canal').fill(randomUUID());await page.getByLabel('Identificador de instancia',{exact:true}).fill('instancia-prueba-ui');await page.getByRole('button',{name:'Guardar configuración',exact:true}).click();await page.getByRole('heading',{name:'Registrar credencial protegida'}).waitFor();
- await page.getByLabel('Credencial S2S',{exact:true}).fill(token);await page.getByRole('button',{name:'Guardar credencial cifrada',exact:true}).click();await page.getByRole('heading',{name:'Sustituir credencial protegida'}).waitFor();assert.equal(await page.getByLabel('Credencial S2S',{exact:true}).inputValue(),'');assert.ok(!await page.content().then(v=>v.includes(token)));assert.equal(await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage})), '{}');
- await page.getByLabel('Local de la empresa',{exact:true}).selectOption(storeId);await page.getByLabel('externalLocationId',{exact:true}).fill('sede-prueba-ui');await page.getByLabel('purpose',{exact:true}).fill('ORDER_REQUEST');await page.getByLabel('Referencia de cola autorizada en TU VERSO',{exact:true}).fill(randomUUID());await page.getByLabel('Confirmo que esta sede, propósito y cola pertenecen a la cuenta y tenant TU VERSO autorizados.').check();await page.getByRole('button',{name:'Guardar asociación',exact:true}).click();await page.getByText('Asociación local guardada como autorización declarada; no comprobada por TU VERSO.').waitFor();
- assert.equal(await page.getByRole('button',{name:'Probar conexión',exact:true}).isDisabled(),true);await page.reload();await page.getByRole('heading',{name:'Empresas',exact:true}).waitFor();await page.locator('.portal-company').filter({hasText:'PRUEBA UI INTEGRACIONES '+tag}).getByRole('button',{name:'Integraciones',exact:true}).click();await page.getByRole('button',{name:'Configurar Integración prueba UI',exact:true}).click();await page.getByRole('heading',{name:'Sustituir credencial protegida'}).waitFor();await page.getByText('Cola declarada:',{exact:false}).waitFor();
- await page.getByLabel('Credencial S2S',{exact:true}).fill(replacement);await page.getByRole('button',{name:'Sustituir credencial',exact:true}).click();await page.getByText('Credencial cifrada guardada. No se ha emitido ni revocado ninguna credencial en TU VERSO.').waitFor();
- await page.getByRole('button',{name:'Suspender conexión local',exact:true}).click();await page.getByRole('button',{name:'Retirar suspensión local',exact:true}).waitFor();
- assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'.local/tuverso-integrations-desktop.png',fullPage:true});
- await page.getByLabel('Confirmo eliminar la credencial almacenada únicamente en este administrador.').check();await page.getByRole('button',{name:'Eliminar credencial local',exact:true}).click();await page.getByRole('heading',{name:'Registrar credencial protegida'}).waitFor();
- assert.deepEqual(errors,[]);const db=(await pool.query('SELECT encrypted_credential,last_check FROM tenant_integrations WHERE tenant_id=$1',[tenantId])).rows[0];assert.equal(db.encrypted_credential,null);assert.equal(db.last_check,null);
- console.log('PASS desktop UI: company navigation, empty state, persistent metadata/credential/binding, replacement, suspension and deletion; no browser secret storage or JS errors; live checks blocked.');
+ tenantId=(await pool.query('INSERT INTO tenants(name) VALUES($1) RETURNING id',['PRUEBA UI INTEGRACIONES '+tag])).rows[0].id
+ userId=(await pool.query("INSERT INTO admin_users(email,password_hash,role) VALUES($1,$2,'SUPER_ADMIN') RETURNING id",[email,hash])).rows[0].id
+ const storeId=(await pool.query("INSERT INTO stores(tenant_id,code,name,address) VALUES($1,'prueba-ui-integracion','Sede prueba UI','Solo local') RETURNING id",[tenantId])).rows[0].id
+ browser=await chromium.launch({channel:'msedge',headless:true})
+ const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[]
+ page.on('pageerror',e=>errors.push(e.message))
+ await page.goto('http://localhost:3000');await page.getByLabel('Correo electrónico').fill(email);await page.getByLabel('Contraseña',{exact:true}).fill(password);await page.getByRole('button',{name:'Iniciar sesión'}).click()
+ const openCompany=async()=>page.locator('.portal-company').filter({hasText:'PRUEBA UI INTEGRACIONES '+tag}).getByRole('button',{name:'Integraciones',exact:true}).click()
+ await openCompany();await page.getByRole('heading',{name:'Integraciones → TU VERSO'}).waitFor()
+ assert.equal(await page.getByLabel('Clave de integración',{exact:true}).isVisible(),true)
+ for(const label of ['Código de cuenta en TU VERSO','Código de empresa en TU VERSO','Código de la aplicación o web en TU VERSO','Referencia de cola autorizada en TU VERSO'])assert.equal(await page.getByLabel(label,{exact:true}).count(),0)
+ assert.equal(await page.getByRole('button',{name:'Guardar configuración',exact:true}).count(),0)
+ assert.ok(!(await page.locator('body').innerText()).includes('queue.availability.read'))
+ await page.getByLabel('Clave de integración',{exact:true}).fill(token);await page.getByRole('button',{name:'Guardar clave y continuar',exact:true}).click()
+ await page.getByRole('heading',{name:'1. Sustituir clave de conexión',exact:true}).waitFor()
+ assert.equal(await page.getByLabel('Clave de integración',{exact:true}).inputValue(),'')
+ assert.ok(!(await page.content()).includes(token));assert.equal(await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage})), '{}')
+ const original=(await pool.query('SELECT * FROM tenant_integrations WHERE tenant_id=$1',[tenantId])).rows[0]
+ for(const key of ['external_tenant_id','channel_account_id','channel_type','instance_key'])assert.equal(original[key],null)
+ assert.ok(original.encrypted_credential&&!original.encrypted_credential.includes(token))
+ await page.getByLabel('Sede',{exact:true}).selectOption(storeId);await page.getByLabel('Propósito',{exact:true}).selectOption('ORDER_REQUEST')
+ await page.getByLabel('Confirmo que esta sede y este propósito están autorizados para la clave en TU VERSO.').check()
+ await page.getByRole('button',{name:'Guardar sede y propósito',exact:true}).click();await page.getByText('Sede y propósito guardados. Puedes comprobar la conexión.').waitFor()
+ const binding=(await pool.query('SELECT external_location_id,queue_reference FROM integration_bindings WHERE tenant_id=$1',[tenantId])).rows[0]
+ assert.equal(binding.external_location_id,'prueba-ui-integracion');assert.equal(binding.queue_reference,null)
+ assert.equal(await page.getByRole('button',{name:'Probar conexión',exact:true}).isDisabled(),true)
+ await page.reload();await page.getByRole('heading',{name:'Empresas',exact:true}).waitFor();await openCompany();await page.getByRole('button',{name:'Configurar TU VERSO',exact:true}).click();await page.getByRole('heading',{name:'1. Sustituir clave de conexión',exact:true}).waitFor()
+ await page.getByText('Atención de pedidos · Código de sede: prueba-ui-integracion',{exact:true}).waitFor()
+ await page.getByLabel('Clave de integración',{exact:true}).fill(replacement);await page.getByRole('button',{name:'Guardar nueva clave',exact:true}).click();await page.getByText('Clave guardada de forma segura. Ahora selecciona la sede y el propósito autorizados.').waitFor()
+ const updated=(await pool.query('SELECT encrypted_credential FROM tenant_integrations WHERE id=$1',[original.id])).rows[0]
+ assert.notEqual(updated.encrypted_credential,original.encrypted_credential)
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
+ await page.screenshot({path:'.local/tuverso-integrations-desktop.png',fullPage:true})
+ await page.getByRole('button',{name:'Suspender conexión local',exact:true}).click();await page.getByRole('button',{name:'Retirar suspensión local',exact:true}).waitFor()
+ await page.getByText('Eliminar clave guardada',{exact:true}).click();await page.getByLabel('Confirmo que quiero eliminar la clave guardada.').check();await page.getByRole('button',{name:'Eliminar clave',exact:true}).click();await page.getByRole('heading',{name:'1. Clave de integración',exact:true}).waitFor()
+ assert.deepEqual(errors,[])
+ const final=(await pool.query('SELECT encrypted_credential,last_check FROM tenant_integrations WHERE tenant_id=$1',[tenantId])).rows[0];assert.equal(final.encrypted_credential,null);assert.equal(final.last_check,null)
+ console.log('PASS minimal desktop flow: key visible immediately; no account/tenant/instance/queue inputs; key + store + purpose saved and persisted; replacement, suspension and deletion verified; live checks blocked; no browser storage secrets or JS errors.')
 }finally{
- if(browser)await browser.close();if(tenantId){await pool.query('DELETE FROM integration_bindings WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM tenant_integrations WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM admin_audit WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM stores WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM tenants WHERE id=$1',[tenantId])}if(userId)await pool.query('DELETE FROM admin_users WHERE id=$1',[userId]);await pool.end();
+ if(browser)await browser.close()
+ if(tenantId){await pool.query('DELETE FROM integration_bindings WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM tenant_integrations WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM admin_audit WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM stores WHERE tenant_id=$1',[tenantId]);await pool.query('DELETE FROM tenants WHERE id=$1',[tenantId])}
+ if(userId)await pool.query('DELETE FROM admin_users WHERE id=$1',[userId]);await pool.end()
 }

@@ -15,10 +15,14 @@ function state(row){
 function view(row){return {id:row.id,tenantId:row.tenant_id,provider:row.provider,name:row.name,externalTenantId:row.external_tenant_id,channelAccountId:row.channel_account_id,channelType:row.channel_type,instanceKey:row.instance_key,baseUrl:row.base_url,scopes:row.scopes,hasCredential:!!row.credential_hint,credentialHint:row.credential_hint,credentialReference:row.credential_reference,expiresAt:row.expires_at,suspended:row.suspended,status:state(row),lastCheck:row.last_check,revision:row.revision,metadataSource:'MANUAL',connectionMode:connectionMode(),phase1BEnabled:false}}
 function keys(b,allowed){if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!allowed.includes(k)))throw fail(400,'Campos no admitidos en esta operación')}
 function expiry(value){if(value==null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d\d-\d\dT/.test(value)||!Number.isFinite(Date.parse(value)))throw fail(400,'Vencimiento inválido');return new Date(value).toISOString()}
-function metadata(b){
+function metadata(b,existing={}){
  keys(b,['name','externalTenantId','channelAccountId','channelType','instanceKey','baseUrl','scopes','credentialReference','expiresAt'])
- if(!text(b.name,180)||!text(b.externalTenantId,180)||!uuid(b.channelAccountId)||!['MOBILE_APP','WEB'].includes(b.channelType)||!text(b.instanceKey,180)||b.baseUrl!==undefined&&b.baseUrl!==TUVERSO_BASE||!Array.isArray(b.scopes)||!b.scopes.includes('queue.availability.read')||new Set(b.scopes).size!==b.scopes.length||b.scopes.some(s=>!TUVERSO_SCOPES.includes(s))||b.credentialReference&&!text(b.credentialReference,180))throw fail(400,'Identificación, scopes o referencia de integración inválidos')
- return [b.name.trim(),b.externalTenantId.trim(),b.channelAccountId.toLowerCase(),b.channelType,b.instanceKey.trim(),b.scopes,b.credentialReference||null,expiry(b.expiresAt)]
+ const optional=(field,column)=>b[field]===undefined?existing[column]??null:b[field]===''?null:b[field]
+ const name=b.name===undefined?existing.name||'TU VERSO':b.name
+ const externalTenant=optional('externalTenantId','external_tenant_id'),account=optional('channelAccountId','channel_account_id'),channel=optional('channelType','channel_type'),instance=optional('instanceKey','instance_key'),reference=optional('credentialReference','credential_reference')
+ const scopes=b.scopes??existing.scopes??['queue.availability.read']
+ if(!text(name,180)||externalTenant!==null&&!text(externalTenant,180)||account!==null&&!uuid(account)||channel!==null&&!['MOBILE_APP','WEB'].includes(channel)||instance!==null&&!text(instance,180)||b.baseUrl!==undefined&&b.baseUrl!==TUVERSO_BASE||!Array.isArray(scopes)||!scopes.includes('queue.availability.read')||new Set(scopes).size!==scopes.length||scopes.some(s=>!TUVERSO_SCOPES.includes(s))||reference!==null&&!text(reference,180))throw fail(400,'Datos de integración inválidos')
+ return [name.trim(),externalTenant?.trim()??null,account?.toLowerCase()??null,channel,instance?.trim()??null,scopes,reference,b.expiresAt===undefined?existing.expires_at??null:expiry(b.expiresAt)]
 }
 const attempts=new Map()
 export async function integrationRoutes({req,res,url,user,pool,body,json,tenantOf}){
@@ -60,9 +64,9 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
   const invalidate=async()=>client.query("UPDATE tenant_integrations SET check_state=CASE WHEN encrypted_credential IS NULL THEN 'UNCONFIGURED' ELSE 'CONFIGURED' END,last_check=NULL,revision=revision+1,updated_at=now() WHERE tenant_id=$1 AND id=$2",[tenantId,id])
   if(!action){
    if(req.method!=='PUT')throw fail(405,'Usa PUT para actualizar metadatos')
-   const values=metadata(b)
+   const values=metadata(b,row)
    // Changing the remote identity requires removing its old credential and bindings first.
-   if(row.external_tenant_id!==b.externalTenantId.trim()||row.channel_account_id!==b.channelAccountId.toLowerCase()||row.channel_type!==b.channelType||row.instance_key!==b.instanceKey.trim()){
+   if(row.external_tenant_id!==values[1]||row.channel_account_id!==values[2]||row.channel_type!==values[3]||row.instance_key!==values[4]){
     const bindings=await client.query('SELECT 1 FROM integration_bindings WHERE tenant_id=$1 AND integration_id=$2 LIMIT 1',[tenantId,id])
     if(row.encrypted_credential||bindings.rowCount)throw fail(409,'Elimina la credencial y las asociaciones antes de cambiar la identidad externa')
    }
@@ -73,10 +77,10 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
   if(action==='credential'){
    keys(b,['token','credentialReference','expiresAt'])
    if(typeof b.token!=='string'||!/^tvi_v1_[A-Za-z0-9_-]{32,512}$/.test(b.token)||b.credentialReference&&!text(b.credentialReference,180))throw fail(400,'Credencial o referencia inválida')
-   const expiresAt=expiry(b.expiresAt)
+   const expiresAt=b.expiresAt===undefined?row.expires_at:expiry(b.expiresAt)
    if(expiresAt&&new Date(expiresAt)<=new Date())throw fail(400,'La credencial registrada ya está vencida')
    const encrypted=encryptCredential(b.token,tenantId,id)
-   await client.query('UPDATE tenant_integrations SET encrypted_credential=$3,credential_hint=$4,credential_reference=$5,expires_at=$6 WHERE tenant_id=$1 AND id=$2',[tenantId,id,encrypted,credentialHint(b.token),b.credentialReference||null,expiresAt]);await invalidate()
+   await client.query('UPDATE tenant_integrations SET encrypted_credential=$3,credential_hint=$4,credential_reference=$5,expires_at=$6 WHERE tenant_id=$1 AND id=$2',[tenantId,id,encrypted,credentialHint(b.token),b.credentialReference===undefined?row.credential_reference:b.credentialReference||null,expiresAt]);await invalidate()
    return await finish(200,{ok:true},row.encrypted_credential?'CREDENTIAL_REPLACED':'CREDENTIAL_SAVED')
   }
   if(action==='credential-delete'){
@@ -96,9 +100,9 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
     await invalidate();return await finish(200,{ok:true},'BINDING_REMOVED')
    }
    keys(b,['storeId','externalLocationId','purpose','queueReference','authorizationConfirmed'])
-   if(!uuid(b.storeId)||!text(b.externalLocationId,180)||typeof b.purpose!=='string'||b.purpose.length>80||! /^[A-Z][A-Z0-9_]*$/.test(b.purpose)||!uuid(b.queueReference)||b.authorizationConfirmed!==true)throw fail(400,'Confirma una asociación autorizada de sede, propósito y cola')
-   const store=await client.query('SELECT id FROM stores WHERE tenant_id=$1 AND id=$2',[tenantId,b.storeId]);if(!store.rowCount)throw fail(400,'La sede no pertenece a esta empresa')
-   const created=await client.query('INSERT INTO integration_bindings(tenant_id,integration_id,store_id,external_location_id,purpose,queue_reference,authorization_confirmed_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[tenantId,id,b.storeId,b.externalLocationId.trim(),b.purpose,b.queueReference,user.id]);await invalidate()
+   if(!uuid(b.storeId)||b.externalLocationId!==undefined&&!text(b.externalLocationId,180)||typeof b.purpose!=='string'||b.purpose.length>80||! /^[A-Z][A-Z0-9_]*$/.test(b.purpose)||b.queueReference!=null&&!uuid(b.queueReference)||b.authorizationConfirmed!==true)throw fail(400,'Selecciona una sede y un propósito previamente autorizados en TU VERSO')
+   const store=await client.query('SELECT id,code FROM stores WHERE tenant_id=$1 AND id=$2',[tenantId,b.storeId]);if(!store.rowCount)throw fail(400,'La sede no pertenece a esta empresa')
+   const created=await client.query('INSERT INTO integration_bindings(tenant_id,integration_id,store_id,external_location_id,purpose,queue_reference,authorization_confirmed_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[tenantId,id,b.storeId,b.externalLocationId?.trim()??store.rows[0].code,b.purpose,b.queueReference??null,user.id]);await invalidate()
    return await finish(201,{id:created.rows[0].id},'BINDING_SAVED')
   }
   if(action==='test'){
