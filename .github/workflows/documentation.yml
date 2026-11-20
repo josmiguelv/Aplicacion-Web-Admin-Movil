@@ -1,0 +1,44 @@
+name: Documentation contract and PDF
+on:
+  pull_request:
+  push:
+    branches: ['**']
+permissions:
+  contents: read
+jobs:
+  documentation:
+    name: Verify documentation and publish PDF artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check documentation follows contract/config changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_BRANCH: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            git fetch --no-tags origin "$BASE_BRANCH"
+            BASE_REF="origin/$BASE_BRANCH"
+          elif [[ -n "$BEFORE_SHA" && ! "$BEFORE_SHA" =~ ^0+$ ]] && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+            BASE_REF="$BEFORE_SHA"
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            BASE_REF="HEAD^"
+          else
+            BASE_REF="HEAD"
+          fi
+          python3 scripts/check-documentation.py --base "$BASE_REF"
+      - name: Install PDF generator
+        run: python3 -m pip install --disable-pip-version-check reportlab==4.4.4
+      - name: Generate official PDF from Markdown
+        run: python3 scripts/build-documentation-pdf.py
+      - name: Upload versioned PDF for download
+        uses: actions/upload-artifact@v4
+        with:
+          name: administrador-web-documentacion-pdf
+          path: build/docs/Administrador_Web_Documentacion_Tecnica.pdf
+          retention-days: 90
+          if-no-files-found: error
