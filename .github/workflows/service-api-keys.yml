@@ -50,6 +50,8 @@ jobs:
         run: node server/catalog-operations.test.mjs
       - name: Focused commercial CRUD — payments, promotions, catalog, apps and accounts
         run: node server/commercial-crud.test.mjs
+      - name: Verify store availability checkbox read-after-write (focused)
+        run: node --test src/app/storeAvailabilityConfirmation.test.mjs
       - name: Focused scheduled notification API and image access
         run: node server/scheduled-notifications.test.mjs
       - name: Focused FCM scheduler, tenant routing and HTTP v1 send contract
