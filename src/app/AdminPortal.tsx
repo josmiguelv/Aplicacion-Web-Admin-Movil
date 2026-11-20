@@ -172,7 +172,7 @@ export default function AdminPortal() {
           <h2><Building2 size={18} /> Empresas registradas</h2>
           {loadingTenants ? <p className="portal-muted">Consultando empresas...</p> : tenants.length === 0 ? <p className="portal-muted">Todavía no hay empresas. Registra la primera para comenzar.</p> :
             <div className="portal-company-list">{tenants.map(tenant => <div className="portal-company" key={tenant.id}>
-              <div><strong>{tenant.name}</strong><small>{tenant.active ? 'Activa' : 'Inactiva'} · Identificador {tenant.id}</small></div>
+              <div className="portal-company-info"><strong>{tenant.name}</strong><span className={tenant.active ? 'ops-state ops-state--yes' : 'ops-state ops-state--no'}>{tenant.active ? 'Activa' : 'Desactivada'}</span></div>
               <button className="portal-outline" type="button" onClick={() => selectTenant(tenant.id, true)} disabled={!tenant.active}>Administrar</button>
               <button className="portal-outline" type="button" onClick={() => selectTenant(tenant.id)}>Accesos</button>
             </div>)}</div>}
