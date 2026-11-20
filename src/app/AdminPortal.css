@@ -207,3 +207,14 @@
 .portal-technical-links .portal-tab:hover:not(:disabled){background:#e4ebf2}
 .portal-technical-links .portal-tab.active{background:#fff;border-bottom-color:#234663;color:#203d58}
 @media(max-width:700px){.portal-technical-links{width:100%;margin:3px 0 8px;padding:4px;flex-wrap:wrap}.portal-technical-links .portal-tab{flex:1;justify-content:center;min-width:140px}}
+
+/* Usuarios existentes del tenant: consulta clara, sin secretos ni identificadores. */
+.portal-tenant-users{margin:0 0 22px;border:1px solid #e1e5e9;border-radius:9px;padding:16px;background:#fafbfc}
+.portal-tenant-users h3,.portal-create-admin-heading{font-size:14px;margin:0 0 12px;color:#263b4a}
+.portal-create-admin-heading{padding-top:16px;border-top:1px solid #e1e5e9}
+.portal-users-list{display:grid;gap:8px}
+.portal-user-item{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid #e1e5e9;border-radius:8px;background:#fff}
+.portal-user-ident{display:grid;gap:4px;min-width:0}
+.portal-user-ident strong{font-size:13px;overflow-wrap:anywhere;color:#263b4a}
+.portal-user-ident small{font-size:12px;color:#6c7b87}
+.portal-user-item .ops-state{flex-shrink:0}
