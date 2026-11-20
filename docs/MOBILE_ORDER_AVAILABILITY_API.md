@@ -331,3 +331,6 @@ La aplicación queda disponible en `http://localhost:4000`. Este arranque valida
 | Prueba E2E con TU VERSO | Pendiente; no se hicieron llamadas remotas. |
 | Integración de una aplicación móvil | Fuera del alcance de esta entrega; no se modificó ninguna app. |
 
+## Autorización de permisos TU VERSO
+
+En el flujo de validación anterior `/api/v1/mobile/orders/availability`, el Administrador Web mantiene asociación y credencial autorizadas, vigencia y no suspensión, pero no bloquea por la lista local `tenant_integrations.scopes`. Los permisos efectivos `queue.availability.read`, `interactions.create` e `interactions.read` los verifica TU VERSO en cada llamada. Esto evita errores `INTEGRATION_UNAVAILABLE` causados solo por metadatos locales desactualizados. No cambia las condiciones de selección de sede ni el estado de las validaciones.
