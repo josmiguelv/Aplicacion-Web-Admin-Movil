@@ -85,7 +85,7 @@ Ejemplo de dirección. Los campos de ubicación permiten geocodificar sin asumir
 
 Para GPS confirmado, enviar `useGps: true`, `latitude` y `longitude`; `address`, `district`, `city` y `country` pueden omitirse. Si se envía una dirección completa, el backend usa esa dirección. Las coordenadas deben estar entre latitud −90 y 90 y longitud −180 y 180.
 
-El servidor determina sedes activas, Delivery habilitado, horario abierto, cobertura y tarifa. Ordena por distancia de carretera y evalúa una sede a la vez. En una sede con consulta desactivada no llama a TU VERSO; con consulta activada verifica disponibilidad y, si está disponible, espera la decisión del asesor. Una falta de capacidad o rechazo permite evaluar la siguiente sede.
+El servidor determina sedes activas, Delivery habilitado, horario abierto, cobertura y tarifa. Ordena por distancia geográfica en línea recta (Haversine), calculada localmente sin Google Routes ni costos por solicitud, y evalúa una sede a la vez. Requiere coordenadas numéricas latitude/longitude del destino; una dirección textual sin coordenadas devuelve HTTP 422. La tarifa por kilómetro usa esta distancia estimada y no kilómetros de carretera. En una sede con consulta desactivada no llama a TU VERSO; con consulta activada verifica disponibilidad y, si está disponible, espera la decisión del asesor. Una falta de capacidad o rechazo permite evaluar la siguiente sede.
 
 ### Respuesta pendiente — HTTP 202
 
@@ -178,7 +178,7 @@ El cuerpo de error es `{ "error": "..." }`. Los errores internos se sanitizan y 
 | `422` | Dirección incompleta y sin GPS confirmado. |
 | `429` | Límite de solicitudes alcanzado; esperar antes de reintentar. |
 | `500` | Error interno genérico, sin información del proveedor. |
-| `503` | Cotización no disponible, por ejemplo sin Google Routes configurado o exceso de sedes en una operación. |
+| `503` | Cotización no disponible, por ejemplo si excede el límite de sedes en una operación. La falta de coordenadas del destino devuelve 422; no se consulta Google Routes. |
 
 El limitador actual es por proceso y dirección IP (10 POST/minuto, 60 GET/minuto). No sustituye a un limitador distribuido/WAF para producción con varias réplicas; este detalle debe revisarse antes de exposición pública amplia.
 
