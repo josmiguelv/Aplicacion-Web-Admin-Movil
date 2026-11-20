@@ -153,8 +153,6 @@ export default function AdminPortal() {
               <div><strong>{tenant.name}</strong><small>{tenant.active ? 'Activa' : 'Inactiva'} · Identificador {tenant.id}</small></div>
               <button className="portal-outline" type="button" onClick={() => selectTenant(tenant.id, true)} disabled={!tenant.active}>Administrar</button>
               <button className="portal-outline" type="button" onClick={() => selectTenant(tenant.id)}>Accesos</button>
-              <button className="portal-outline" type="button" disabled={!tenant.active} onClick={() => { selectTenant(tenant.id); setSection('integrations') }}>Integraciones</button>
-              <button className="portal-outline" type="button" disabled={!tenant.active} onClick={() => { selectTenant(tenant.id); setSection('api-keys') }}>API Keys</button>
             </div>)}</div>}
         </section>
         {selectedTenant && <section className="portal-panel">
