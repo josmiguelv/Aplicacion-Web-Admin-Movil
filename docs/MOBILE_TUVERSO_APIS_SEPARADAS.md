@@ -21,7 +21,7 @@ Las operaciones S2S a TU VERSO las realiza únicamente el backend, con credencia
 - Sede activa, delivery habilitado, horario configurado y abierta para la operación.
 - **Locales y horarios → sede → Consultar disponibilidad del pedido** activado y publicado.
 - **Conexiones externas → TU VERSO:** credencial vigente y una sola vinculación activa para la combinación tenant, aplicación, sede y propósito `ORDER_REQUEST`.
-- Permisos declarados: `queue.availability.read` para consulta, más `interactions.create` para envío.
+- Permisos efectivos: TU VERSO valida `queue.availability.read` para consulta y `interactions.create` para envío usando la credencial privada. Los `scopes` declarados localmente en Administrador Web son metadatos históricos y **no bloquean** operaciones por estar desactualizados. Se mantienen las validaciones locales de empresa, app, sede autorizada, horario, credencial, vencimiento, suspensión y tipo de canal. Los errores `401`/`403` del POST provienen de TU VERSO, no de la lista local de scopes.
 - En el backend de **Administrador Web**: `TUVERSO_LIVE_CHECKS_ENABLED=true` para consultas y `TUVERSO_LIVE_REQUESTS_ENABLED=true` para creación. Habilitar en entorno local **solo con autorización para enviar solicitudes de prueba al tenant y cola previstos**.
 - La clave `INTEGRATION_MASTER_KEY` que cifra las credenciales debe permanecer estable; no sustituirla ni copiarla al móvil.
 - La base del Administrador requiere las migraciones históricas de integración; estas rutas nuevas **no requieren migración nueva**.
