@@ -197,3 +197,89 @@
  .ops-notification-tab-count{min-width:24px;height:24px}
  .ops-notification-center .ops-store-toolbar>.ops-record-actions>.button{flex:1 1 130px}
 }
+
+
+/* Locales y horarios · CX: edición por secciones, lectura directa y horario rápido. */
+.ops-stores-cx>.ops-store-toolbar{margin-bottom:18px}
+.ops-cx-note{display:flex;align-items:flex-start;gap:8px;border:1px solid #e4edf4;border-radius:10px;background:#f7fafc;padding:12px 14px;font-size:12px;color:#536777;line-height:1.5}
+.ops-cx-note svg{flex:0 0 auto;margin-top:2px}
+.ops-cx-overview{display:flex;flex-wrap:wrap;gap:9px;margin:14px 0}
+.ops-cx-overview span{border:1px solid #dce8f0;border-radius:10px;background:#fff;padding:10px 14px;color:#577184;font-size:12px}
+.ops-cx-overview strong{font-size:16px;color:#1f4f6d;margin-right:4px}
+.ops-cx-store-list{gap:10px}
+.ops-cx-store-list .ops-store-entry{padding:6px 0}
+.ops-cx-store-list .ops-store-entry>.ops-row{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;padding:15px 17px}
+.ops-cx-store-list .ops-store-entry>.ops-row>span:first-child{font-size:14px;font-weight:750;color:#274a63}
+.ops-cx-store-list .ops-store-entry>.ops-row>span:nth-child(2){font-size:11px;color:#2c7897;font-weight:700}
+.ops-cx-store-list .ops-store-entry>.ops-row small{font-size:12px;margin:0;line-height:1.5}
+.ops-store-editor-v2{background:#fff;border-color:#dbe5ed;gap:0;padding:0;overflow:hidden}
+.ops-cx-form-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:22px 24px;border-bottom:1px solid #e1e9ef;background:#f8fbfd}
+.ops-cx-eyebrow{font-size:10px;letter-spacing:.12em;font-weight:750;color:#387a9a}
+.ops-store-editor-v2 .ops-cx-form-heading h3{font-size:20px;margin:6px 0;color:#204562}
+.ops-cx-form-heading p{margin:0}
+.ops-cx-step{padding:22px 24px;border-bottom:1px solid #e6edf2;display:grid;gap:16px}
+.ops-cx-step-head{display:flex;align-items:flex-start;gap:12px}
+.ops-cx-step-number{display:grid;place-items:center;flex:0 0 30px;height:30px;border:1px solid #bed5e5;border-radius:10px;background:#edf6fb;color:#286187;font-weight:750;font-size:14px}
+.ops-cx-step-head h4{font-size:15px;margin:3px 0 5px;color:#244a64;font-weight:750}
+.ops-cx-step-head p{margin:0}
+.ops-cx-fields{margin:0}
+.ops-cx-fields>label,.ops-cx-code>label{min-width:0}
+.ops-cx-fields label small{font-size:11px;font-weight:400;color:#687d8b}
+.ops-cx-required{color:#78909e;font-size:10px;font-weight:600;margin-left:4px}
+.ops-cx-code p{font-size:11px;line-height:1.5;margin:4px 0 8px}
+.ops-cx-code>.button{min-height:32px}
+.ops-cx-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ops-panel .ops-cx-option{display:flex;flex-direction:row;align-items:flex-start;gap:11px;border:1px solid #dde6ec;border-radius:12px;background:#fbfdfe;padding:13px;cursor:pointer;font-size:13px}
+.ops-cx-option input[type=checkbox]{flex:0 0 18px;margin-top:3px}
+.ops-cx-option span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ops-cx-option strong{font-size:13px;color:#284c65}
+.ops-cx-option small{font-size:11px;font-weight:400;line-height:1.5;color:#697d89}
+.ops-panel .ops-cx-option-focus{background:#f2f8fc;border-color:#cde2ef}
+.ops-cx-delivery{margin:0}
+.ops-cx-delivery>summary{justify-content:flex-start}
+.ops-cx-delivery summary:after{margin-left:auto}
+.ops-cx-delivery .ops-grid{margin:0 0 16px}
+.ops-cx-save-footer{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;padding:19px 24px;background:#f4f8fb}
+.ops-cx-save-footer strong{display:inline-flex;align-items:center;gap:7px;color:#234863}
+.ops-cx-save-footer p{margin:5px 0 0}
+.ops-cx-save-footer>.button{flex:0 0 auto}
+.ops-store-editor-v2>.ops-action-feedback{margin:15px 24px}
+.ops-store-editor-v2>.ops-cx-delete{margin:14px 24px}
+.ops-hours-experience{display:grid;gap:18px}
+.ops-hours-quick{padding:16px;border:1px solid #cfe2ed;border-radius:12px;background:#f7fbfd}
+.ops-hours-quick-title{display:flex;gap:10px;align-items:flex-start}
+.ops-hours-quick-title svg{color:#37789c;flex:0 0 auto;margin-top:3px}
+.ops-hours-quick-title strong{font-size:13px;color:#234e6b}
+.ops-hours-quick-title p{margin:4px 0 13px}
+.ops-hours-quick-fields{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(110px,1fr) minmax(110px,1fr) auto;gap:10px;align-items:end}
+.ops-hours-quick-fields>.button{min-height:42px;white-space:nowrap}
+.ops-hours-quick small{display:block;margin-top:9px;color:#667d8d;font-size:11px}
+.ops-hours-list-header{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
+.ops-hours-list-header strong{display:inline-flex;align-items:center;gap:7px;color:#294e67;font-size:13px}
+.ops-hours-list-header span{font-size:11px;color:#607789}
+.ops-hours-list{display:grid;gap:7px}
+.ops-hours-day{display:grid;grid-template-columns:100px minmax(155px,1.1fr) minmax(115px,.85fr) minmax(115px,.85fr);gap:10px;align-items:end;padding:10px 12px;border:1px solid #e4ebef;border-radius:10px;background:#fff}
+.ops-hours-day>strong{align-self:center;color:#324e61;font-size:12px}
+.ops-hours-day label{min-width:0;font-size:11px}
+.ops-hours-day input,.ops-hours-day select{width:100%;min-width:0;min-height:40px}
+.ops-hours-day-help{grid-column:3/5;align-self:center;color:#78909e;font-size:12px}
+.ops-hours-experience>.ops-store-help{margin:0;font-size:11px;color:#6d7e8d}
+@media(max-width:850px){
+ .ops-hours-quick-fields{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .ops-hours-quick-fields>label:first-child{grid-column:1/-1}
+ .ops-hours-quick-fields>.button{grid-column:1/-1}
+ .ops-hours-day{grid-template-columns:90px minmax(130px,1fr) minmax(100px,1fr) minmax(100px,1fr)}
+}
+@media(max-width:620px){
+ .ops-cx-form-heading,.ops-cx-step,.ops-cx-save-footer{padding:16px}
+ .ops-cx-options{grid-template-columns:1fr}
+ .ops-cx-form-heading>.button{width:100%}
+ .ops-cx-save-footer>.button{width:100%}
+ .ops-hours-day{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .ops-hours-day>strong{grid-column:1}
+ .ops-hours-day .ops-hours-day-status{grid-column:2}
+ .ops-hours-day-help{grid-column:1/-1}
+ .ops-hours-quick-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ops-hours-quick-fields>label:first-child{grid-column:1/-1}
+}
+@media(max-width:390px){.ops-hours-quick-fields{grid-template-columns:1fr}.ops-hours-quick-fields>label:first-child{grid-column:auto}}

@@ -496,3 +496,16 @@ Los consumidores actuales siguen funcionando aunque ignoren el nuevo campo.
 administrador antes de desplegar el backend. La nueva columna tiene `DEFAULT false`;
 no elimina ni sobrescribe datos previos. Las actualizaciones quedan en borrador
 hasta pulsar **Publicar**.
+
+### Locales y horarios — experiencia de configuración
+
+La pantalla del administrador separa el alta y edición de sedes del listado y
+organiza el formulario en **Datos del local**, **Estado y servicios**, **Horarios
+de atención** y **Ubicación y tarifas de delivery**. El horario rápido permite
+aplicar una franja a todos los días, de lunes a viernes o a fines de semana,
+sin borrar las reglas de los días no seleccionados. Cada día permite distinguir
+entre horario configurado, cerrado y sin configurar.
+
+El checkbox **Consultar disponibilidad del pedido** continúa siendo informativo,
+por sede. No cambia ningún contrato de API, migración ni lógica de cálculo de
+delivery. Guardar actualiza la sede; **Publicar** actualiza la API pública.
