@@ -200,3 +200,10 @@
 .ops-save-next p{margin:0;color:#335f47;font-size:13px;line-height:1.55}
 .ops-save-next-actions{display:flex;flex-wrap:wrap;gap:9px}
 @media(max-width:650px){.ops-save-next-actions .button{flex:1 1 auto}}
+
+/* Diferenciar herramientas técnicas sin encabezados que parezcan pestañas. */
+.portal-technical-links{display:flex;align-items:stretch;gap:4px;margin:5px 0 5px auto;padding:0 6px;border:1px solid #dfe6ed;border-radius:8px;background:#eef2f6}
+.portal-technical-links .portal-tab{padding:9px 12px;border-radius:6px;border-bottom:2px solid transparent}
+.portal-technical-links .portal-tab:hover:not(:disabled){background:#e4ebf2}
+.portal-technical-links .portal-tab.active{background:#fff;border-bottom-color:#234663;color:#203d58}
+@media(max-width:700px){.portal-technical-links{width:100%;margin:3px 0 8px;padding:4px;flex-wrap:wrap}.portal-technical-links .portal-tab{flex:1;justify-content:center;min-width:140px}}
