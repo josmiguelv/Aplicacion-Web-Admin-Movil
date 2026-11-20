@@ -156,3 +156,6 @@
 .integration-inline-notice{margin:12px 0 0;padding:10px 12px;line-height:1.5;font-size:13px}
 .integration-key-form>.integration-inline-notice,.integration-check-panel>.integration-inline-notice{justify-self:stretch}
 .integration-action-block>.integration-inline-notice{margin-top:12px}
+
+/* Aviso CX: cambios de sede pendientes de guardar. */
+.ops-unsaved{padding:11px 13px;border:1px solid #e9d3a6;background:#fff9eb;color:#76551d;border-radius:8px;font-size:13px;line-height:1.5;margin:12px 0}
