@@ -29,6 +29,14 @@ Este conjunto documenta el repositorio `josmiguelv/Aplicacion-Web-Admin-Movil`. 
 - El módulo TU VERSO del Administrador y las APIs públicas comerciales pertenecen a este repositorio. TU VERSO mantiene su propio repositorio, base y despliegue; este conjunto no describe ni modifica ese proyecto.
 - Las claves S2S de catálogo del Administrador (`ib2g_sk_v1_`) son distintas de las credenciales de TU VERSO. Ninguna clave privada debe ir en APK, navegador, logs ni repositorio.
 
+## Control automático en GitHub Actions
+
+El workflow `.github/workflows/documentation.yml` se ejecuta en **cada push de cualquier rama y en cada pull request**. Compara los archivos modificados con el commit anterior (push) o con la rama base (PR) y **falla** si se cambia un contrato o configuración de backend sin actualizar el Markdown responsable en el mismo cambio. La correspondencia de módulos está versionada en `scripts/check-documentation.py`.
+
+Los documentos Markdown de `docs/` son **la fuente oficial**. En cada ejecución, `scripts/build-documentation-pdf.py` compila un PDF único desde los archivos fuente sin sobrescribirlos ni crear un commit automático. El archivo se descarga como artefacto **administrador-web-documentacion-pdf** desde **GitHub → Actions → Documentation contract and PDF → ejecución → Artifacts**. Los artefactos se conservan 90 días. El PDF no se despliega en Railway ni actualiza por sí mismo la documentación.
+
+**Límite:** el control verifica presencia de cambios en la documentación correspondiente, no garantiza por sí solo exactitud semántica del texto. La revisión de contratos y riesgos sigue siendo responsabilidad del PR. Este flujo no toca TU VERSO, aplicaciones consumidoras ni bases de datos.
+
 ## Cómo mantener esta documentación
 
 Al cambiar código, actualizar el documento del contrato o módulo afectado en el mismo cambio. Dejar explícitos los consumidores, tenant ownership, variables requeridas, migraciones, pruebas focales, limitaciones actuales y si la capacidad está implementada, desplegada o certificada E2E. No describir un despliegue ni una prueba real que no se haya observado.
