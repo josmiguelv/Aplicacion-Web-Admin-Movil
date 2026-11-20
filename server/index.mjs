@@ -75,13 +75,13 @@ function storeHours(store,date=new Date()){
 function withLiveHours(store){return {...store,weeklyHours:mobileWeeklyHours(store.openingHours??store.opening_hours),...storeHours(store)}}
 
 async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings]=await Promise.all([
- tx.query('SELECT id,name,address,latitude,longitude,radius_km,delivery_fee_pen,delivery_rate_per_km_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours FROM stores WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
+ tx.query('SELECT id,name,address,latitude,longitude,radius_km,delivery_fee_pen,delivery_rate_per_km_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,consult_order_availability,opening_hours FROM stores WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query('SELECT id,name,description,category,price_pen,image_url FROM products WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query('SELECT id,title,starts_at,ends_at FROM promotions WHERE tenant_id=$1 AND active=true AND (starts_at IS NULL OR starts_at<=now()) AND (ends_at IS NULL OR ends_at>=now())',[tenantId]),
  tx.query('SELECT store_id,mode,method FROM payment_methods WHERE tenant_id=$1 AND enabled=true',[tenantId]),
  tx.query('SELECT id,title,summary,description,requirements,schedule,employment_type AS "employmentType",location_label AS "locationLabel",image_url AS "imageUrl",whatsapp_phone AS "whatsappPhone" FROM job_vacancies WHERE tenant_id=$1 AND active=true ORDER BY updated_at DESC,id',[tenantId]),
  tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId])
- ]);const payload={schemaVersion:1,appId,currency:'PEN',stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ ]);const payload={schemaVersion:1,appId,currency:'PEN',stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),consultOrderAvailability:s.consult_order_availability===true,openingHours:s.opening_hours??null,paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(withLiveHours)},true)}
 
@@ -318,12 +318,15 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(resource==='stores'){
   if(b.id && !uuid(b.id))throw bad(400,'ID técnico de sede inválido');
   if(b.code!==undefined&&(typeof b.code!=='string'||b.code.length<2||b.code.length>80||!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(b.code)))throw bad(400,'ID de sede inválido: usa minúsculas, números y guiones (2 a 80 caracteres)');
+  let existing;
   if(b.id){
-   const existing=await client.query('SELECT code FROM stores WHERE tenant_id=$1 AND id=$2 FOR UPDATE',[tenantId,b.id]);
+   existing=await client.query('SELECT code,consult_order_availability FROM stores WHERE tenant_id=$1 AND id=$2 FOR UPDATE',[tenantId,b.id]);
    if(!existing.rowCount)throw bad(404,'Sede no encontrada');
    if(b.code!==undefined&&b.code!==existing.rows[0].code)throw bad(400,'El ID de la sede no se puede modificar');
   }
   const storeCode=b.code??('sede-'+randomUUID());
+  if(b.consultOrderAvailability!==undefined&&!bool(b.consultOrderAvailability))throw bad(400,'Consultar disponibilidad del pedido debe ser un valor booleano');
+  const consultOrderAvailability=b.consultOrderAvailability===undefined?(existing?.rows?.[0]?.consult_order_availability??false):b.consultOrderAvailability;
   if(!word(b.name,180))throw bad(400,'Completa el nombre del local (máximo 180 caracteres)');
   if(!word(b.address,300))throw bad(400,'Completa la dirección del local (máximo 300 caracteres)');
   if(![b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled].every(bool))
@@ -346,8 +349,8 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    throw bad(400,'Horario de atención inválido'+(wrong?' para el '+(dayLabels[wrong[0]]||wrong[0]):'')+
     ': completa apertura y cierre en formato HH:MM, o marca Cerrado');
   }
-  const args=[tenantId,b.name.trim(),b.address.trim(),b.latitude??null,b.longitude??null,b.radiusKm??null,b.deliveryRatePerKmPen??null,b.deliveryFeePen??null,b.deliveryPricingMode??'PER_KM',b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,b.openingHours??null];
-  result=b.id&&uuid(b.id)?await client.query(`UPDATE stores SET name=$2,address=$3,latitude=$4,longitude=$5,radius_km=$6,delivery_rate_per_km_pen=$7,delivery_fee_pen=$8,delivery_pricing_mode=$9,active=$10,delivery_enabled=$11,pickup_enabled=$12,dine_in_enabled=$13,opening_hours=$14,updated_at=now() WHERE tenant_id=$1 AND id=$15 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO stores(tenant_id,name,address,latitude,longitude,radius_km,delivery_rate_per_km_pen,delivery_fee_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,[...args,storeCode])
+  const args=[tenantId,b.name.trim(),b.address.trim(),b.latitude??null,b.longitude??null,b.radiusKm??null,b.deliveryRatePerKmPen??null,b.deliveryFeePen??null,b.deliveryPricingMode??'PER_KM',b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,b.openingHours??null,consultOrderAvailability];
+  result=b.id&&uuid(b.id)?await client.query(`UPDATE stores SET name=$2,address=$3,latitude=$4,longitude=$5,radius_km=$6,delivery_rate_per_km_pen=$7,delivery_fee_pen=$8,delivery_pricing_mode=$9,active=$10,delivery_enabled=$11,pickup_enabled=$12,dine_in_enabled=$13,opening_hours=$14,consult_order_availability=$15,updated_at=now() WHERE tenant_id=$1 AND id=$16 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO stores(tenant_id,name,address,latitude,longitude,radius_km,delivery_rate_per_km_pen,delivery_fee_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,consult_order_availability,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,[...args,storeCode])
  }else if(resource==='vacancies'){
   const title=b.title?.trim(),phone=String(b.whatsappPhone||'').replace(/\D/g,'');
   const normalized=phone.length===9?'51'+phone:phone;

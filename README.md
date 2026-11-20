@@ -466,3 +466,33 @@ para volver, mientras que la navegación presenta contadores y un control
 manual **Actualizar**. Los filtros solo organizan los últimos resultados
 disponibles en la API administrativa; no borran ni cambian registros.
 No hay migraciones nuevas ni actualización de la app móvil para este cambio.
+
+
+## Consultar disponibilidad del pedido (por local)
+
+En **Locales → Editar local**, el checkbox **Consultar disponibilidad del pedido** es una opción
+booleana independiente para cada sede. Los nuevos locales y los existentes mantienen
+el valor `false` hasta que el administrador la active explícitamente. No modifica
+precios, tarifas, horarios ni el cálculo de entrega.
+
+- API autenticada `GET /api/admin/tenants/{tenantId}/stores`: propiedad
+  `consult_order_availability` (`true`/`false`) por cada local.
+- API de escritura `POST /api/admin/tenants/{tenantId}/stores`:
+  `consultOrderAvailability` (booleano opcional; sin valor preserva el estado
+  anterior al editar y aplica `false` al crear).
+- API pública **después de publicar la app**:
+  `GET /api/v1/mobile/config?appId=com.integrab2g.pollosb3`, en cada objeto
+  `stores[]`, campo `consultOrderAvailability` booleano, junto a
+  `deliveryPricingMode`, `deliveryFeePen`, `deliveryRatePerKmPen`,
+  `radiusKm`, `openingHours` y `paymentMethods`.
+
+**Contrato:** esta es una señal informativa para cada consumidor. Si vale `true`,
+la web o app aplicará su propia verificación de disponibilidad del pedido;
+el administrador **no** consulta inventario ni realiza comprobaciones de pedidos.
+Los consumidores actuales siguen funcionando aunque ignoren el nuevo campo.
+
+**Actualización de una base ya instalada:** aplicar solo la migración aditiva
+`server/migrations/011-store-order-availability.sql` a la base independiente del
+administrador antes de desplegar el backend. La nueva columna tiene `DEFAULT false`;
+no elimina ni sobrescribe datos previos. Las actualizaciones quedan en borrador
+hasta pulsar **Publicar**.

@@ -70,12 +70,41 @@ try{
   ...store('crud-'+nonce),openingHours:{mon:{open:'11:00',close:'23:00'}}
  }})
  const storeId=storeSaved.id
+ assert.equal(storeSaved.consult_order_availability,false,'Local nuevo: no exige consulta de disponibilidad')
+ const invalidFlag=await request(root+'/stores',{...params,method:'POST',data:{
+  ...store('crud-'+nonce),consultOrderAvailability:'true'
+ }})
+ assert.equal(invalidFlag.status,400)
+ assert.match(invalidFlag.body.error,/Consultar disponibilidad del pedido/)
  const pay={storeId,mode:'pickup',method:'yape',enabled:true}
  assert.equal((await requireStatus(root+'/payments',{...params,method:'POST',data:pay})).enabled,true)
  assert.equal((await requireStatus(root+'/payments',params)).items.length,1)
  await requireStatus(root+'/publish',{...params,method:'POST',data:{appId:app}})
  const publicPath='/api/v1/mobile/config?appId='+app
- assert.deepEqual((await requireStatus(publicPath)).stores[0].paymentMethods.pickup,['yape'])
+ const beforeToggle=await requireStatus(publicPath)
+ assert.deepEqual(beforeToggle.stores[0].paymentMethods.pickup,['yape'])
+ assert.equal(beforeToggle.stores[0].consultOrderAvailability,false)
+ const updatedStore=await requireStatus(root+'/stores',{...params,method:'POST',data:{
+  ...store('crud-'+nonce),id:storeId,consultOrderAvailability:true,
+  openingHours:{mon:{open:'11:00',close:'23:00'}}
+ }})
+ assert.equal(updatedStore.consult_order_availability,true)
+ assert.equal((await requireStatus(root+'/stores',params)).items.find(x=>x.id===storeId).consult_order_availability,true)
+ assert.equal((await requireStatus(publicPath)).stores[0].consultOrderAvailability,false,'Sin publicar se conserva el valor anterior')
+ await requireStatus(root+'/publish',{...params,method:'POST',data:{appId:app}})
+ const enabled=(await requireStatus(publicPath)).stores[0]
+ assert.equal(enabled.consultOrderAvailability,true)
+ assert.equal(enabled.consult_order_availability,true)
+ assert.equal(enabled.deliveryPricingMode,'PER_KM','Conservar los demás campos de delivery')
+ assert.equal(enabled.paymentMethods.pickup[0],'yape','Conservar los métodos de pago')
+ const disabledStore=await requireStatus(root+'/stores',{...params,method:'POST',data:{
+  ...store('crud-'+nonce),id:storeId,consultOrderAvailability:false,
+  openingHours:{mon:{open:'11:00',close:'23:00'}}
+ }})
+ assert.equal(disabledStore.consult_order_availability,false)
+ assert.equal((await requireStatus(publicPath)).stores[0].consultOrderAvailability,true,'Se mantiene el snapshot publicado')
+ await requireStatus(root+'/publish',{...params,method:'POST',data:{appId:app}})
+ assert.equal((await requireStatus(publicPath)).stores[0].consultOrderAvailability,false,'Desactivación visible al republicar')
  assert.equal((await requireStatus(root+'/payments',{...params,method:'POST',data:{...pay,enabled:false}})).enabled,false)
  assert.equal((await requireStatus(root+'/payments',params)).items[0].enabled,false)
  assert.deepEqual((await requireStatus(publicPath)).stores[0].paymentMethods.pickup,['yape'],'sin republicar, permanece snapshot')

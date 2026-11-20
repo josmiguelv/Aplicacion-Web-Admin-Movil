@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS stores (
   delivery_enabled BOOLEAN NOT NULL DEFAULT false,
   pickup_enabled BOOLEAN NOT NULL DEFAULT false,
   dine_in_enabled BOOLEAN NOT NULL DEFAULT false,
+  consult_order_availability BOOLEAN NOT NULL DEFAULT false,
   opening_hours JSONB,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (id,tenant_id)
@@ -400,4 +401,10 @@ DROP INDEX IF EXISTS idx_notifications_once_per_series_day;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_once_per_slot_day
  ON scheduled_notifications(recurrence_slot_id,occurrence_date)
  WHERE recurrence_slot_id IS NOT NULL;
+COMMIT;
+
+-- Bandera por sede para que cada aplicación consumidora consulte la disponibilidad del pedido.
+-- No genera consultas ni cambia la lógica de pedidos.
+BEGIN;
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS consult_order_availability BOOLEAN NOT NULL DEFAULT false;
 COMMIT;
