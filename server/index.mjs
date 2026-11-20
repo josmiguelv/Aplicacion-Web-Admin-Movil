@@ -2,6 +2,7 @@ import {integrationRoutes} from './integrations.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
+import {straightLineKm} from './delivery-distance.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -80,9 +81,6 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(s=>withLiveHours(s,q.rows[0].payload.timeZone))},true)}
 
-const routesApiKey=process.env.GOOGLE_ROUTES_API_KEY||'';
-const routeCache=new Map();
-const routePending=new Map();
 const quoteRateLimit=new Map();
 function limitPublicDeliveryQuotes(req){
  const ip=req.socket.remoteAddress||'unknown',now=Date.now();
@@ -91,57 +89,20 @@ function limitPublicDeliveryQuotes(req){
  if(!item||now-item.start>=60000){quoteRateLimit.set(ip,{start:now,count:1});return}
  if(++item.count>20)throw bad(429,'Demasiadas cotizaciones. Intenta de nuevo en un minuto');
 }
-const routeTimeoutMs=6000;
-async function roadDistanceKm(store,destination,revision){
- // The key never reaches the mobile device. No fallback to straight-line billing.
- if(!routesApiKey)throw bad(503,'Cotización de Delivery no disponible: falta configurar Google Routes');
- const key=[revision,store.id,typeof destination==='string'?destination:destination.latitude.toFixed(4)+':'+destination.longitude.toFixed(4)].join(':');
- const cached=routeCache.get(key);
- if(cached&&Date.now()<cached.until)return cached.km;
- if(routePending.has(key))return routePending.get(key);
- const promise=(async()=>{
- const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),routeTimeoutMs);
- try{
-  const response=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
-   method:'POST',signal:controller.signal,
-   headers:{'Content-Type':'application/json','X-Goog-Api-Key':routesApiKey,'X-Goog-FieldMask':'routes.distanceMeters'},
-   body:JSON.stringify({
-    origin:{location:{latLng:{latitude:store.latitude,longitude:store.longitude}}},
-    destination:typeof destination==='string'?{address:destination}:{location:{latLng:destination}},
-    travelMode:'DRIVE',routingPreference:'TRAFFIC_UNAWARE',computeAlternativeRoutes:false
-   })
-  });
-  if(!response.ok)throw Error('Routes '+response.status);
-  const data=await response.json();
-  const meters=data.routes?.[0]?.distanceMeters;
-  if(!Number.isFinite(meters)||meters<0) return null; // No drivable route.
-  const km=meters/1000;
-  if(routeCache.size>3000)routeCache.clear();
-  routeCache.set(key,{km,until:Date.now()+5*60*1000});
-  return km;
- }catch(err){if(err.name==='AbortError')throw bad(503,'Tiempo de espera agotado al calcular la ruta');throw bad(503,'No se pudo calcular la distancia por carretera')}
- finally{clearTimeout(timer)}
- })();
- routePending.set(key,promise);
- try{return await promise}finally{routePending.delete(key)}
-}
-
 async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
  const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone)).filter(s=>s.active&&s.delivery_enabled===true&&s.hoursConfigured===true&&s.isOpen===true);
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para Delivery');
- const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
- const hasAddress=word(b.address,250)&&word(b.district,90);
- if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
- const region=word(b.city,100)&&word(b.country,100)?[b.city.trim(),b.country.trim()]:legacyLimaFallback?['Lima','Perú']:[];
- const destination=hasAddress?[b.address.trim(),b.district.trim(),...region].join(', '):{latitude:b.latitude,longitude:b.longitude};
+ const hasCoordinates=checkLatLng(b.latitude,b.longitude);
+ if(!hasCoordinates)throw bad(422,'Para calcular sin Google, indica latitud y longitud del destino. La dirección en texto por sí sola no permite calcular distancia en línea recta.');
+ const destination={latitude:b.latitude,longitude:b.longitude};
  const candidates=eligible.filter(s=>checkLatLng(s.latitude,s.longitude)&&
   (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
  if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
  if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
- if(hasCoordinates&&!hasAddress)candidates.sort((a,b2)=>kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
+ if(hasCoordinates)candidates.sort((a,b2)=>kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
  const available=[];
  for(const store of candidates){
-  const km=await roadDistanceKm(store,destination,revision);
+  const km=straightLineKm({latitude:store.latitude,longitude:store.longitude},destination);
   if(km===null||store.radiusKm!==null&&store.radiusKm!==undefined&&km>store.radiusKm+1e-8)continue;
   const deliveryFee=store.deliveryPricingMode==='FIXED'?store.deliveryFeePen:Math.round((km*store.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
   available.push({storeId:store.id,storeName:store.name,deliveryFee,routeDistanceKm:km,
@@ -201,7 +162,7 @@ async function quote(req,res){
   mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],deliveryFeePen,routeDistanceKm:roadKm,
   deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,
   ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
-  distanceSource:b.mode==='delivery'?'GOOGLE_ROUTES':null,provisional:true,
+  distanceSource:b.mode==='delivery'?'STRAIGHT_LINE':null,provisional:true,
   notice:'Importes sujetos a confirmación al realizar el pedido.'},true)
 }
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
