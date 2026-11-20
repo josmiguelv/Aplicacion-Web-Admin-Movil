@@ -7,6 +7,11 @@ import pg from 'pg'
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL, max:10})
 const port=Number(process.env.PORT||4000)
 const prod=process.env.NODE_ENV==='production'
+if(prod){
+ if(!process.env.DATABASE_URL)throw new Error('DATABASE_URL es obligatorio en producción');
+ if(!process.env.ADMIN_ORIGIN || !/^https:\/\/[^/]+$/.test(process.env.ADMIN_ORIGIN))throw new Error('ADMIN_ORIGIN debe ser un origen HTTPS exacto en producción');
+ if(process.env.COOKIE_SECURE==='false')throw new Error('COOKIE_SECURE no puede ser false en producción');
+}
 const secure=process.env.COOKIE_SECURE!== 'false' && prod
 const allowedOrigins=(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean)
 const corsHeaders={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type','Cache-Control':'no-store'}
@@ -232,6 +237,12 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
 }
 async function serve(res,path){const base=join(process.cwd(),'dist');const target=normalize(join(base,path==='/'?'index.html':path));if(!target.startsWith(base+'/')&&target!==base)throw bad(403,'Ruta inválida');let content;try{content=await readFile(target)}catch{content=await readFile(join(base,'index.html'))}const type=({'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[extname(target)]||'application/octet-stream';res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(content)}
 createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);try{
+ if(url.pathname==='/health/live'&&req.method==='GET')return json(res,200,{status:'ok'});
+ if(url.pathname==='/health/ready'&&req.method==='GET'){
+  try{await sql('SELECT 1');return json(res,200,{status:'ready'})}
+  catch{ return json(res,503,{status:'unavailable'}) }
+ }
+
  if(url.pathname.startsWith('/api/v1/mobile/')){
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
