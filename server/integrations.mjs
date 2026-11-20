@@ -49,7 +49,7 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
    if(!id){const rows=await pool.query(`SELECT ${columns} FROM tenant_integrations WHERE tenant_id=$1 ORDER BY created_at,id`,[tenantId]);json(res,200,{integrations:rows.rows.map(view),connectionMode:connectionMode()});return true}
    const row=(await pool.query(`SELECT ${columns} FROM tenant_integrations WHERE tenant_id=$1 AND id=$2`,[tenantId,id])).rows[0]
    if(!row)throw fail(404,'Integración no encontrada')
-   const bindings=await pool.query('SELECT b.id,b.store_id AS "storeId",s.name AS "storeName",s.code AS "storeCode",b.external_location_id AS "externalLocationId",b.purpose,b.queue_reference AS "queueReference",b.authorization_confirmed_at AS "authorizationConfirmedAt" FROM integration_bindings b JOIN stores s ON s.id=b.store_id AND s.tenant_id=b.tenant_id WHERE b.tenant_id=$1 AND b.integration_id=$2 ORDER BY b.authorization_confirmed_at,b.id',[tenantId,id])
+   const bindings=await pool.query('SELECT b.id,b.app_id AS "appId",b.store_id AS "storeId",s.name AS "storeName",s.code AS "storeCode",b.external_location_id AS "externalLocationId",b.purpose,b.queue_reference AS "queueReference",b.authorization_confirmed_at AS "authorizationConfirmedAt" FROM integration_bindings b JOIN stores s ON s.id=b.store_id AND s.tenant_id=b.tenant_id WHERE b.tenant_id=$1 AND b.integration_id=$2 ORDER BY b.app_id,b.authorization_confirmed_at,b.id',[tenantId,id])
    json(res,200,{...view(row),bindings:bindings.rows.map(b=>({...b,source:'MANUAL_AUTHORIZATION'}))});return true
   }
   const b=await body(req)
@@ -112,10 +112,11 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
     const removed=await client.query('DELETE FROM integration_bindings WHERE tenant_id=$1 AND integration_id=$2 AND id=$3',[tenantId,id,bindingToDelete]);if(!removed.rowCount)throw fail(404,'Asociación no encontrada')
     await invalidate();return await finish(200,{ok:true},'BINDING_REMOVED')
    }
-   keys(b,['storeId','externalLocationId','purpose','queueReference','authorizationConfirmed'])
-   if(!uuid(b.storeId)||b.externalLocationId!==undefined&&!text(b.externalLocationId,180)||typeof b.purpose!=='string'||b.purpose.length>80||! /^[A-Z][A-Z0-9_]*$/.test(b.purpose)||b.queueReference!=null&&!uuid(b.queueReference)||b.authorizationConfirmed!==true)throw fail(400,'Selecciona una sede y un propósito previamente autorizados en TU VERSO')
+   keys(b,['appId','storeId','externalLocationId','purpose','queueReference','authorizationConfirmed'])
+   if(!uuid(b.storeId)||b.appId!==undefined&&!text(b.appId,150)||b.externalLocationId!==undefined&&!text(b.externalLocationId,180)||typeof b.purpose!=='string'||b.purpose.length>80||! /^[A-Z][A-Z0-9_]*$/.test(b.purpose)||b.queueReference!=null&&!uuid(b.queueReference)||b.authorizationConfirmed!==true)throw fail(400,'Selecciona una sede y un propósito previamente autorizados en TU VERSO')
+   if(b.appId){const app=await client.query('SELECT 1 FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,b.appId]);if(!app.rowCount)throw fail(400,'La aplicación no pertenece a esta empresa')}
    const store=await client.query('SELECT id,code FROM stores WHERE tenant_id=$1 AND id=$2',[tenantId,b.storeId]);if(!store.rowCount)throw fail(400,'La sede no pertenece a esta empresa')
-   const created=await client.query('INSERT INTO integration_bindings(tenant_id,integration_id,store_id,external_location_id,purpose,queue_reference,authorization_confirmed_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',[tenantId,id,b.storeId,b.externalLocationId?.trim()??store.rows[0].code,b.purpose,b.queueReference??null,user.id]);await invalidate()
+   const created=await client.query('INSERT INTO integration_bindings(tenant_id,integration_id,app_id,store_id,external_location_id,purpose,queue_reference,authorization_confirmed_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[tenantId,id,b.appId??null,b.storeId,b.externalLocationId?.trim()??store.rows[0].code,b.purpose,b.queueReference??null,user.id]);await invalidate()
    return await finish(201,{id:created.rows[0].id},'BINDING_SAVED')
   }
   if(action==='request'){
