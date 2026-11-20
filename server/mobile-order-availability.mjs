@@ -69,7 +69,7 @@ export function createMobileOrderAvailabilityRoutes({pool,body,json,loadOrderCon
   return true
  }
  async function integrationFor(row,candidate){
-  const result=await pool.query(`SELECT i.id AS integration_id,i.tenant_id,i.encrypted_credential,i.expires_at,i.suspended,i.scopes,
+  const result=await pool.query(`SELECT i.id AS integration_id,i.tenant_id,i.encrypted_credential,i.expires_at,i.suspended,
     b.id AS binding_id,b.store_id,b.external_location_id,b.purpose,b.authorization_confirmed_at
    FROM integration_bindings b
    JOIN tenant_integrations i ON i.id=b.integration_id AND i.tenant_id=b.tenant_id
@@ -80,12 +80,12 @@ export function createMobileOrderAvailabilityRoutes({pool,body,json,loadOrderCon
    ORDER BY i.id`,[row.tenant_id,row.app_id,candidate.storeId])
   if(result.rowCount!==1)return null
   const item=result.rows[0]
-  if(item.suspended||!item.encrypted_credential||item.expires_at&&new Date(item.expires_at)<=new Date()||
-   !Array.isArray(item.scopes)||!item.scopes.includes('queue.availability.read')||!item.scopes.includes('interactions.create')||!item.scopes.includes('interactions.read'))return null
+  // Local scopes are informational; TU VERSO enforces effective read/create permissions.
+  if(item.suspended||!item.encrypted_credential||item.expires_at&&new Date(item.expires_at)<=new Date())return null
   return {...item,token:decrypt(item.encrypted_credential,row.tenant_id,item.integration_id)}
  }
  async function attemptFor(row){
-  return (await pool.query(`SELECT a.*,i.encrypted_credential,i.expires_at,i.suspended,i.scopes,b.external_location_id,b.purpose
+  return (await pool.query(`SELECT a.*,i.encrypted_credential,i.expires_at,i.suspended,b.external_location_id,b.purpose
    FROM mobile_order_attempts a
    JOIN tenant_integrations i ON i.id=a.integration_id AND i.tenant_id=a.tenant_id
    JOIN integration_bindings b ON b.id=a.binding_id AND b.tenant_id=a.tenant_id
