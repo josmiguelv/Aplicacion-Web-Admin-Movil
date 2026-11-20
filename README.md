@@ -10,6 +10,7 @@ Repositorio de la plataforma administrativa multitenant y sus APIs comerciales. 
 - [API Keys S2S](docs/API_KEYS_INTEGRACIONES.md): gestión y consumo de claves privadas para lectura de catálogo.
 - [Integraciones TU VERSO](docs/TUVERSO_INTEGRACIONES.md): configuración por empresa, custodia de credenciales y límites.
 - [API de disponibilidad](docs/MOBILE_ORDER_AVAILABILITY_API.md): contrato, estados, migración 006 y operación local.
+- [APIs móviles TU VERSO separadas](docs/MOBILE_TUVERSO_APIS_SEPARADAS.md): consulta por sede, inicio de interacción y prueba local Windows.
 
 ## Componentes activos
 
