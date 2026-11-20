@@ -9,7 +9,7 @@
 1. La app descarga el catálogo publicado desde `GET /api/v1/mobile/config?appId=...`.
 2. La app selecciona una sede considerando su horario, cobertura y entrega. El backend vuelve a validar que esa sede pertenece al mismo tenant, está activa, tiene delivery habilitado y está abierta en el horario real.
 3. La app consulta la capacidad de la cola autorizada para **esa sede**, mediante la nueva API independiente `GET /api/v1/mobile/stores/{storeId}/agent-availability?appId=...`. **No crea conversación ni pedido.**
-4. Si hay capacidad, la app calcula la tarifa con la API existente `POST /api/v1/mobile/fulfillment/resolve`. **La ruta de cotización existente puede seleccionar automáticamente la sede más cercana para delivery; el consumidor debe comprobar que `storeId` de la cotización coincide con la sede elegida antes de continuar.** No se cambia su comportamiento en esta tarea.
+4. Si hay capacidad, la app calcula la tarifa con la API existente `POST /api/v1/mobile/fulfillment/resolve`. **La ruta de cotización puede seleccionar automáticamente la sede más cercana para delivery, usando distancia en línea recta sin llamar a Google; el consumidor debe comprobar que `storeId` de la cotización coincide con la sede elegida antes de continuar.** No se cambia su comportamiento en esta tarea.
 5. La app envía `POST /api/v1/mobile/interactions` para crear una solicitud en TU VERSO. El backend revalida la sede y vuelve a comprobar la capacidad antes de crearla. `AVAILABLE` no implica reserva de un asesor.
 6. La respuesta `PENDING` confirma creación de una interacción pendiente de decisión, **no aprobación, cobro ni pedido final**. La lectura posterior de la decisión sigue siendo un flujo distinto y no se añade una ruta pública nueva de lectura en esta entrega.
 
@@ -90,6 +90,10 @@ Ejemplo de respuesta `201`:
 ```
 
 El valor `externalReference` anterior es descriptivo; en una respuesta real será el valor determinístico generado por el backend. Respuesta `409`: catálogo cambió, sede ya no disponible o capacidad perdida. Respuesta `503`: TU VERSO o creación deshabilitados/no comprobables.
+
+### Cálculo local sin costo de Google
+
+Para delivery, `/api/v1/mobile/fulfillment/resolve` y la validación previa de pedidos usan una distancia aproximada **en línea recta**, sin llamadas a Google Routes. La app debe incluir `latitude` y `longitude` numéricos correspondientes al destino y confirmar las coordenadas con el usuario. Una dirección textual sola devuelve HTTP `422`: no es posible obtener coordenadas fiables a partir del texto sin geocodificación. El cálculo por kilómetro y las restricciones de cobertura usarán kilómetros lineales, no distancia por carretera. El campo `distanceSource` de las cotizaciones es `STRAIGHT_LINE`.
 
 ## 5. Arranque y prueba LOCAL en Windows PowerShell
 
