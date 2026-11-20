@@ -170,3 +170,21 @@
 .portal-nav-label{font-size:11px;font-weight:700;letter-spacing:.04em;color:#64717d;padding:13px 10px;align-self:center}
 .portal-nav-separator{width:1px;background:#dfe4e8;align-self:stretch;margin:8px 10px}
 @media(max-width:700px){.ops-area-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:9px;gap:7px}.ops-area-tab{padding:10px 7px;font-size:12px}.portal-nav{flex-wrap:wrap}.portal-nav-separator{display:none}.portal-nav-label{width:100%;padding:10px 8px 0}}
+
+/* Sedes creadas: lectura rápida para administradores no técnicos. */
+.ops-sede-header{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin:23px 0 14px}
+.ops-sede-header h3{margin:0 0 4px;font-size:16px}
+.ops-sede-header .ops-hint{margin:0}
+.ops-sede-list{display:grid;gap:10px;margin-bottom:22px}
+.ops-sede-card{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px 18px;border:1px solid #e1e5e9;border-radius:10px;background:#fff}
+.ops-sede-info{display:grid;gap:9px;min-width:0;flex:1 1 270px}
+.ops-sede-name{font-size:15px;font-weight:700;color:#23313e;overflow-wrap:anywhere}
+.ops-sede-states{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap}
+.ops-sede-consult{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px;color:#526475}
+.ops-state{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:5px 10px;font-size:12px;font-weight:700;border:1px solid}
+.ops-state::before{content:"";height:7px;width:7px;border-radius:50%;background:currentColor}
+.ops-state--yes{background:#eaf7ef;border-color:#b7e1c6;color:#17643b}
+.ops-state--no{background:#fff0ef;border-color:#f1c7c2;color:#a62f2a}
+.ops-sede-actions{display:flex;flex-wrap:wrap;gap:9px}
+.ops-sede-editor{border-top:1px solid #e1e5e9;padding-top:20px;margin-top:20px}
+@media(max-width:700px){.ops-sede-card{padding:14px}.ops-sede-actions{width:100%}.ops-sede-actions .button{flex:1 1 auto}.ops-sede-header>.button{width:100%}}
