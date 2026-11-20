@@ -2,7 +2,7 @@ import {integrationRoutes} from './integrations.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
-import {straightLineKm} from './delivery-distance.mjs'
+import {straightLineKm,resolveDeliveryDestination} from './delivery-distance.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -92,14 +92,12 @@ function limitPublicDeliveryQuotes(req){
 async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
  const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone)).filter(s=>s.active&&s.delivery_enabled===true&&s.hoursConfigured===true&&s.isOpen===true);
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para Delivery');
- const hasCoordinates=checkLatLng(b.latitude,b.longitude);
- if(!hasCoordinates)throw bad(422,'Para calcular sin Google, indica latitud y longitud del destino. La dirección en texto por sí sola no permite calcular distancia en línea recta.');
- const destination={latitude:b.latitude,longitude:b.longitude};
+ const destination=resolveDeliveryDestination(b);
  const candidates=eligible.filter(s=>checkLatLng(s.latitude,s.longitude)&&
   (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
  if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
  if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
- if(hasCoordinates)candidates.sort((a,b2)=>kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
+ candidates.sort((a,b2)=>kmDistance(destination.latitude,destination.longitude,a.latitude,a.longitude)-kmDistance(destination.latitude,destination.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
  const available=[];
  for(const store of candidates){
   const km=straightLineKm({latitude:store.latitude,longitude:store.longitude},destination);

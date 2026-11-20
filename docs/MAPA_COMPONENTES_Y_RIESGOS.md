@@ -77,7 +77,7 @@ Si un campo nuevo debe llegar a móvil, cambiar solo la forma del formulario no 
 
 - Las sedes se filtran por estado activo, modalidad, horario y cobertura.
 - La zona horaria del tenant determina si la sede está abierta.
-- En el entorno de pruebas, la distancia del delivery se calcula dentro del backend mediante Haversine (línea recta) en `server/delivery-distance.mjs`, sin llamadas a Google Routes. Las APIs requieren las coordenadas del destino; una dirección textual sola devuelve 422. Este cálculo es una aproximación: la cobertura y la tarifa por km no representan kilometraje real de carretera.
+- En el entorno de pruebas, la distancia del delivery se calcula dentro del backend mediante Haversine (línea recta) en `server/delivery-distance.mjs`, sin llamadas a Google Routes. Sin ambas coordenadas del destino, el backend utiliza provisionalmente las coordenadas de prueba -12.0506096, -77.1251313; una coordenada parcial o inválida devuelve 422. Hay riesgo de tarifa/distancia cero incorrecta si se utiliza la ubicación de prueba. Este cálculo es una aproximación: la cobertura y la tarifa por km no representan kilometraje real de carretera.
 - La tarifa por kilómetro o fija y el límite de cobertura tienen semánticas distintas; no cambiar una sin revisar `README.md`, `MobileOperations.tsx` y el flujo `fulfillment/resolve`.
 
 ### Validación de disponibilidad y TU VERSO

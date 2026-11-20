@@ -93,7 +93,7 @@ El valor `externalReference` anterior es descriptivo; en una respuesta real ser�
 
 ### Cálculo local sin costo de Google
 
-Para delivery, `/api/v1/mobile/fulfillment/resolve` y la validación previa de pedidos usan una distancia aproximada **en línea recta**, sin llamadas a Google Routes. La app debe incluir `latitude` y `longitude` numéricos correspondientes al destino y confirmar las coordenadas con el usuario. Una dirección textual sola devuelve HTTP `422`: no es posible obtener coordenadas fiables a partir del texto sin geocodificación. El cálculo por kilómetro y las restricciones de cobertura usarán kilómetros lineales, no distancia por carretera. El campo `distanceSource` de las cotizaciones es `STRAIGHT_LINE`.
+Para delivery, `/api/v1/mobile/fulfillment/resolve` y la validación previa de pedidos usan una distancia aproximada **en línea recta**, sin llamadas a Google Routes. Si faltan **ambas** coordenadas del destino (`latitude` y `longitude`), el backend usa de forma provisional las coordenadas de prueba **-12.0506096, -77.1251313**, incluso cuando la solicitud contiene una dirección escrita. Si llega solo una coordenada o datos inválidos responde HTTP `422`. Las coordenadas de prueba no representan necesariamente al cliente, por lo que la cotización puede ser inexacta o cero. El cálculo por kilómetro y las restricciones de cobertura usarán kilómetros lineales, no distancia por carretera. El campo `distanceSource` de las cotizaciones es `STRAIGHT_LINE`.
 
 ## 5. Arranque y prueba LOCAL en Windows PowerShell
 
