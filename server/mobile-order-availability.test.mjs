@@ -80,7 +80,7 @@ test('pending asesor rejection advances once to the next eligible tenant store',
  const firstStore='16161616-1616-4161-8161-161616161616',secondStore='17171717-1717-4171-8171-171717171717'
  let row=null,attempt=null,decision='PENDING',creates=0,availabilityChecks=0
  const linked={integration_id:integration,tenant_id:tenant,encrypted_credential:'ciphertext',expires_at:null,suspended:false,
-  scopes:['queue.availability.read','interactions.create','interactions.read'],binding_id:binding,store_id:firstStore,
+  scopes:['queue.availability.read'],binding_id:binding,store_id:firstStore,
   external_location_id:'authorized-location',purpose:'ORDER_REQUEST',authorization_confirmed_at:new Date()}
  const pool={async query(sql,args=[]){
   if(sql.includes('FROM mobile_order_validations v')&&sql.includes('v.idempotency_key=$2'))return {rowCount:0,rows:[]}

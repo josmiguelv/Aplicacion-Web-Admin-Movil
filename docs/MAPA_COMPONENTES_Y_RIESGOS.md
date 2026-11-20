@@ -137,3 +137,9 @@ Ejecutar solo las pruebas relacionadas con el cambio. Las pruebas unitarias simu
 - Actualizar tipos, contrato, ejemplo y estado de despliegue si el comportamiento cambió.
 - Añadir y ejecutar pruebas focalizadas que cubran el riesgo introducido.
 - No activar flags live ni hacer llamadas reales a TU VERSO como efecto colateral de una prueba rutinaria.
+
+## Autoridad de permisos de integraciones externas
+
+Los permisos `scopes` guardados en `tenant_integrations` son metadatos locales, **no una segunda autoridad de acceso**. Las rutas `server/mobile-tuverso-routes.mjs`, `server/mobile-order-availability.mjs` y el envío administrativo de `server/integrations.mjs` delegan la decisión de permisos efectivos a TU VERSO mediante credencial S2S. Riesgo evitado: denegación incorrecta por scopes locales desactualizados. Riesgo que permanece: credencial realmente revocada o sin licencia/permiso remoto; debe interpretarse la respuesta upstream. No aflojar los controles locales de empresa, app, sede, vínculo autorizado, tipo de canal, suspensión y credencial válida.
+
+Validación focal: `node --test server/mobile-tuverso-routes.test.mjs server/mobile-order-availability.test.mjs server/integrations.test.mjs`. Las pruebas simulan respuestas remotas; no crean interacciones reales.

@@ -300,3 +300,9 @@ Estas pruebas acreditan el comportamiento del administrador ante simulaciones.
 una cuenta/instancia, cola y Flow autorizados, credencial legítima, licencia/scopes
 vigentes y autorización explícita de consulta. Fase 1B permanece deshabilitada;
 no se implementan interacciones, conversaciones, mensajes, pedidos ni cobros.
+
+## Autoridad efectiva de permisos (20-11-2026)
+
+Los `scopes` de `tenant_integrations` permanecen por compatibilidad y visibilidad administrativa, **pero no se usan para bloquear ni aprobar** operaciones de disponibilidad, creación o lectura de interacciones. TU VERSO verifica los permisos efectivos al recibir cada petición con la credencial cifrada guardada en el Administrador Web. La lista local puede diferir de los permisos reales sin impedir una operación autorizada por TU VERSO.
+
+El Administrador Web mantiene obligatorios los controles de tenant, `appId`, sede, asociación `ORDER_REQUEST` previamente autorizada, credencial vigente, suspensión, tipo de canal, banderas de ejecución, idempotencia y límites. Una denegación real de TU VERSO se trata como rechazo upstream; no debe autoasignarse scopes ni copiar permisos entre empresas. La ruta administrativa de envío también delega la comprobación de `interactions.create` al servidor TU VERSO.

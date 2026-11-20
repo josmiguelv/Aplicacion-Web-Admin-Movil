@@ -15,7 +15,7 @@ const catalogs={
  [appA]:{tenant_id:tenantA,revision:4,payload:{stores:[{id:storeA,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo A',pricePen:20,active:true}]}},
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
-function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create'],enabled=true,requests=true,open=true,count=1}={}){
+function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create'],enabled=true,requests=true,open=true,count=1,upstreamStatus=201,suspended=false,hasCredential=true,channelType='MOBILE_APP'}={}){
  const queries=[],remote=[]
  const pool={async query(sql,args){
   queries.push({sql,args})
@@ -28,7 +28,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    return {rowCount:matches?1:0,rows:matches?[{active:true,delivery_enabled:true,opening_hours:{},time_zone:'America/Lima'}]:[]}
   }
   if(sql.includes('FROM integration_bindings b')){
-   return {rowCount:count,rows:count?[{integration_id:integration,encrypted_credential:'ciphertext',expires_at:null,suspended:false,scopes,channel_type:'MOBILE_APP',binding_id:bindingId,external_location_id:args[2]===storeA?'location-a':'location-b',purpose:'ORDER_REQUEST'}]:[]}
+   return {rowCount:count,rows:count?[{integration_id:integration,encrypted_credential:hasCredential?'ciphertext':null,expires_at:null,suspended,scopes,channel_type:channelType,binding_id:bindingId,external_location_id:args[2]===storeA?'location-a':'location-b',purpose:'ORDER_REQUEST'}]:[]}
   }
   throw Error('Unexpected SQL: '+sql)
  }}
@@ -38,7 +38,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   decrypt:()=> 'private-credential',
   availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return {result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
-  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});return {ok:true,httpStatus:201,data:{interactionId:randomUUID(),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}}
+  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});return upstreamStatus!==201?{ok:false,httpStatus:upstreamStatus,errorCode:'UPSTREAM_'+upstreamStatus}:{ok:true,httpStatus:201,data:{interactionId:randomUUID(),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}}
  })
  const call=async(method,path,{payload,headers}={})=>{
   const req={method,body:payload,headers:headers||{},socket:{remoteAddress:'synthetic'}}
@@ -75,9 +75,27 @@ test('closed store and missing binding fail closed',async()=>{
  const b=harness({count:0}),other=await b.call('GET',endpoint())
  assert.equal(other.code,409);assert.equal(b.remote.length,0)
 })
-test('missing permission and disabled switches never call remote',async()=>{
- const a=harness({scopes:['queue.availability.read']}),r=await a.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
- assert.equal(r.code,409);assert.equal(a.remote.length,0)
+test('stale locally declared scopes do not block TU VERSO-authorized request',async()=>{
+ const a=harness({scopes:['queue.availability.read']})
+ const r=await a.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
+ assert.equal(r.code,201);assert.deepEqual(a.remote.map(x=>x.operation),['capacity','interaction'])
+ const b=harness({scopes:[]}),q=await b.call('GET',endpoint())
+ assert.equal(q.code,200);assert.equal(q.payload.available,true)
+})
+test('actual upstream permission errors are returned without exposing credential',async()=>{
+ for(const code of [401,403,409,429]){
+  const a=harness({scopes:['queue.availability.read'],upstreamStatus:code})
+  const r=await a.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
+  assert.equal(r.code,code)
+  assert.equal(JSON.stringify(r.payload).includes('private-credential'),false)
+  assert.deepEqual(a.remote.map(x=>x.operation),['capacity','interaction'])
+ }
+})
+test('suspension, absent credential, invalid channel and disabled switches still block',async()=>{
+ for(const options of [{suspended:true},{hasCredential:false},{channelType:'WEB'}]){
+  const h=harness(options),r=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
+  assert.equal(r.code,409);assert.equal(h.remote.length,0)
+ }
  const b=harness({enabled:false}),other=await b.call('GET',endpoint())
  assert.equal(other.code,503);assert.equal(b.remote.length,0)
  const c=harness({requests:false}),third=await c.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})

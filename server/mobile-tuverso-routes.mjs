@@ -48,8 +48,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   },live.rows[0].time_zone))throw fail(409,'La sede ya no está abierta o habilitada')
   return {tenantId:catalog.tenant_id,revision:catalog.revision,payload:catalog.payload,store}
  }
- async function binding(tenantId,appId,storeId,kind){
-  const result=await pool.query(`SELECT i.id AS integration_id,i.encrypted_credential,i.expires_at,i.suspended,i.scopes,
+ async function binding(tenantId,appId,storeId){
+  const result=await pool.query(`SELECT i.id AS integration_id,i.encrypted_credential,i.expires_at,i.suspended,
     i.channel_type,b.id AS binding_id,b.external_location_id,b.purpose
     FROM integration_bindings b JOIN tenant_integrations i
     ON i.id=b.integration_id AND i.tenant_id=b.tenant_id
@@ -58,10 +58,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     ORDER BY i.id`,[tenantId,appId,storeId])
   if(result.rowCount!==1)throw fail(409,'La sede no tiene una integración única y autorizada')
   const row=result.rows[0]
+  // TU VERSO authorizes its scopes. Keep local tenant/app/store binding, credential,
+  // suspension and channel restrictions; do not trust stale declared scopes.
   if(row.suspended||!row.encrypted_credential||row.expires_at&&new Date(row.expires_at)<=new Date()||
-     row.channel_type&&row.channel_type!=='MOBILE_APP'||
-     !Array.isArray(row.scopes)||!row.scopes.includes('queue.availability.read')||
-     kind==='create'&&!row.scopes.includes('interactions.create'))throw fail(409,'La integración no está habilitada para esta operación')
+     row.channel_type&&row.channel_type!=='MOBILE_APP')throw fail(409,'La integración no está habilitada para esta operación')
   return {...row,token:decrypt(row.encrypted_credential,tenantId,row.integration_id)}
  }
  return async function route({req,res,url}){
@@ -76,7 +76,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!VALID_UUID.test(storeId)||!APP.test(appId||''))throw fail(400,'Sede o aplicación inválida')
     const ctx=await context(appId,storeId)
     if(checkMode()==='DISABLED')throw fail(503,'Consulta de TU VERSO no habilitada')
-    const integration=await binding(ctx.tenantId,appId,storeId,'read')
+    const integration=await binding(ctx.tenantId,appId,storeId)
     const result=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
     if(result.result!=='AVAILABLE'&&result.result!=='UNAVAILABLE')throw fail(503,'No se pudo comprobar la disponibilidad')
     return json(res,200,{storeId,status:result.result,available:result.result==='AVAILABLE',checkedAt:result.providerCheckedAt??result.checkedAt,reservation:false})
@@ -92,7 +92,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    const ctx=await context(input.appId,input.storeId)
    if(ctx.revision!==input.quoteRevision)throw fail(409,'El catálogo cambió: solicita una nueva cotización')
    const cart=calculateOrderCart(ctx.payload.products,input.items)
-   const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
+   const integration=await binding(ctx.tenantId,input.appId,input.storeId)
    // This is a fresh capacity check, not a reservation. If capacity was lost, refuse before creating.
    const available=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
    if(available.result==='UNAVAILABLE')throw fail(409,'Ya no hay capacidad de atención en esta sede')
@@ -102,7 +102,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
     customerExternalId:input.customerExternalId,externalReference,summary:cart.summary,idempotencyKey
    })
-   if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:503,'TU VERSO no pudo iniciar la solicitud')
+   if(!result.ok){
+    const upstreamStatus=[401,403,409,429].includes(result.httpStatus)?result.httpStatus:503
+    throw fail(upstreamStatus,'TU VERSO no pudo iniciar la solicitud')
+   }
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
       result.data?.purpose!=='ORDER_REQUEST')throw fail(503,'Respuesta de TU VERSO no corresponde a la sede autorizada')
    return json(res,result.httpStatus===201?201:200,{interactionId:result.data.interactionId,status:result.data.status,storeId:input.storeId,externalReference:result.data.externalReference})
