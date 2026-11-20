@@ -7,6 +7,7 @@ import './AdminPortal.css'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
+type TenantUser = { id: string; email: string; role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; active: boolean; created_at: string }
 type Section = 'companies' | 'operations' | 'integrations' | 'api-keys'
 
 async function api<T>(path: string, method: 'GET' | 'POST' = 'GET', data?: unknown): Promise<T> {
@@ -35,6 +36,10 @@ export default function AdminPortal() {
   const [companyName, setCompanyName] = useState('')
   const [adminEmail, setAdminEmail] = useState('')
   const [adminPassword, setAdminPassword] = useState('')
+  const [tenantUsers, setTenantUsers] = useState<TenantUser[]>([])
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [usersError, setUsersError] = useState('')
+  const [usersRevision, setUsersRevision] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -56,6 +61,20 @@ export default function AdminPortal() {
     return () => { active = false }
   }, [session?.role])
 
+  useEffect(() => {
+    if(session?.role !== 'SUPER_ADMIN' || !tenantId || section !== 'companies'){
+      setTenantUsers([]); setUsersError(''); setLoadingUsers(false)
+      return
+    }
+    let current = true
+    setTenantUsers([]); setUsersError(''); setLoadingUsers(true)
+    void api<{ items: TenantUser[] }>('/api/admin/tenants/' + tenantId + '/users')
+      .then(result => { if(current) setTenantUsers(result.items) })
+      .catch(cause => { if(current) setUsersError(cause instanceof Error ? cause.message : 'No se pudieron consultar los usuarios') })
+      .finally(() => { if(current) setLoadingUsers(false) })
+    return () => { current = false }
+  }, [session?.role, tenantId, section, usersRevision])
+
   const execute = async (work: () => Promise<void>) => {
     setBusy(true); setError(''); setNotice('')
     try { await work() } catch (cause) { setError(cause instanceof Error ? cause.message : 'Error inesperado') }
@@ -75,7 +94,7 @@ export default function AdminPortal() {
 
   const logout = () => void execute(async () => {
     await api('/api/admin/logout', 'POST')
-    setSession(null); setTenants([]); setTenantId(''); setAdminEmail(''); setAdminPassword('')
+    setSession(null); setTenants([]); setTenantId(''); setAdminEmail(''); setAdminPassword(''); setTenantUsers([])
     setSection('companies')
   })
 
@@ -101,6 +120,7 @@ export default function AdminPortal() {
     void execute(async () => {
       await api('/api/admin/tenants/' + tenantId + '/users', 'POST', { email: adminEmail.trim(), password: adminPassword })
       setAdminEmail(''); setAdminPassword('')
+      setUsersRevision(value => value + 1)
       setNotice('Administrador registrado para la empresa seleccionada.')
     })
   }
@@ -158,7 +178,18 @@ export default function AdminPortal() {
             </div>)}</div>}
         </section>
         {selectedTenant && <section className="portal-panel">
-          <h2><ShieldCheck size={18} /> Administrador de {selectedTenant.name}</h2>
+          <h2><ShieldCheck size={18} /> Accesos de {selectedTenant.name}</h2>
+          <div className="portal-tenant-users">
+            <h3>Usuarios de la empresa</h3>
+            {loadingUsers ? <p className="portal-muted" role="status">Cargando usuarios...</p> :
+              usersError ? <div role="alert" className="portal-error">{usersError} <button type="button" className="portal-outline" onClick={() => setUsersRevision(value => value + 1)}>Reintentar</button></div> :
+              tenantUsers.length === 0 ? <p className="portal-muted">Esta empresa todavía no tiene usuarios registrados.</p> :
+              <div className="portal-users-list">{tenantUsers.map(user => <div className="portal-user-item" key={user.id}>
+                <div className="portal-user-ident"><strong>{user.email}</strong><small>{user.role === 'TENANT_ADMIN' ? 'Administrador de empresa' : 'Superadministrador'}</small></div>
+                <span className={user.active ? 'ops-state ops-state--yes' : 'ops-state ops-state--no'}>{user.active ? 'Activo' : 'Desactivado'}</span>
+              </div>)}</div>}
+          </div>
+          <h3 className="portal-create-admin-heading">Crear administrador</h3>
           <p className="portal-muted">La cuenta creada tendrá acceso únicamente a esta empresa. La contraseña debe contener al menos 14 caracteres.</p>
           <form className="portal-inline portal-admin-form" onSubmit={createTenantAdmin}>
             <label>Correo del administrador<input type="email" autoComplete="off" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} required /></label>
