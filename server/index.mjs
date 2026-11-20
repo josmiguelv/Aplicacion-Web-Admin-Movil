@@ -222,6 +222,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   return json(res,200,x.rows[0]);
  }
  const userMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users$/);
+ if(userMatch&&req.method==='GET'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const id=userMatch[1];await tenantOf(user,id);const result=await sql('SELECT id,email,role,active,created_at FROM admin_users WHERE tenant_id=$1 ORDER BY created_at DESC,id',[id]);return json(res,200,{items:result.rows})}
  if(userMatch&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const id=userMatch[1];await tenantOf(user,id);const b=await body(req);if(!word(b.email,254)||!word(b.password,512)||b.password.length<14)throw bad(400,'Correo o clave inválida (mínimo 14 caracteres)');const salt=randomBytes(16).toString('hex'),hash=`scrypt:${salt}:${scryptSync(b.password,salt,64).toString('hex')}`;const x=await sql('INSERT INTO admin_users(email,password_hash,role,tenant_id) VALUES(lower($1),$2,$3,$4) RETURNING id,email',[b.email,hash,'TENANT_ADMIN',id]);return json(res,201,x.rows[0])}
  const asset=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/images$/);
  if(asset&&req.method==='POST'){
@@ -293,8 +294,9 @@ async function serve(res,path){const base=join(process.cwd(),'dist');const targe
 createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);try{
  if(url.pathname==='/health/live'&&req.method==='GET')return json(res,200,{status:'ok'});
  if(url.pathname==='/health/ready'&&req.method==='GET'){
-  try{await sql('SELECT 1');return json(res,200,{status:'ready'})}
-  catch{ return json(res,503,{status:'unavailable'}) }
+  let databaseReady=false;
+  try{await sql('SELECT 1');databaseReady=true}catch{}
+  return json(res,databaseReady?200:503,{status:databaseReady?'ready':'unavailable'});
  }
 
  if(await serviceCatalogRoute({req,res,url,pool,json}))return
@@ -312,4 +314,4 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(url.pathname.startsWith('/api/admin/'))return await admin(req,res,url)
  if(req.method==='GET')return await serve(res,url.pathname)
  throw bad(405,'Método no permitido')
- }catch(err){if(err.code==='23505')return json(res,409,{error:'Conflicto: registro duplicado'});if(err.code==='23503')return json(res,409,{error:'Referencia no válida'});const code=typeof err.code==='number'?err.code:500;if(code===500)console.error('API error',err.message);json(res,code,{error:code===500?'Error interno':err.message})}}).listen(port,()=>console.log('INTEGRA B2G multitenant admin listening',port))
+ }catch(err){if(res.headersSent || res.writableEnded){console.error('API response already started:',err instanceof Error?err.message:'Unknown error');if(!res.writableEnded&&!res.destroyed)res.destroy();return}if(err.code==='23505')return json(res,409,{error:'Conflicto: registro duplicado'});if(err.code==='23503')return json(res,409,{error:'Referencia no válida'});const code=typeof err.code==='number'?err.code:500;if(code===500)console.error('API error',err.message);json(res,code,{error:code===500?'Error interno':err.message})}}).listen(port,()=>console.log('INTEGRA B2G multitenant admin listening',port))
