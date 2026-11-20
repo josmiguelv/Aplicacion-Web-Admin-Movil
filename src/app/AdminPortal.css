@@ -193,3 +193,10 @@
 .ops-sede-card>.ops-sede-editor{flex:0 0 100%;width:100%;min-width:0;margin-top:4px;padding-top:22px}
 .ops-sede-card:has(>.ops-sede-editor){border-color:#a9c9b8;box-shadow:0 4px 16px rgba(30,70,50,.06)}
 .ops-sede-card>.ops-sede-editor .ops-panel{margin-bottom:16px}
+
+/* Feedback contextual: guardar no equivale a publicar. */
+.ops-save-next{display:grid;gap:10px;padding:16px;margin-top:14px;background:#f0faf3;border:1px solid #b8dec5;border-radius:9px;color:#1a5f38}
+.ops-save-next-heading{display:flex;align-items:center;gap:9px;font-size:14px}
+.ops-save-next p{margin:0;color:#335f47;font-size:13px;line-height:1.55}
+.ops-save-next-actions{display:flex;flex-wrap:wrap;gap:9px}
+@media(max-width:650px){.ops-save-next-actions .button{flex:1 1 auto}}
