@@ -45,7 +45,7 @@ La zona se usa al validar horarios y se publica al catálogo cuando se vuelve a 
 
 ## 3. Reglas comunes de las APIs móviles
 
-- Base URL: la URL HTTPS del backend del Administrador.
+- Base URL: en local, `http://localhost:4000` cuando Node sirve la interfaz compilada; en un servidor accesible fuera del equipo, usar la URL HTTPS del backend del Administrador.
 - Content-Type para solicitudes con cuerpo: `application/json`.
 - `appId`: identificador exacto registrado en el Administrador.
 - `validationToken`: 256 bits aleatorios como mínimo, generado con CSPRNG por cada validación; formato `ordv1_` más 43 caracteres base64url sin `=`. La app lo guarda en almacenamiento privado de sesión y nunca en logs. El backend almacena solo su SHA-256.
@@ -209,12 +209,125 @@ Authorization: Bearer {credencial privada}
 
 Se leen los estados de TU VERSO `PENDING`, `ACCEPTED`, `REJECTED` o `EXPIRED`. No se asume webhook ni se crea una API nueva en TU VERSO. Un timeout incierto conserva la clave y referencia del mismo intento para recuperarse con idempotencia.
 
-## 9. Compatibilidad, pruebas y despliegue
+## 9. Compatibilidad y pruebas
 
 - `consultOrderAvailability` es un booleano por sede, publicado en el catálogo sin cambiar los demás campos existentes.
 - Si está desactivado, no se consulta TU VERSO y se conserva la cotización de la sede elegible.
 - `POST /api/v1/mobile/fulfillment/resolve` conserva su comportamiento actual.
 - La migración `server/migrations/006-mobile-order-availability.sql` es aditiva para la base del Administrador. No ejecutarla contra la base de TU VERSO.
 - Prueba focalizada: `node --test server/mobile-order-availability.test.mjs`. Los escenarios sintéticos cubren el subtotal del catálogo, aislamiento de dos tenants y rechazo del asesor con avance a la siguiente sede.
-- No se ejecutó la migración ni se desplegó. No hubo llamadas E2E a TU VERSO. Ninguna app móvil se modificó; cada aplicación debe integrar estas rutas para usar la función.
+- La migración no se ha ejecutado y la API no se ha desplegado en un servidor. No hubo llamadas E2E a TU VERSO. Ninguna app móvil se modificó; cada aplicación debe integrar estas rutas para usar la función.
+
+## 10. Instalación y ejecución local
+
+Esta guía es exclusivamente para el repositorio del Administrador; no requiere Railway ni modifica la base de TU VERSO.
+
+**Repositorio:** `josmiguelv/Aplicacion-Web-Admin-Movil`  
+**Rama de la funcionalidad:** `feat/multitenant-mobile-order-availability`
+
+### Requisitos
+
+- Node.js 22, pnpm y PostgreSQL 17 instalados localmente.
+- Una base de datos local exclusiva del Administrador. No configurar aquí la URL de PostgreSQL de TU VERSO.
+- Ejecutar los comandos desde la raíz del repositorio, en PowerShell.
+
+### Obtener el código
+
+Si ya existe una rama local con la funcionalidad:
+
+```powershell
+git fetch origin
+git switch feat/multitenant-mobile-order-availability
+git pull --ff-only origin feat/multitenant-mobile-order-availability
+```
+
+Si aún no existe la rama local, después de `git fetch origin`:
+
+```powershell
+git switch --track -c feat/multitenant-mobile-order-availability origin/feat/multitenant-mobile-order-availability
+```
+
+### Configurar variables locales
+
+Crear `.env` sin sobrescribir un archivo existente y editarlo localmente:
+
+```powershell
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+notepad .env
+```
+
+Configurar `DATABASE_URL` para la base local del Administrador y, al servir la compilación en el puerto 4000, establecer:
+
+```text
+PORT=4000
+NODE_ENV=development
+ADMIN_ORIGIN=http://localhost:4000
+COOKIE_SECURE=false
+TUVERSO_LIVE_CHECKS_ENABLED=false
+```
+
+No subir `.env` al repositorio. La clave `INTEGRATION_MASTER_KEY` debe permanecer estable mientras existan credenciales TU VERSO cifradas con ella. Las llamadas reales a TU VERSO permanecen desactivadas por defecto; activarlas requiere configuración autorizada por tenant y puede crear interacciones remotas.
+
+### Aplicar esquema o migración
+
+Elegir solo el caso que corresponde a la base del Administrador:
+
+- **Base nueva y vacía:** `server/schema.sql` contiene el esquema actual, incluidos los objetos de la migración 006. Aplicar el esquema completo una sola vez; no ejecutar 006 aparte.
+- **Base existente con las migraciones previas 003, 004 y 005:** aplicar únicamente `server/migrations/006-mobile-order-availability.sql`. No ejecutar `server/schema.sql` sobre una base con datos.
+- Si la base no tiene las tablas previas de TU VERSO del Administrador (`tenant_integrations` e `integration_bindings`), detenerse y revisar el estado de las migraciones anteriores antes de ejecutar 006.
+
+En PowerShell, cargar la URL desde `.env`, confirmar que identifica la base local del Administrador y aplicar 006:
+
+```powershell
+$env:DATABASE_URL = ((Get-Content .env | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -First 1) -replace '^DATABASE_URL=', '')
+psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -c "SELECT current_database() AS database, current_user AS db_user, to_regclass('public.tenants') AS tenants, to_regclass('public.mobile_apps') AS mobile_apps, to_regclass('public.stores') AS stores, to_regclass('public.integration_bindings') AS integration_bindings, to_regclass('public.tenant_integrations') AS tenant_integrations;"
+psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -f server/migrations/006-mobile-order-availability.sql
+```
+
+Para una base nueva, reemplazar la última línea por:
+
+```powershell
+psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -f server/schema.sql
+```
+
+Verificar que la migración esté aplicada:
+
+```powershell
+psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -c "SELECT to_regclass('public.mobile_order_validations') AS validations, to_regclass('public.mobile_order_attempts') AS attempts, EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='stores' AND column_name='consult_order_availability') AS store_setting, EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='tenants' AND column_name='time_zone') AS tenant_timezone;"
+```
+
+Las tablas deben existir y los dos indicadores deben ser `t` (`true`).
+
+### Compilar e iniciar
+
+```powershell
+pnpm install --frozen-lockfile
+node --test server/mobile-order-availability.test.mjs server/tuverso-mobile-connector.test.mjs
+pnpm build
+```
+
+En una base nueva, crear el Super Administrador una sola vez. Omitir este paso si la base ya tiene uno:
+
+```powershell
+node --env-file=.env server/bootstrap-admin.mjs
+```
+
+Después de verificar el resultado, quitar las variables `BOOTSTRAP_ADMIN_*` de `.env`. Iniciar la interfaz compilada y el backend:
+
+```powershell
+node --env-file=.env server/index.mjs
+```
+
+La aplicación queda disponible en `http://localhost:4000`. Este arranque valida el servicio local; no certifica por sí mismo llamadas reales a TU VERSO ni la integración de una aplicación móvil.
+
+### Estado de la entrega
+
+| Elemento | Estado |
+| --- | --- |
+| Código multitenant y rutas del Administrador | Implementados en la rama indicada. |
+| Pruebas focalizadas sintéticas y compilación de CI | Aprobadas para el commit del PR revisado. |
+| Migración 006 en la base local del usuario | Pendiente de ejecución local. |
+| Inicio local del backend con la base migrada | Pendiente de ejecución y verificación en el equipo local. |
+| Prueba E2E con TU VERSO | Pendiente; no se hicieron llamadas remotas. |
+| Integración de una aplicación móvil | Fuera del alcance de esta entrega; no se modificó ninguna app. |
 
