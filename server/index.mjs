@@ -73,6 +73,9 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(withLiveHours)},true)}
 
+const routesApiKey=process.env.GOOGLE_ROUTES_API_KEY||'';
+const routeCache=new Map();
+const routePending=new Map();
 const quoteRateLimit=new Map();
 function limitPublicDeliveryQuotes(req){
  const ip=req.socket.remoteAddress||'unknown',now=Date.now();
@@ -81,25 +84,39 @@ function limitPublicDeliveryQuotes(req){
  if(!item||now-item.start>=60000){quoteRateLimit.set(ip,{start:now,count:1});return}
  if(++item.count>20)throw bad(429,'Demasiadas cotizaciones. Intenta de nuevo en un minuto');
 }
-
-// Transitional distance model. No external routing API or fabricated road distance.
-function straightLineQuote(stores,latitude,longitude){
- if(!checkLatLng(latitude,longitude))throw bad(422,'Confirma las coordenadas de entrega antes de calcular la cobertura');
- const eligible=stores.filter(s=>checkLatLng(s.latitude,s.longitude)&&
-  (s.deliveryPricingMode==='FIXED'
-   ?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0
-   :Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
- if(!eligible.length)throw bad(409,'Ninguna sede habilitada tiene coordenadas y tarifa de Delivery configuradas');
- const within=eligible.map(store=>({store,km:kmDistance(latitude,longitude,store.latitude,store.longitude)}))
-  .filter(x=>x.store.radiusKm==null||x.km<=Number(x.store.radiusKm)+1e-8)
-  .sort((a,b)=>a.km-b.km||a.store.id.localeCompare(b.store.id));
- if(!within.length)throw bad(409,'Dirección fuera de la cobertura de las sedes abiertas');
- // Always choose the nearest open and covered store, independent of tariff mode.
- const chosen=within[0];
- const fixed=chosen.store.deliveryPricingMode==='FIXED';
- const fee=fixed?chosen.store.deliveryFeePen:
-  Math.round((chosen.km*chosen.store.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
- return {store:chosen.store,straightDistanceKm:Math.round(chosen.km*100)/100,deliveryFeePen:fee};
+const routeTimeoutMs=6000;
+async function roadDistanceKm(store,destination,revision){
+ // The key never reaches the mobile device. No fallback to straight-line billing.
+ if(!routesApiKey)throw bad(503,'Cotización de Delivery no disponible: falta configurar Google Routes');
+ const key=[revision,store.id,typeof destination==='string'?destination:destination.latitude.toFixed(4)+':'+destination.longitude.toFixed(4)].join(':');
+ const cached=routeCache.get(key);
+ if(cached&&Date.now()<cached.until)return cached.km;
+ if(routePending.has(key))return routePending.get(key);
+ const promise=(async()=>{
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),routeTimeoutMs);
+ try{
+  const response=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{
+   method:'POST',signal:controller.signal,
+   headers:{'Content-Type':'application/json','X-Goog-Api-Key':routesApiKey,'X-Goog-FieldMask':'routes.distanceMeters'},
+   body:JSON.stringify({
+    origin:{location:{latLng:{latitude:store.latitude,longitude:store.longitude}}},
+    destination:typeof destination==='string'?{address:destination}:{location:{latLng:destination}},
+    travelMode:'DRIVE',routingPreference:'TRAFFIC_UNAWARE',computeAlternativeRoutes:false
+   })
+  });
+  if(!response.ok)throw Error('Routes '+response.status);
+  const data=await response.json();
+  const meters=data.routes?.[0]?.distanceMeters;
+  if(!Number.isFinite(meters)||meters<0) return null; // No drivable route.
+  const km=meters/1000;
+  if(routeCache.size>3000)routeCache.clear();
+  routeCache.set(key,{km,until:Date.now()+5*60*1000});
+  return km;
+ }catch(err){if(err.name==='AbortError')throw bad(503,'Tiempo de espera agotado al calcular la ruta');throw bad(503,'No se pudo calcular la distancia por carretera')}
+ finally{clearTimeout(timer)}
+ })();
+ routePending.set(key,promise);
+ try{return await promise}finally{routePending.delete(key)}
 }
 
 async function quote(req,res){
@@ -110,15 +127,36 @@ async function quote(req,res){
  const config=q.rows[0].payload;
  const eligible=config.stores.map(withLiveHours).filter(s=>s.active&&s[b.mode==='dine_in'?'dine_in_enabled':b.mode+'_enabled']===true&&(b.mode==='delivery'?(s.hoursConfigured===true&&s.isOpen===true):(s.hoursConfigured!==true||s.isOpen===true)));
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para esta modalidad');
- let selected,straightDistanceKm=null,deliveryFeePen=0;
+ let selected,roadKm=null,deliveryFeePen=0;
  if(b.mode==='delivery'){
   limitPublicDeliveryQuotes(req);
-  // The destination must be geocoded on the device or explicitly confirmed by GPS.
-  // A text address is metadata, never silently treated as a point or shop coordinates.
-  if(!checkLatLng(b.latitude,b.longitude))
-   throw bad(422,'No hay coordenadas del destino. Confirma el punto de entrega o utiliza tu ubicación actual');
-  const chosen=straightLineQuote(eligible,b.latitude,b.longitude);
-  selected=chosen.store;straightDistanceKm=chosen.straightDistanceKm;deliveryFeePen=chosen.deliveryFeePen;
+  const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
+  const hasAddress=word(b.address,250)&&word(b.district,90);
+  if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
+  // A typed address takes precedence: an earlier GPS fix from browsing stores must
+  // never silently replace the delivery destination.
+  const destination=hasAddress?
+   [b.address.trim(),b.district.trim(),'Lima','Perú'].join(', '):
+   {latitude:b.latitude,longitude:b.longitude};
+  const candidates=eligible.filter(s=>checkLatLng(s.latitude,s.longitude)&&
+   (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
+  if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
+  if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
+  if(hasCoordinates&&!hasAddress)candidates.sort((a,b2)=>
+   kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-
+   kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
+  // Evaluate all reachable, enabled stores so the road-nearest eligible one wins.
+  const available=[];
+  for(const store of candidates){
+   const km=await roadDistanceKm(store,destination,q.rows[0].revision);
+   if(km===null)continue;
+   if(store.radiusKm!==null&&store.radiusKm!==undefined&&km>store.radiusKm+1e-8)continue;
+   available.push({store,km});
+  }
+  available.sort((a,b2)=>a.km-b2.km||a.store.id.localeCompare(b2.store.id));
+  if(!available.length)throw bad(409,'Dirección fuera de la cobertura de las sedes disponibles');
+  selected=available[0].store;roadKm=available[0].km;
+  deliveryFeePen=selected.deliveryPricingMode==='FIXED'?selected.deliveryFeePen:Math.round((roadKm*selected.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
  }else{
   selected=eligible.find(s=>s.id===b.storeId);
   if(!selected)throw bad(409,'Selecciona una sede abierta para esta modalidad');
@@ -126,9 +164,9 @@ async function quote(req,res){
  return json(res,200,{
   revision:q.rows[0].revision,storeId:selected.id,storeName:selected.name,
   mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],
-  deliveryFeePen,routeDistanceKm:null,straightDistanceKm,deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
-  distanceSource:b.mode==='delivery'?'STRAIGHT_LINE':null,
-  provisional:true,notice:'Distancia aproximada en línea recta. No representa kilómetros por carretera; importe sujeto a confirmación.'
+  deliveryFeePen,routeDistanceKm:roadKm,deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
+  distanceSource:b.mode==='delivery'?'GOOGLE_ROUTES':null,
+  provisional:true,notice:'Importes sujetos a confirmación al realizar el pedido.'
  },true)
 }
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
@@ -218,4 +256,4 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(url.pathname.startsWith('/api/admin/'))return await admin(req,res,url)
  if(req.method==='GET')return await serve(res,url.pathname)
  throw bad(405,'Método no permitido')
- }catch(err){const publicRead=url.pathname.startsWith('/api/v1/mobile/');if(err.code==='23505')return json(res,409,{error:'Conflicto: registro duplicado'},publicRead);if(err.code==='23503')return json(res,409,{error:'Referencia no válida'},publicRead);const code=typeof err.code==='number'?err.code:500;if(code===500)console.error('API error',err.message);json(res,code,{error:code===500?'Error interno':err.message},publicRead)}}).listen(port,()=>console.log('Pollos B3 admin listening',port))
+ }catch(err){if(err.code==='23505')return json(res,409,{error:'Conflicto: registro duplicado'});if(err.code==='23503')return json(res,409,{error:'Referencia no válida'});const code=typeof err.code==='number'?err.code:500;if(code===500)console.error('API error',err.message);json(res,code,{error:code===500?'Error interno':err.message})}}).listen(port,()=>console.log('Pollos B3 admin listening',port))
