@@ -1,5 +1,6 @@
 import {integrationRoutes} from './integrations.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
+import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -16,7 +17,7 @@ if(prod){
 }
 const secure=process.env.COOKIE_SECURE!== 'false' && prod
 const allowedOrigins=(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean)
-const corsHeaders={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type','Cache-Control':'no-store'}
+const corsHeaders={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization, Idempotency-Key','Cache-Control':'no-store'}
 const json=(res,status,body,publicRead=false)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8',...(publicRead?corsHeaders:{'Cache-Control':'no-store'})});res.end(JSON.stringify(body))}
 const bad=(code,message)=>Object.assign(new Error(message),{code})
 const uuid=x=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(x)
@@ -38,7 +39,8 @@ async function session(req){const token=cookie(req);if(!/^[a-f0-9]{64}$/.test(to
 async function tenantOf(auth,id){if(!uuid(id))throw bad(400,'Empresa inválida');if(auth.role!=='SUPER_ADMIN'&&auth.tenant_id!==id)throw bad(403,'No tienes acceso a esta empresa');const row=await sql('SELECT id FROM tenants WHERE id=$1 AND active=true',[id]);if(!row.rowCount)throw bad(404,'Empresa no disponible')}
 function checkLatLng(lat,lng){return safeNumber(lat)&&safeNumber(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180}
 
-const PERU_TZ='America/Lima';
+const DEFAULT_TENANT_TZ='America/Lima';
+function validTimeZone(value){if(typeof value!=='string'||value.length>100)return false;try{new Intl.DateTimeFormat('en-US',{timeZone:value});return true}catch{return false}}
 const WEEKDAYS=['sun','mon','tue','wed','thu','fri','sat'];
 function validateOpeningHours(value){
  if(value===null)return true;
@@ -48,10 +50,11 @@ function validateOpeningHours(value){
    /^([01]\d|2[0-3]):[0-5]\d$/.test(v.open)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v.close)&&v.open!==v.close)
  ));
 }
-function storeHours(store,date=new Date()){
+function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
  const hours=store.openingHours??store.opening_hours;
  if(!hours||typeof hours!=='object')return {hoursConfigured:false};
- const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:PERU_TZ,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).map(p=>[p.type,p.value]));
+ const zone=validTimeZone(timeZone)?timeZone:DEFAULT_TENANT_TZ;
+ const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).map(p=>[p.type,p.value]));
  const day=parts.weekday.toLowerCase(),cfg=hours[day],minutes=Number(parts.hour)*60+Number(parts.minute);
  const index=WEEKDAYS.indexOf(day);
  const prev=hours[WEEKDAYS[(index+6)%7]];
@@ -62,18 +65,19 @@ function storeHours(store,date=new Date()){
  const begin=value(cfg.open),end=value(cfg.close),isOpen=end>begin?(minutes>=begin&&minutes<end):(minutes>=begin);
  return {hoursConfigured:true,isOpen,closesAt:isOpen?cfg.close:null};
 }
-function withLiveHours(store){return {...store,...storeHours(store)}}
+function withLiveHours(store,timeZone){return {...store,...storeHours(store,new Date(),timeZone)}}
 
-async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings]=await Promise.all([
- tx.query('SELECT id,name,address,latitude,longitude,radius_km,delivery_fee_pen,delivery_rate_per_km_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours FROM stores WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
+async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,tenantSettings]=await Promise.all([
+ tx.query('SELECT id,name,address,latitude,longitude,radius_km,delivery_fee_pen,delivery_rate_per_km_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,consult_order_availability FROM stores WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query('SELECT id,name,description,category,price_pen,image_url FROM products WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query('SELECT id,title,starts_at,ends_at FROM promotions WHERE tenant_id=$1 AND active=true AND (starts_at IS NULL OR starts_at<=now()) AND (ends_at IS NULL OR ends_at>=now())',[tenantId]),
  tx.query('SELECT store_id,mode,method FROM payment_methods WHERE tenant_id=$1 AND enabled=true',[tenantId]),
  tx.query('SELECT id,title,summary,description,requirements,schedule,employment_type AS "employmentType",location_label AS "locationLabel",image_url AS "imageUrl",whatsapp_phone AS "whatsappPhone" FROM job_vacancies WHERE tenant_id=$1 AND active=true ORDER BY updated_at DESC,id',[tenantId]),
- tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId])
- ]);const payload={schemaVersion:1,appId,currency:'PEN',stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]),
+ tx.query('SELECT time_zone FROM tenants WHERE id=$1 AND active=true',[tenantId])
+ ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,consultOrderAvailability:s.consult_order_availability===true,paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
-async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(withLiveHours)},true)}
+async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(s=>withLiveHours(s,q.rows[0].payload.timeZone))},true)}
 
 const routesApiKey=process.env.GOOGLE_ROUTES_API_KEY||'';
 const routeCache=new Map();
@@ -121,55 +125,82 @@ async function roadDistanceKm(store,destination,revision){
  try{return await promise}finally{routePending.delete(key)}
 }
 
+async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
+ const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone)).filter(s=>s.active&&s.delivery_enabled===true&&s.hoursConfigured===true&&s.isOpen===true);
+ if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para Delivery');
+ const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
+ const hasAddress=word(b.address,250)&&word(b.district,90);
+ if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
+ const region=word(b.city,100)&&word(b.country,100)?[b.city.trim(),b.country.trim()]:legacyLimaFallback?['Lima','Perú']:[];
+ const destination=hasAddress?[b.address.trim(),b.district.trim(),...region].join(', '):{latitude:b.latitude,longitude:b.longitude};
+ const candidates=eligible.filter(s=>checkLatLng(s.latitude,s.longitude)&&
+  (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
+ if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
+ if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
+ if(hasCoordinates&&!hasAddress)candidates.sort((a,b2)=>kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
+ const available=[];
+ for(const store of candidates){
+  const km=await roadDistanceKm(store,destination,revision);
+  if(km===null||store.radiusKm!==null&&store.radiusKm!==undefined&&km>store.radiusKm+1e-8)continue;
+  const deliveryFee=store.deliveryPricingMode==='FIXED'?store.deliveryFeePen:Math.round((km*store.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
+  available.push({storeId:store.id,storeName:store.name,deliveryFee,routeDistanceKm:km,
+   deliveryPricingMode:store.deliveryPricingMode,ratePerKmPen:store.deliveryPricingMode==='FIXED'?null:store.deliveryRatePerKmPen,
+   paymentMethods:store.paymentMethods?.delivery||[],consultOrderAvailability:store.consultOrderAvailability===true});
+ }
+ available.sort((a,b2)=>a.routeDistanceKm-b2.routeDistanceKm||a.storeId.localeCompare(b2.storeId));
+ if(!available.length)throw bad(409,'Dirección fuera de la cobertura de las sedes disponibles');
+ return available
+}
+async function loadOrderContext(appId,b){
+ const q=await sql(`SELECT p.tenant_id,p.payload,p.revision FROM published_catalogs p
+  JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id
+  JOIN tenants t ON t.id=p.tenant_id
+  WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);
+ if(!q.rowCount)throw bad(409,'Catálogo no publicado');
+ const {tenant_id:tenantId,payload,revision}=q.rows[0];
+ const candidates=await deliveryQuotes(payload,b,revision);
+ return {tenantId,revision,currency:payload.currency||'PEN',products:payload.products||[],candidates};
+}
+const orderRequestLimit=new Map();
+function limitMobileOrderRequests(req){
+ const ip=req.socket?.remoteAddress||'unknown',now=Date.now(),current=orderRequestLimit.get(ip);
+ if(orderRequestLimit.size>5000)orderRequestLimit.clear();
+ const max=req.method==='GET'?60:10;
+ if(!current||now-current.start>=60000){orderRequestLimit.set(ip,{start:now,count:1});return}
+ if(++current.count>max)throw bad(429,'Demasiadas solicitudes de pedido. Intenta de nuevo en un minuto');
+}
+async function isOrderCandidateLive(tenantId,candidate){
+ const result=await sql(`SELECT s.active,s.delivery_enabled,s.opening_hours,t.time_zone
+  FROM stores s JOIN tenants t ON t.id=s.tenant_id
+  WHERE s.tenant_id=$1 AND s.id=$2 AND t.active=true`,[tenantId,candidate.storeId]);
+ const store=result.rows[0];if(!store||!store.active||!store.delivery_enabled)return false;
+ const hours=storeHours({opening_hours:store.opening_hours},new Date(),store.time_zone||DEFAULT_TENANT_TZ);
+ return hours.hoursConfigured===true&&hours.isOpen===true
+}
+const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
 async function quote(req,res){
  const b=await body(req);
  if(!word(b.appId,150)||!mode(b.mode))throw bad(400,'Modalidad y aplicación obligatorias');
  const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[b.appId]);
  if(!q.rowCount)throw bad(409,'Catálogo no publicado');
  const config=q.rows[0].payload;
- const eligible=config.stores.map(withLiveHours).filter(s=>s.active&&s[b.mode==='dine_in'?'dine_in_enabled':b.mode+'_enabled']===true&&(b.mode==='delivery'?(s.hoursConfigured===true&&s.isOpen===true):(s.hoursConfigured!==true||s.isOpen===true)));
+ const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone)).filter(s=>s.active&&s[b.mode==='dine_in'?'dine_in_enabled':b.mode+'_enabled']===true&&(b.mode==='delivery'?(s.hoursConfigured===true&&s.isOpen===true):(s.hoursConfigured!==true||s.isOpen===true)));
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para esta modalidad');
  let selected,roadKm=null,deliveryFeePen=0;
  if(b.mode==='delivery'){
   limitPublicDeliveryQuotes(req);
-  const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
-  const hasAddress=word(b.address,250)&&word(b.district,90);
-  if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
-  // A typed address takes precedence: an earlier GPS fix from browsing stores must
-  // never silently replace the delivery destination.
-  const destination=hasAddress?
-   [b.address.trim(),b.district.trim(),'Lima','Perú'].join(', '):
-   {latitude:b.latitude,longitude:b.longitude};
-  const candidates=eligible.filter(s=>checkLatLng(s.latitude,s.longitude)&&
-   (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
-  if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
-  if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
-  if(hasCoordinates&&!hasAddress)candidates.sort((a,b2)=>
-   kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-
-   kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
-  // Evaluate all reachable, enabled stores so the road-nearest eligible one wins.
-  const available=[];
-  for(const store of candidates){
-   const km=await roadDistanceKm(store,destination,q.rows[0].revision);
-   if(km===null)continue;
-   if(store.radiusKm!==null&&store.radiusKm!==undefined&&km>store.radiusKm+1e-8)continue;
-   available.push({store,km});
-  }
-  available.sort((a,b2)=>a.km-b2.km||a.store.id.localeCompare(b2.store.id));
-  if(!available.length)throw bad(409,'Dirección fuera de la cobertura de las sedes disponibles');
-  selected=available[0].store;roadKm=available[0].km;
-  deliveryFeePen=selected.deliveryPricingMode==='FIXED'?selected.deliveryFeePen:Math.round((roadKm*selected.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
+  const candidates=await deliveryQuotes(config,b,q.rows[0].revision,true);
+  const first=candidates[0];selected=eligible.find(s=>s.id===first.storeId);roadKm=first.routeDistanceKm;deliveryFeePen=first.deliveryFee;
  }else{
   selected=eligible.find(s=>s.id===b.storeId);
   if(!selected)throw bad(409,'Selecciona una sede abierta para esta modalidad');
  }
- return json(res,200,{
-  revision:q.rows[0].revision,storeId:selected.id,storeName:selected.name,
-  mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],
-  deliveryFeePen,routeDistanceKm:roadKm,deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
-  distanceSource:b.mode==='delivery'?'GOOGLE_ROUTES':null,
-  provisional:true,notice:'Importes sujetos a confirmación al realizar el pedido.'
- },true)
+ return json(res,200,{revision:q.rows[0].revision,storeId:selected.id,storeName:selected.name,
+  mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],deliveryFeePen,routeDistanceKm:roadKm,
+  deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,
+  ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
+  distanceSource:b.mode==='delivery'?'GOOGLE_ROUTES':null,provisional:true,
+  notice:'Importes sujetos a confirmación al realizar el pedido.'},true)
 }
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
  if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok)throw bad(401,'Credenciales inválidas');const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
@@ -179,7 +210,17 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
  if(url.pathname==='/api/admin/logout'&&req.method==='POST'){await sql('DELETE FROM admin_sessions WHERE token_hash=$1',[digest(cookie(req))]);res.setHeader('Set-Cookie',`b3sid=; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`);return json(res,200,{ok:true})}
  if(url.pathname==='/api/admin/tenants'&&req.method==='GET'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const x=await sql('SELECT id,name,active FROM tenants ORDER BY created_at');return json(res,200,{tenants:x.rows})}
- if(url.pathname==='/api/admin/tenants'&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const b=await body(req);if(!word(b.name,180))throw bad(400,'Nombre de empresa inválido');const x=await sql('INSERT INTO tenants(name) VALUES($1) RETURNING id,name,active',[b.name.trim()]);await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[x.rows[0].id,user.id,'TENANT_CREATED',x.rows[0].id]);return json(res,201,x.rows[0])}
+ if(url.pathname==='/api/admin/tenants'&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const b=await body(req),timeZone=b.timeZone??DEFAULT_TENANT_TZ;if(!word(b.name,180)||!validTimeZone(timeZone))throw bad(400,'Nombre de empresa o zona horaria inválidos');const x=await sql('INSERT INTO tenants(name,time_zone) VALUES($1,$2) RETURNING id,name,active,time_zone AS "timeZone"',[b.name.trim(),timeZone]);await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[x.rows[0].id,user.id,'TENANT_CREATED',x.rows[0].id]);return json(res,201,x.rows[0])}
+ const tenantSettingsMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/settings$/);
+ if(tenantSettingsMatch&&['GET','PUT'].includes(req.method)){
+  const tenantId=tenantSettingsMatch[1];await tenantOf(user,tenantId);const b=await body(req);
+  if(req.method==='GET'){const current=await sql('SELECT id,time_zone AS "timeZone" FROM tenants WHERE id=$1 AND active=true',[tenantId]);if(!current.rowCount)throw bad(404,'Empresa no disponible');return json(res,200,current.rows[0])}
+  if(Object.keys(b).some(key=>key!=='timeZone')||!validTimeZone(b.timeZone))throw bad(400,'Indica una zona horaria IANA válida');
+  const x=await sql('UPDATE tenants SET time_zone=$2 WHERE id=$1 AND active=true RETURNING id,time_zone AS "timeZone"',[tenantId,b.timeZone]);
+  if(!x.rowCount)throw bad(404,'Empresa no disponible');
+  await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'TIME_ZONE_UPDATED',tenantId]);
+  return json(res,200,x.rows[0]);
+ }
  const userMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users$/);
  if(userMatch&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const id=userMatch[1];await tenantOf(user,id);const b=await body(req);if(!word(b.email,254)||!word(b.password,512)||b.password.length<14)throw bad(400,'Correo o clave inválida (mínimo 14 caracteres)');const salt=randomBytes(16).toString('hex'),hash=`scrypt:${salt}:${scryptSync(b.password,salt,64).toString('hex')}`;const x=await sql('INSERT INTO admin_users(email,password_hash,role,tenant_id) VALUES(lower($1),$2,$3,$4) RETURNING id,email',[b.email,hash,'TENANT_ADMIN',id]);return json(res,201,x.rows[0])}
  const asset=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/images$/);
@@ -204,9 +245,10 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    if(b.code!==undefined&&b.code!==existing.rows[0].code)throw bad(400,'El ID de la sede no se puede modificar');
   }
   const storeCode=b.code??('sede-'+randomUUID());
-  if(!validateOpeningHours(b.openingHours??null)||!word(b.name,180)||!word(b.address,300)||![b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled].every(bool)||!(b.latitude==null&&b.longitude==null)&&!checkLatLng(b.latitude,b.longitude)||b.radiusKm!=null&&(!safeNumber(b.radiusKm)||b.radiusKm<=0||b.radiusKm>500)||b.deliveryRatePerKmPen!=null&&(!safeNumber(b.deliveryRatePerKmPen)||b.deliveryRatePerKmPen<0||b.deliveryRatePerKmPen>1000)||b.deliveryFeePen!=null&&(!safeNumber(b.deliveryFeePen)||b.deliveryFeePen<0||b.deliveryFeePen>10000)||!['PER_KM','FIXED'].includes(b.deliveryPricingMode??'PER_KM'))throw bad(400,'Datos del local inválidos');
-  const args=[tenantId,b.name.trim(),b.address.trim(),b.latitude??null,b.longitude??null,b.radiusKm??null,b.deliveryRatePerKmPen??null,b.deliveryFeePen??null,b.deliveryPricingMode??'PER_KM',b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,b.openingHours??null];
-  result=b.id&&uuid(b.id)?await client.query(`UPDATE stores SET name=$2,address=$3,latitude=$4,longitude=$5,radius_km=$6,delivery_rate_per_km_pen=$7,delivery_fee_pen=$8,delivery_pricing_mode=$9,active=$10,delivery_enabled=$11,pickup_enabled=$12,dine_in_enabled=$13,opening_hours=$14,updated_at=now() WHERE tenant_id=$1 AND id=$15 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO stores(tenant_id,name,address,latitude,longitude,radius_km,delivery_rate_per_km_pen,delivery_fee_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,[...args,storeCode])
+  const consultOrderAvailability=b.consultOrderAvailability===undefined?false:b.consultOrderAvailability;
+  if(!validateOpeningHours(b.openingHours??null)||!word(b.name,180)||!word(b.address,300)||![b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,consultOrderAvailability].every(bool)||!(b.latitude==null&&b.longitude==null)&&!checkLatLng(b.latitude,b.longitude)||b.radiusKm!=null&&(!safeNumber(b.radiusKm)||b.radiusKm<=0||b.radiusKm>500)||b.deliveryRatePerKmPen!=null&&(!safeNumber(b.deliveryRatePerKmPen)||b.deliveryRatePerKmPen<0||b.deliveryRatePerKmPen>1000)||b.deliveryFeePen!=null&&(!safeNumber(b.deliveryFeePen)||b.deliveryFeePen<0||b.deliveryFeePen>10000)||!['PER_KM','FIXED'].includes(b.deliveryPricingMode??'PER_KM'))throw bad(400,'Datos del local inválidos');
+  const args=[tenantId,b.name.trim(),b.address.trim(),b.latitude??null,b.longitude??null,b.radiusKm??null,b.deliveryRatePerKmPen??null,b.deliveryFeePen??null,b.deliveryPricingMode??'PER_KM',b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,b.openingHours??null,consultOrderAvailability];
+  result=b.id&&uuid(b.id)?await client.query(`UPDATE stores SET name=$2,address=$3,latitude=$4,longitude=$5,radius_km=$6,delivery_rate_per_km_pen=$7,delivery_fee_pen=$8,delivery_pricing_mode=$9,active=$10,delivery_enabled=$11,pickup_enabled=$12,dine_in_enabled=$13,opening_hours=$14,consult_order_availability=$15,updated_at=now() WHERE tenant_id=$1 AND id=$16 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO stores(tenant_id,name,address,latitude,longitude,radius_km,delivery_rate_per_km_pen,delivery_fee_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,consult_order_availability,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,[...args,storeCode])
  }else if(resource==='vacancies'){
   const title=b.title?.trim(),phone=String(b.whatsappPhone||'').replace(/\D/g,'');
   const normalized=phone.length===9?'51'+phone:phone;
@@ -258,6 +300,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(await serviceCatalogRoute({req,res,url,pool,json}))return
  if(url.pathname.startsWith('/api/v1/mobile/')){
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
+ if(await mobileOrderAvailabilityRoutes({req,res,url}))return
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){

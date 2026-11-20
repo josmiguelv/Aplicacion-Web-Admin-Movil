@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 type Store = { id: string; name: string; code: string }
-type Binding = { id: string; storeId: string; storeName: string; storeCode: string; externalLocationId: string; purpose: string; queueReference: string | null }
+type App = { app_id: string }
+type Binding = { id: string; appId: string | null; storeId: string; storeName: string; storeCode: string; externalLocationId: string; purpose: string; queueReference: string | null }
 type Check = { httpStatus: number | null; result: string | null; errorCode: string | null; message: string; checkedAt: string; simulation: boolean; bindingId: string }
 type Integration = { id: string; name: string; hasCredential: boolean; credentialHint: string | null; expiresAt: string | null; status: string; suspended: boolean; connectionMode: string; lastCheck: Check | null; bindings?: Binding[] }
 
@@ -34,6 +35,7 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
  const root = '/api/admin/tenants/' + tenantId + '/integrations'
  const [items, setItems] = useState<Integration[]>([])
  const [stores, setStores] = useState<Store[]>([])
+ const [apps, setApps] = useState<App[]>([])
  const [selectedId, setSelectedId] = useState('')
  const [creating, setCreating] = useState(false)
  const [detail, setDetail] = useState<Integration | null>(null)
@@ -44,7 +46,7 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
  const [notice, setNotice] = useState('')
  const [noticeAt, setNoticeAt] = useState<'connection' | 'overview' | 'key' | 'check' | 'locations' | 'toggle' | 'credential'>('overview')
  const [mode, setMode] = useState('DISABLED')
- const [binding, setBinding] = useState({ storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false })
+ const [binding, setBinding] = useState({ appId: '', storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false })
  const [customPurpose, setCustomPurpose] = useState(false)
  const [addingBinding, setAddingBinding] = useState(false)
  const [removingBindingId, setRemovingBindingId] = useState('')
@@ -66,10 +68,12 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
   void Promise.all([
    api<{ integrations: Integration[]; connectionMode: string }>(root, 'GET', undefined, controller.signal),
    api<{ items: Store[] }>('/api/admin/tenants/' + tenantId + '/stores', 'GET', undefined, controller.signal),
-  ]).then(([list, resources]) => {
+   api<{ items: App[] }>('/api/admin/tenants/' + tenantId + '/apps', 'GET', undefined, controller.signal),
+  ]).then(([list, resources, applicationList]) => {
    setItems(list.integrations)
    setMode(list.connectionMode)
    setStores(resources.items)
+   setApps(applicationList.items)
    if (list.integrations.length) setSelectedId(list.integrations[0].id)
   }).catch(e => { if (!controller.signal.aborted) setError(e.message) })
    .finally(() => { if (!controller.signal.aborted) setLoading(false) })
@@ -86,7 +90,7 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
   setConfirmDeactivate(false)
   setEditingKey(false)
   setAddingBinding(false)
-  setBinding({ storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false })
+  setBinding({ appId: '', storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false })
   setCustomPurpose(false)
   secretForm.current?.reset()
   if (!selectedId) return
@@ -292,7 +296,7 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
      <h2>Sedes vinculadas</h2>
      {bindings.length === 0 ? <p className="portal-muted">No hay sedes asociadas a esta conexión. Agrega la primera para poder comprobar disponibilidad.</p> :
       <div className="integration-binding-list">{bindings.map(item => <div className="integration-binding-row" key={item.id}>
-       <div><strong>{item.storeName}</strong><small>{purposeLabel(item.purpose)} · Código en TU VERSO: {item.externalLocationId}</small></div>
+       <div><strong>{item.storeName}</strong><small>{item.appId ? 'App: ' + item.appId + ' · ' : 'App sin asignar · '}{purposeLabel(item.purpose)} · Código en TU VERSO: {item.externalLocationId}</small></div>
        {removingBindingId === item.id ?
         <div className="integration-delete-confirm" role="group" aria-label={'Confirmar retirada de ' + item.storeName}>
          <p>¿Retirar esta asociación de este administrador? La sede comercial y TU VERSO no se modificarán.</p>
@@ -311,13 +315,20 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
       onSubmit={e => { e.preventDefault(); void run(async () => {
        const { externalLocationId, ...required } = binding
        await api(root + '/' + selectedId + '/bindings', 'POST', { ...required, ...(externalLocationId.trim() ? { externalLocationId: externalLocationId.trim() } : {}) })
-       setBinding({ storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false })
+       setBinding({ appId: '', storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false })
        setCustomPurpose(false); setAddingBinding(false)
        await refresh()
        notify('Sede y propósito guardados. Ahora puedes comprobar disponibilidad.', 'locations')
       }) }}>
       <h3>{bindings.length ? 'Añadir asociación' : 'Vincular primera sede'}</h3>
       <div className="integration-fields">
+       <label>Aplicación autorizada
+        <select aria-label="Aplicación autorizada" required value={binding.appId} disabled={busy}
+         onChange={e => setBinding({ ...binding, appId: e.target.value, authorizationConfirmed: false })}>
+         <option value="">Selecciona la aplicación</option>
+         {apps.map(app => <option key={app.app_id} value={app.app_id}>{app.app_id}</option>)}
+        </select>
+       </label>
        <label>Sede
         <select aria-label="Sede" required value={binding.storeId} disabled={busy}
          onChange={e => setBinding({ ...binding, storeId: e.target.value, externalLocationId: '', authorizationConfirmed: false })}>
@@ -349,9 +360,9 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
       <label className="integration-check"><input type="checkbox" required checked={binding.authorizationConfirmed} disabled={busy}
        onChange={e => setBinding({ ...binding, authorizationConfirmed: e.target.checked })}/>Confirmo que esta sede y propósito ya están autorizados para la clave en TU VERSO.</label>
       <div className="integration-actions">
-       <button className="portal-primary" disabled={busy || !binding.authorizationConfirmed}>Guardar asociación</button>
+       <button className="portal-primary" disabled={busy || !binding.authorizationConfirmed || !binding.appId}>Guardar asociación</button>
        {bindings.length > 0 && <button className="portal-outline" type="button" disabled={busy} onClick={() => {
-        setAddingBinding(false); setBinding({ storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false }); setCustomPurpose(false)
+        setAddingBinding(false); setBinding({ appId: '', storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false }); setCustomPurpose(false)
        }}>Cancelar</button>}
       </div>
      </form>}
