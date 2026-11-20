@@ -29,6 +29,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [storeEditorOpen,setStoreEditorOpen]=useState(false)
  const [storeSavedNotice,setStoreSavedNotice]=useState(false)
  const hasUnsavedStoreChanges=JSON.stringify(store)!==storeBaseline
+ useEffect(()=>{if(hasUnsavedStoreChanges)setStoreSavedNotice(false)},[hasUnsavedStoreChanges])
  const selectStoreForEditing=(next:ReturnType<typeof emptyStore>)=>{
   if(hasUnsavedStoreChanges&&!window.confirm('Hay cambios sin guardar en esta sede. ¿Quieres descartarlos y continuar?'))return
   setStore(next);setStoreBaseline(JSON.stringify(next));setStoreEditorOpen(true);setStoreSavedNotice(false);setError('');setMessage('')
