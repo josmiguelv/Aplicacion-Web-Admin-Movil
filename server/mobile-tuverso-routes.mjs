@@ -4,7 +4,6 @@ import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
 
-const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const APP=/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,149}$/
 const fail=(code,message)=>Object.assign(new Error(message),{code})
