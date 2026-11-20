@@ -218,3 +218,12 @@
 .portal-user-ident strong{font-size:13px;overflow-wrap:anywhere;color:#263b4a}
 .portal-user-ident small{font-size:12px;color:#6c7b87}
 .portal-user-item .ops-state{flex-shrink:0}
+
+/* Listados comerciales legibles sin exponer identificadores internos. */
+.portal-company-info{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap}
+.ops-record-list{display:grid;gap:10px;margin-top:18px}
+.ops-record-list h3{font-size:15px;margin:0 0 3px}
+.ops-record-row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border:1px solid #e1e5e9;border-radius:8px;padding:12px 14px;background:#fff}
+.ops-record-row strong{font-size:13px;color:#263b4a}
+.ops-record-row>span:not(.ops-state){font-size:13px;color:#50616f}
+@media(max-width:650px){.ops-record-row{align-items:flex-start}}
