@@ -129,11 +129,13 @@ export default function AdminPortal() {
       <div className="portal-header-right"><span className="portal-role">{superAdmin ? 'Super Administrador' : 'Administrador de empresa'}</span><button className="portal-link" type="button" onClick={logout} disabled={busy}><LogOut size={16} /> Cerrar sesión</button></div>
     </header>
     <div className="portal-body">
-      <nav className="portal-nav" aria-label="Administración"><span className="portal-nav-label">NEGOCIO</span>
+      <nav className="portal-nav" aria-label="Administración">
         {superAdmin && <button className={section === 'companies' ? 'portal-tab active' : 'portal-tab'} type="button" onClick={() => { setSection('companies'); setError(''); setNotice('') }}><Building2 size={17} /> Empresas</button>}
         <button className={section === 'operations' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={superAdmin && !tenantId} onClick={() => { setSection('operations'); setError(''); setNotice('') }}><Settings2 size={17} /> Mi negocio</button>
-        {superAdmin && <span className="portal-nav-separator" aria-hidden="true" />}{superAdmin && <span className="portal-nav-label">CONFIGURACIÓN TÉCNICA</span>}{superAdmin && <button className={section === 'integrations' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('integrations'); setError(''); setNotice('') }}>Conexiones externas</button>}
-        {superAdmin && <button className={section === 'api-keys' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('api-keys'); setError(''); setNotice('') }}><KeyRound size={17}/> Claves de acceso</button>}
+        {superAdmin && <div className="portal-technical-links" role="group" aria-label="Herramientas técnicas">
+          <button className={section === 'integrations' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('integrations'); setError(''); setNotice('') }}>Conexiones externas</button>
+          <button className={section === 'api-keys' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('api-keys'); setError(''); setNotice('') }}><KeyRound size={17}/> Claves de acceso</button>
+        </div>}
       </nav>
       {error && <p className="portal-error" role="alert">{error}</p>}
       {notice && <p className="portal-notice" role="status">{notice}</p>}
