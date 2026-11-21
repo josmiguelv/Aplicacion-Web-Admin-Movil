@@ -155,9 +155,14 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
     const history=await readMessages(integration.token,interactionId)
-    if(!history.ok||history.data?.interactionId!==interactionId)
-      throw fail(503,'No se pudo leer la decisión del asesor')
-    const cancelled=history.data.messages.some(m=>m.direction==='INBOUND'&&m.text===CANCEL_NOTICE)
+    // Interaction status and conversation history are independent requests.
+    // For a read-only poll, a transient history failure must not make a
+    // successfully identified interaction look lost or rejected to Android.
+    const messagesAvailable=history.ok===true&&history.data?.interactionId===interactionId
+    if(!messagesAvailable&&operation==='cancel')
+      throw fail(503,'No se pudo verificar la conversación antes de cancelar')
+    const messages=messagesAvailable?history.data.messages:[]
+    const cancelled=messages.some(m=>m.direction==='INBOUND'&&m.text===CANCEL_NOTICE)
     if(operation==='cancel'){
      if(cancelled)return json(res,200,{interactionId,status:'CANCELLED'})
      if(remote.data.status==='EXPIRED')throw fail(409,'La interacción ya expiró')
@@ -167,10 +172,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     }
     // Relay verified conversation facts only. Android owns decision parsing, store
     // fallback and delivery-quote progression; the Administrator never decides.
-    const agentMessages=history.data.messages.filter(message=>message.direction==='OUTBOUND')
+    const agentMessages=messages.filter(message=>message.direction==='OUTBOUND')
      .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
-     status:cancelled?'CANCELLED':remote.data.status,agentMessages})
+     status:cancelled?'CANCELLED':remote.data.status,agentMessages,messagesAvailable})
    }
    if(messageMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
@@ -228,10 +233,11 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     customer?('Pedido de '+cart.items.length+' productos del catálogo. Subtotal S/ '+cart.subtotal.toFixed(2)+'. Revisar detalle en conversación.'):null)
    if(!listSummary)throw fail(422,'El resumen del pedido supera el limite permitido')
    const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
-   // This is a fresh capacity check, not a reservation. If capacity was lost, refuse before creating.
-   const available=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
-   if(available.result==='UNAVAILABLE')throw fail(409,'Ya no hay capacidad de atención en esta sede')
-   if(available.result!=='AVAILABLE')throw fail(503,'No se pudo confirmar la capacidad')
+   // Do not precheck availability again here: a prior create may have succeeded
+   // upstream before its HTTP acknowledgement was lost, and the assigned agent
+   // may now occupy the last available slot. Android has already checked capacity.
+   // TU VERSO remains authoritative for actual create admission and idempotency.
+   // Replays must reach the same upstream idempotency key.
    // Stable upstream reference for retries. The public caller cannot set location, queue, price or summary.
    const externalReference=reference(ctx.tenantId,input.appId,input.storeId,idempotencyKey)
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{

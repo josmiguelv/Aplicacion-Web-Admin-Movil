@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false,historyFailure=false}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  let referenceForTest=''
@@ -46,7 +46,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
   },
   readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
-  readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});return {ok:true,data:{interactionId:id,messages:[
+  readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});if(historyFailure)return {ok:false,httpStatus:503,errorCode:'CONNECTION_FAILED'};return {ok:true,data:{interactionId:id,messages:[
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
   ]}}},
@@ -106,12 +106,12 @@ test('create uses validated published catalog, exact scoped binding, stable upst
  const second=await h.call('POST','/api/v1/mobile/interactions',{headers:{'idempotency-key':id},payload:p})
  assert.equal(first.code,201);assert.equal(first.payload.status,'PENDING')
  assert.equal(first.payload.storeId,storeA)
- assert.equal(h.remote.length,4)
- assert.equal(h.remote[1].operation,'interaction')
- assert.equal(h.remote[1].input.summary.includes('2 x Pollo A'),true)
- assert.equal(h.remote[1].input.idempotencyKey,id)
- assert.equal(h.remote[1].input.externalReference,h.remote[3].input.externalReference)
- assert.equal(h.remote[1].binding.external_location_id,'location-a')
+ assert.equal(h.remote.length,2)
+ assert.equal(h.remote[0].operation,'interaction')
+ assert.equal(h.remote[0].input.summary.includes('2 x Pollo A'),true)
+ assert.equal(h.remote[0].input.idempotencyKey,id)
+ assert.equal(h.remote[0].input.externalReference,h.remote[1].input.externalReference)
+ assert.equal(h.remote[0].binding.external_location_id,'location-a')
  assert.equal('token' in first.payload,false)
 })
 test('invalid store, injected tenant, outdated catalog and missing idempotency fail before remote',async()=>{
@@ -126,10 +126,14 @@ test('invalid store, injected tenant, outdated catalog and missing idempotency f
  assert.equal(missing.code,400)
  assert.equal(h.remote.length,0)
 })
-test('capacity lost between read and creation refuses interaction',async()=>{
- const h=harness({capacity:'UNAVAILABLE'})
- const r=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
- assert.equal(r.code,409);assert.deepEqual(h.remote.map(x=>x.operation),['capacity'])
+test('idempotent creation does not recheck capacity after an agent is already assigned',async()=>{
+ const h=harness({capacity:'UNAVAILABLE'}),key=randomUUID()
+ const request={headers:{'idempotency-key':key},payload:createBody()}
+ const first=await h.call('POST','/api/v1/mobile/interactions',request)
+ const second=await h.call('POST','/api/v1/mobile/interactions',request)
+ assert.equal(first.code,201);assert.equal(second.code,201)
+ assert.equal(first.payload.interactionId,second.payload.interactionId)
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','interaction'])
 })
 
 test('new interaction creation accepts catalog revision before pricing',async()=>{
@@ -148,7 +152,7 @@ test('create returns interactionId before chat text, and text delivery runs inde
   headers:{'idempotency-key':key},payload:createBody({customer})})
  assert.equal(response.code,201)
  assert.equal(response.payload.status,'PENDING')
- assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction'])
  const id=response.payload.interactionId
  const sent=h.remote.find(x=>x.operation==='interaction')
  assert.ok(sent.input.summary.includes('2 x Pollo A'))
@@ -159,7 +163,7 @@ test('create returns interactionId before chat text, and text delivery runs inde
  assert.equal(delivered.code,200)
  assert.equal(delivered.payload.delivered,true)
  assert.equal(delivered.payload.interactionId,id)
- assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
  const message=h.remote.find(x=>x.operation==='orderText').value.text
  for(const part of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
   'Av. Ejemplo 123','Santa Anita','Porton lateral','2 x Pollo A',
@@ -199,7 +203,7 @@ test('failed text delivery returns 503 without undoing a created interaction',as
  const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(result.code,503)
- assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
 })
 test('message scope and forged order reference cannot access other conversations',async()=>{
  const key=randomUUID()
@@ -211,7 +215,7 @@ test('message scope and forged order reference cannot access other conversations
  const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(reply.code,409)
- assert.deepEqual(denied.remote.map(x=>x.operation),['capacity','interaction'])
+ assert.deepEqual(denied.remote.map(x=>x.operation),['interaction'])
  const forged=harness()
  forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
  const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
@@ -274,6 +278,27 @@ test('cancellation status remains authoritative; inbound client text is not rela
  assert.equal(r.payload.status,'CANCELLED')
  assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
  assert.equal('decision' in r.payload,false)
+})
+test('temporary history outage keeps accepted interaction pending for Android without inventing a reply',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const h=harness({remoteStatus:'ACCEPTED',historyFailure:true})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const path='/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA
+ const r=await h.call('GET',path,{headers:{'x-order-access-key':key}})
+ assert.equal(r.code,200)
+ assert.equal(r.payload.interactionId,id)
+ assert.equal(r.payload.status,'ACCEPTED')
+ assert.deepEqual(r.payload.agentMessages,[])
+ assert.equal(r.payload.messagesAvailable,false)
+ assert.equal(h.remote.filter(x=>x.operation==='interaction').length,0)
+})
+test('cancellation refuses to proceed when prior conversation cannot be checked',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({historyFailure:true})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const r=await h.call('POST','/api/v1/mobile/interactions/'+id+'/cancel',{
+  headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA}})
+ assert.equal(r.code,503)
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,0)
 })
 test('client cannot read decision with wrong key or other tenant',async()=>{
  const id=randomUUID(),key=randomUUID()
