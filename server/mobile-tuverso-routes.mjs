@@ -194,6 +194,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    const cart=calculateOrderCart(ctx.payload.products,input.items)
    const customer=normalizeCustomer(input.customer)
    const orderMessage=customer?orderSummaryText(cart,ctx.store,customer):null
+   const listSummary=cart.summary.length<=1200?cart.summary:(
+    customer?('Pedido de '+cart.items.length+' productos del catálogo. Subtotal S/ '+cart.subtotal.toFixed(2)+'. Revisar detalle en conversación.'):null)
+   if(!listSummary)throw fail(422,'El resumen del pedido supera el limite permitido')
    const integration=await binding(ctx.tenantId,input.appId,input.storeId,customer?'create_message':'create')
    // This is a fresh capacity check, not a reservation. If capacity was lost, refuse before creating.
    const available=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
@@ -202,7 +205,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    // Stable upstream reference for retries. The public caller cannot set location, queue, price or summary.
    const externalReference=reference(ctx.tenantId,input.appId,input.storeId,idempotencyKey)
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
-    customerExternalId:input.customerExternalId,externalReference,summary:cart.summary,idempotencyKey
+    customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey
    })
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:503,'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
