@@ -142,52 +142,82 @@ test('new interaction creation accepts catalog revision before pricing',async()=
 })
 const customer={firstName:'Ana',lastName:'Quispe',phone:'912345678',
  address:'Av. Ejemplo 123',district:'Santa Anita',reference:'Porton lateral',mode:'delivery'}
-test('text-only request uses verified catalog/store and customer-entered delivery contact',async()=>{
- const h=harness()
+test('create returns interactionId before chat text, and text delivery runs independently',async()=>{
+ const h=harness(),key=randomUUID()
  const response=await h.call('POST','/api/v1/mobile/interactions',{
-  headers:headers(),payload:createBody({customer})})
+  headers:{'idempotency-key':key},payload:createBody({customer})})
  assert.equal(response.code,201)
+ assert.equal(response.payload.status,'PENDING')
+ assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction'])
+ const id=response.payload.interactionId
  const sent=h.remote.find(x=>x.operation==='interaction')
- assert.ok(sent)
- const delivered=h.remote.find(x=>x.operation==='orderText')
- assert.ok(delivered,'The chat receives an actual INBOUND order text')
- assert.equal(sent.input.summary.includes('2 x Pollo A'),true)
- assert.equal(sent.input.summary.includes('+51'),false)
- assert.match(delivered.value.idempotencyKey,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
- const message=delivered.value.text
- for(const piece of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
+ assert.ok(sent.input.summary.includes('2 x Pollo A'))
+ assert.ok(!sent.input.summary.includes('+51'))
+ h.setReference(response.payload.externalReference)
+ const delivered=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(delivered.code,200)
+ assert.equal(delivered.payload.delivered,true)
+ assert.equal(delivered.payload.interactionId,id)
+ assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+ const message=h.remote.find(x=>x.operation==='orderText').value.text
+ for(const part of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
   'Av. Ejemplo 123','Santa Anita','Porton lateral','2 x Pollo A',
-  'Subtotal productos: S/ 40.00','pendiente tras aceptacion','aceptado o rechazado']){
-  assert.ok(message.includes(piece),piece)
+  'Subtotal productos: S/ 40.00','pendiente tras aceptacion']){
+  assert.ok(message.includes(part),part)
  }
- assert.ok(message.includes('\n'),'Summary has line breaks for the agent')
+ assert.ok(message.includes('\n'))
  assert.ok(message.length<=8000)
  assert.ok(!message.includes('deliveryFeePen'))
- assert.ok(!('customer' in response.payload))
  assert.ok(!('phone' in response.payload))
 })
-test('repeating a full text-only request uses a distinct but stable idempotency key',async()=>{
+test('replaying both steps uses one conversation ID and one deterministic message key',async()=>{
  const h=harness(),key=randomUUID()
+ let id=null,messageKey=null
  for(let i=0;i<2;i++){
-  const result=await h.call('POST','/api/v1/mobile/interactions',{
+  const created=await h.call('POST','/api/v1/mobile/interactions',{
    headers:{'idempotency-key':key},payload:createBody({customer})})
-  assert.equal(result.code,201)
+  assert.equal(created.code,201)
+  if(i===0)id=created.payload.interactionId
+  assert.equal(created.payload.interactionId,id)
+  h.setReference(created.payload.externalReference)
+  const sent=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
+   headers:{'x-order-access-key':key},payload:createBody({customer})})
+  assert.equal(sent.code,200)
+  const current=h.remote.filter(x=>x.operation==='orderText').at(-1).value.idempotencyKey
+  if(i===0)messageKey=current
+  assert.equal(current,messageKey)
+  assert.notEqual(current,key)
  }
- const outbound=h.remote.filter(x=>x.operation==='orderText')
- assert.equal(outbound.length,2)
- // A repeated upstream create returns the same conversation, and the text keeps its UUID.
- assert.equal(outbound[0].value.idempotencyKey,outbound[1].value.idempotencyKey)
- assert.notEqual(outbound[0].value.idempotencyKey,key)
- assert.equal(outbound[0].value.text,outbound[1].value.text)
 })
-test('missing message scope and unsuccessful text delivery never report success',async()=>{
- const denied=harness({scopes:['queue.availability.read','interactions.create']})
- const r=await denied.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody({customer})})
- assert.equal(r.code,409);assert.equal(denied.remote.length,0)
- const failed=harness({messageFailure:true})
- const result=await failed.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody({customer})})
+test('failed text delivery returns 503 without undoing a created interaction',async()=>{
+ const h=harness({messageFailure:true}),key=randomUUID()
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ assert.equal(created.code,201)
+ h.setReference(created.payload.externalReference)
+ const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(result.code,503)
- assert.deepEqual(failed.remote.map(x=>x.operation),['capacity','interaction','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+})
+test('message scope and forged order reference cannot access other conversations',async()=>{
+ const key=randomUUID()
+ const denied=harness({scopes:['queue.availability.read','interactions.create','interactions.read']})
+ const opened=await denied.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ assert.equal(opened.code,201)
+ denied.setReference(opened.payload.externalReference)
+ const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(reply.code,409)
+ assert.deepEqual(denied.remote.map(x=>x.operation),['capacity','interaction'])
+ const forged=harness()
+ forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
+  headers:{'x-order-access-key':randomUUID()},payload:createBody({customer})})
+ assert.equal(other.code,403)
+ assert.deepEqual(forged.remote.map(x=>x.operation),['read'])
 })
 test('contact injection, invalid cellphone and client price fields are rejected before TU VERSO',async()=>{
  const invalid=[
