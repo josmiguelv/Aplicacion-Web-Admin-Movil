@@ -2,7 +2,7 @@ name: Web Admin API build
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, feat/b3-prepayment-flow-20261120]
 jobs:
   check:
     runs-on: ubuntu-latest
