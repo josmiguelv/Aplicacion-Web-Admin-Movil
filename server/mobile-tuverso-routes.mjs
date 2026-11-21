@@ -25,6 +25,42 @@ const decideText=messages=>{
  }
  return {decision:null,agentMessageId:null}
 }
+// Text-only mobile order briefing. Never trust product names, prices or store names from Android.
+function normalizeCustomer(input){
+ if(input===undefined)return null // Backward compatibility for already-issued clients.
+ if(!plainObject(input)||Object.keys(input).some(k=>!['firstName','lastName','phone','address','district','reference','mode'].includes(k))||
+    input.mode!=='delivery'||!validText(input.firstName,60)||input.firstName.trim().length<2||
+    !validText(input.lastName,60)||input.lastName.trim().length<2||
+    typeof input.phone!=='string'||!/^9[0-9]{8}$/.test(input.phone)||
+    !validText(input.address,180)||input.address.trim().length<6||
+    !validText(input.district,80)||input.district.trim().length<2||
+    (input.reference!==undefined&&(typeof input.reference!=='string'||input.reference.length>180||
+      /[\\x00-\\x1f]/.test(input.reference))))throw fail(400,'Datos de contacto o dirección inválidos')
+ return {firstName:input.firstName.trim(),lastName:input.lastName.trim(),
+  phone:input.phone,address:input.address.trim(),district:input.district.trim(),
+  reference:(input.reference||'').trim()}
+}
+function orderSummaryText(cart,store,customer){
+ if(!customer)return cart.summary
+ const message=[
+  'POLLOS B3 - SOLICITUD DE VALIDACION',
+  'Sede consultada: '+String(store.name||'Sede').trim(),
+  'Cliente (datos ingresados, no verificados): '+customer.firstName+' '+customer.lastName,
+  'Celular: +51 '+customer.phone,
+  'Modalidad: Delivery',
+  'Direccion: '+customer.address,
+  'Distrito: '+customer.district,
+  ...(customer.reference?['Referencia: '+customer.reference]:[]),
+  'PRODUCTOS: '+cart.summary.replace(/^Solicitud de validación de pedido: /,'').replace(/\\. Subtotal [0-9]+\\.[0-9]{2}\\.$/,''),
+  'Subtotal productos: S/ '+cart.subtotal.toFixed(2),
+  'Costo delivery: pendiente tras aceptacion (no cobrar)',
+  'Estado: PENDIENTE DE VALIDACION',
+  'Verificar productos y responder SOLO: aceptado o rechazado.'
+ ].join('\\n')
+ // TU VERSO supports 1200 characters for summary. Never omit items or truncate silently.
+ if(message.length>1200)throw fail(422,'El detalle del pedido supera el limite de texto permitido. Reduce los productos o la longitud de los datos.')
+ return message
+}
 function throttled(req){
  const key=req.socket?.remoteAddress||'unknown',now=Date.now()
  if(counter.size>5000)counter.clear()
@@ -139,7 +175,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    if(req.method!=='POST')throw fail(405,'Método no permitido')
    if(interactionMode()!=='LIVE'||checkMode()==='DISABLED')throw fail(503,'Interacciones TU VERSO no habilitadas')
    const input=await body(req)
-   if(!plainObject(input)||Object.keys(input).some(key=>!['appId','storeId','quoteRevision','catalogRevision','customerExternalId','items'].includes(key))||
+   if(!plainObject(input)||Object.keys(input).some(key=>!['appId','storeId','quoteRevision','catalogRevision','customerExternalId','items','customer'].includes(key))||
       !APP.test(input.appId)||!VALID_UUID.test(input.storeId)||
       (input.quoteRevision!==undefined&&input.catalogRevision!==undefined)||
       !Number.isSafeInteger(input.catalogRevision??input.quoteRevision)||(input.catalogRevision??input.quoteRevision)<1||
@@ -149,6 +185,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    const ctx=await context(input.appId,input.storeId)
    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))throw fail(409,'El catálogo cambió: actualiza tu pedido')
    const cart=calculateOrderCart(ctx.payload.products,input.items)
+   const customer=normalizeCustomer(input.customer)
+   const summary=orderSummaryText(cart,ctx.store,customer)
    const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
    // This is a fresh capacity check, not a reservation. If capacity was lost, refuse before creating.
    const available=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
@@ -157,7 +195,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    // Stable upstream reference for retries. The public caller cannot set location, queue, price or summary.
    const externalReference=reference(ctx.tenantId,input.appId,input.storeId,idempotencyKey)
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
-    customerExternalId:input.customerExternalId,externalReference,summary:cart.summary,idempotencyKey
+    customerExternalId:input.customerExternalId,externalReference,summary,idempotencyKey
    })
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:503,'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
