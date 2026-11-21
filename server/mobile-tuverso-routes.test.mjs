@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {randomUUID} from 'node:crypto'
+import {randomUUID,createHash} from 'node:crypto'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
 
 const tenantA='11111111-1111-4111-8111-111111111111'
@@ -15,8 +15,10 @@ const catalogs={
  [appA]:{tenant_id:tenantA,revision:4,payload:{stores:[{id:storeA,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo A',pricePen:20,active:true}]}},
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
-function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create'],enabled=true,requests=true,open=true,count=1}={}){
+function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
+  decisionMessage='',decisionMessages=null,cancelled=false}={}){
  const queries=[],remote=[]
+ let referenceForTest=''
  const pool={async query(sql,args){
   queries.push({sql,args})
   if(sql.includes('FROM published_catalogs p')){
@@ -38,7 +40,13 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   decrypt:()=> 'private-credential',
   availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return {result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
-  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});return {ok:true,httpStatus:201,data:{interactionId:randomUUID(),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}}
+  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});return {ok:true,httpStatus:201,data:{interactionId:randomUUID(),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}},
+  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:'PENDING',externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
+  readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});return {ok:true,data:{interactionId:id,messages:[
+   ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
+   ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
+  ]}}},
+  sendMessage:async(token,id,value)=>{remote.push({operation:'cancel',id,value});return {ok:true,data:{messageId:randomUUID(),created:true}}}
  })
  const call=async(method,path,{payload,headers}={})=>{
   const req={method,body:payload,headers:headers||{},socket:{remoteAddress:'synthetic'}}
@@ -47,7 +55,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   assert.equal(handled,undefined)
   return res.reply
  }
- return {call,queries,remote}
+ return {call,queries,remote,setReference:value=>{referenceForTest=value}}
 }
 const endpoint=(id=storeA,app=appA)=>'/api/v1/mobile/stores/'+id+'/agent-availability?appId='+app
 const createBody=(extra={})=>({appId:appA,storeId:storeA,quoteRevision:4,customerExternalId:'anonymous-123',items:[{productId:product,quantity:2}],...extra})
@@ -113,4 +121,50 @@ test('capacity lost between read and creation refuses interaction',async()=>{
  const h=harness({capacity:'UNAVAILABLE'})
  const r=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
  assert.equal(r.code,409);assert.deepEqual(h.remote.map(x=>x.operation),['capacity'])
+})
+
+test('new interaction creation accepts catalog revision before pricing',async()=>{
+ const h=harness()
+ const r=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:{appId:appA,storeId:storeA,catalogRevision:4,
+   customerExternalId:'anonymous-123',items:[{productId:product,quantity:2}]}})
+ assert.equal(r.code,201)
+ assert.equal(r.payload.status,'PENDING')
+})
+test('agent decision comes from exact outbound text; unknown remains pending',async()=>{
+ const interactionId=randomUUID(),key=randomUUID()
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ for(const [message,expected] of [['  ACEPTADO.  ','ACCEPTED'],['rechazada','REJECTED'],
+  ['rechazado','REJECTED'],['Hola, ¿cómo estás?',null]]){
+  const h=harness({decisionMessage:message});h.setReference(ref)
+  const r=await h.call('GET','/api/v1/mobile/interactions/'+interactionId+'/status?appId='+appA+'&storeId='+storeA,{
+   headers:{'x-order-access-key':key}})
+  assert.equal(r.code,200);assert.equal(r.payload.decision,expected)
+  assert.equal(JSON.stringify(r.payload).includes('private-credential'),false)
+ }
+})
+test('the first valid agent response is final even if a later text contradicts it',async()=>{
+ const interactionId=randomUUID(),key=randomUUID()
+ const h=harness({decisionMessages:[' Hola ','aceptado','rechazado']})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const r=await h.call('GET','/api/v1/mobile/interactions/'+interactionId+'/status?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(r.code,200);assert.equal(r.payload.decision,'ACCEPTED')
+})
+test('client cannot read decision with wrong key or other tenant',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const h=harness({decisionMessage:'aceptado'});h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const wrong=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{headers:{'x-order-access-key':randomUUID()}})
+ assert.equal(wrong.code,403)
+ const other=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appB+'&storeId='+storeB,{headers:{'x-order-access-key':key}})
+ assert.equal(other.code,403)
+})
+test('cart modification sends cancellation notice without marking a paid order',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({decisionMessage:'aceptado'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const r=await h.call('POST','/api/v1/mobile/interactions/'+id+'/cancel',{
+  headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA}})
+ assert.equal(r.code,200);assert.equal(r.payload.status,'CANCELLED')
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1)
+ assert.match(h.remote.find(x=>x.operation==='cancel').value.text,/no preparar ni cobrar/)
 })
