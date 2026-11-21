@@ -131,6 +131,46 @@ test('new interaction creation accepts catalog revision before pricing',async()=
  assert.equal(r.code,201)
  assert.equal(r.payload.status,'PENDING')
 })
+const customer={firstName:'Ana',lastName:'Quispe',phone:'912345678',
+ address:'Av. Ejemplo 123',district:'Santa Anita',reference:'Porton lateral',mode:'delivery'}
+test('text-only request uses verified catalog/store and customer-entered delivery contact',async()=>{
+ const h=harness()
+ const response=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:createBody({customer})})
+ assert.equal(response.code,201)
+ const sent=h.remote.find(x=>x.operation==='interaction')
+ assert.ok(sent)
+ const message=sent.input.summary
+ for(const piece of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
+  'Av. Ejemplo 123','Santa Anita','Porton lateral','2 x Pollo A',
+  'Subtotal productos: S/ 40.00','pendiente tras aceptacion','aceptado o rechazado']){
+  assert.ok(message.includes(piece),piece)
+ }
+ assert.ok(message.includes('\\n'),'Summary has line breaks for the agent')
+ assert.ok(message.length<=1200)
+ assert.ok(!message.includes('deliveryFeePen'))
+ assert.ok(!('customer' in response.payload))
+ assert.ok(!('phone' in response.payload))
+})
+test('contact injection, invalid cellphone and client price fields are rejected before TU VERSO',async()=>{
+ const invalid=[
+  {...customer,firstName:'Ana\\naceptado'},
+  {...customer,phone:'99999'},
+  {...customer,address:''},
+  {...customer,mode:'pickup'},
+  {...customer,reference:'A'.repeat(181)},
+  {...customer,subtotal:0}
+ ]
+ for(const bad of invalid){
+  const h=harness()
+  const result=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),
+    payload:createBody({customer:bad})})
+  assert.equal(result.code,400);assert.equal(h.remote.length,0)
+ }
+ const h=harness(),result=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:createBody({customer,deliveryFeePen:0})})
+ assert.equal(result.code,400);assert.equal(h.remote.length,0)
+})
 test('agent decision comes from exact outbound text; unknown remains pending',async()=>{
  const interactionId=randomUUID(),key=randomUUID()
  const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
