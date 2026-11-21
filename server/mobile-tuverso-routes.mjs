@@ -173,7 +173,13 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      if(!sent.ok)throw fail(sent.httpStatus===409?409:503,'No se pudo notificar la cancelación')
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
-    const decision=cancelled?{decision:null,agentMessageId:null}:decideText(history.data.messages)
+    // Formal TU VERSO decisions take precedence; otherwise read the agent's exact
+    // OUTBOUND response while PENDING. Never infer approval from the client's text.
+    const decision=cancelled?{decision:null,agentMessageId:null}:
+     remote.data.status==='ACCEPTED'?{decision:'ACCEPTED',agentMessageId:null}:
+     remote.data.status==='REJECTED'?{decision:'REJECTED',agentMessageId:null}:
+     remote.data.status==='EXPIRED'?{decision:null,agentMessageId:null}:
+     decideText(history.data.messages)
     return json(res,200,{interactionId,storeId:input.storeId,
       status:cancelled?'CANCELLED':remote.data.status,
       decision:cancelled?'CANCELLED':decision.decision,
