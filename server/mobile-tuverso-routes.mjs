@@ -13,6 +13,12 @@ const safeError=error=>Number.isInteger(error?.code)&&error.code>=400&&error.cod
 const counter=new Map()
 const CANCEL_NOTICE='[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
 const reference=(tenantId,appId,storeId,key)=>'mobile:'+createHash('sha256').update([tenantId,appId,storeId,key].join(':')).digest('hex').slice(0,48)
+const orderMessageIdempotency=(key,interactionId)=>{
+ const bytes=createHash('sha256').update('b3-order-text:'+key+':'+interactionId).digest().subarray(0,16)
+ bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128
+ const hex=bytes.toString('hex')
+ return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-')
+}
 const equals=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&
  timingSafeEqual(Buffer.from(a),Buffer.from(b))
 const decideText=messages=>{
@@ -57,8 +63,8 @@ function orderSummaryText(cart,store,customer){
   'Estado: PENDIENTE DE VALIDACION',
   'Verificar productos y responder SOLO: aceptado o rechazado.'
  ].join('\n')
- // TU VERSO supports 1200 characters for summary. Never omit items or truncate silently.
- if(message.length>1200)throw fail(422,'El detalle del pedido supera el limite de texto permitido. Reduce los productos o la longitud de los datos.')
+ // TU VERSO supports 8000 characters per conversation message. Never truncate silently.
+ if(message.length>8000)throw fail(422,'El detalle del pedido supera el limite de texto permitido. Reduce los productos o la longitud de los datos.')
  return message
 }
 function throttled(req){
@@ -114,7 +120,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   if(row.suspended||!row.encrypted_credential||row.expires_at&&new Date(row.expires_at)<=new Date()||
      row.channel_type&&row.channel_type!=='MOBILE_APP'||
      !Array.isArray(row.scopes)||!row.scopes.includes('queue.availability.read')||
-     kind==='create'&&!row.scopes.includes('interactions.create')||
+     (kind==='create'||kind==='create_message')&&!row.scopes.includes('interactions.create')||
+      kind==='create_message'&&!row.scopes.includes('conversations.messages.write')||
      kind==='status'&&(!row.scopes.includes('interactions.read')||!row.scopes.includes('conversations.read'))||
      kind==='cancel'&&(!row.scopes.includes('interactions.read')||!row.scopes.includes('conversations.read')||
        !row.scopes.includes('conversations.messages.write')))throw fail(409,'La integración no está habilitada para esta operación')
@@ -186,8 +193,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))throw fail(409,'El catálogo cambió: actualiza tu pedido')
    const cart=calculateOrderCart(ctx.payload.products,input.items)
    const customer=normalizeCustomer(input.customer)
-   const summary=orderSummaryText(cart,ctx.store,customer)
-   const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
+   const orderMessage=customer?orderSummaryText(cart,ctx.store,customer):null
+   const integration=await binding(ctx.tenantId,input.appId,input.storeId,customer?'create_message':'create')
    // This is a fresh capacity check, not a reservation. If capacity was lost, refuse before creating.
    const available=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
    if(available.result==='UNAVAILABLE')throw fail(409,'Ya no hay capacidad de atención en esta sede')
@@ -195,11 +202,21 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    // Stable upstream reference for retries. The public caller cannot set location, queue, price or summary.
    const externalReference=reference(ctx.tenantId,input.appId,input.storeId,idempotencyKey)
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
-    customerExternalId:input.customerExternalId,externalReference,summary,idempotencyKey
+    customerExternalId:input.customerExternalId,externalReference,summary:cart.summary,idempotencyKey
    })
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:503,'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
       result.data?.purpose!=='ORDER_REQUEST')throw fail(503,'Respuesta de TU VERSO no corresponde a la sede autorizada')
+   // Write a real INBOUND message to the pending mobile conversation. Replays are idempotent.
+   if(orderMessage){
+    const messageKey=orderMessageIdempotency(idempotencyKey,result.data.interactionId)
+    const delivered=await sendMessage(integration.token,result.data.interactionId,{
+     idempotencyKey:messageKey,text:orderMessage
+    })
+    if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||'')){
+     throw fail(delivered.httpStatus===409?409:503,'TU VERSO no confirmó el texto del pedido')
+    }
+   }
    return json(res,result.httpStatus===201?201:200,{interactionId:result.data.interactionId,status:result.data.status,storeId:input.storeId,externalReference:result.data.externalReference})
   }catch(error){
    const status=safeError(error)
