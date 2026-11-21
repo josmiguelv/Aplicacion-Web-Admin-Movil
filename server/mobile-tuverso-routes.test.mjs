@@ -126,10 +126,14 @@ test('invalid store, injected tenant, outdated catalog and missing idempotency f
  assert.equal(missing.code,400)
  assert.equal(h.remote.length,0)
 })
-test('capacity lost between read and creation refuses interaction',async()=>{
- const h=harness({capacity:'UNAVAILABLE'})
- const r=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
- assert.equal(r.code,409);assert.deepEqual(h.remote.map(x=>x.operation),['capacity'])
+test('idempotent creation does not recheck capacity after an agent is already assigned',async()=>{
+ const h=harness({capacity:'UNAVAILABLE'}),key=randomUUID()
+ const request={headers:{'idempotency-key':key},payload:createBody()}
+ const first=await h.call('POST','/api/v1/mobile/interactions',request)
+ const second=await h.call('POST','/api/v1/mobile/interactions',request)
+ assert.equal(first.code,201);assert.equal(second.code,201)
+ assert.equal(first.payload.interactionId,second.payload.interactionId)
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','interaction'])
 })
 
 test('new interaction creation accepts catalog revision before pricing',async()=>{
@@ -148,7 +152,7 @@ test('create returns interactionId before chat text, and text delivery runs inde
   headers:{'idempotency-key':key},payload:createBody({customer})})
  assert.equal(response.code,201)
  assert.equal(response.payload.status,'PENDING')
- assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction'])
  const id=response.payload.interactionId
  const sent=h.remote.find(x=>x.operation==='interaction')
  assert.ok(sent.input.summary.includes('2 x Pollo A'))
@@ -159,7 +163,7 @@ test('create returns interactionId before chat text, and text delivery runs inde
  assert.equal(delivered.code,200)
  assert.equal(delivered.payload.delivered,true)
  assert.equal(delivered.payload.interactionId,id)
- assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
  const message=h.remote.find(x=>x.operation==='orderText').value.text
  for(const part of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
   'Av. Ejemplo 123','Santa Anita','Porton lateral','2 x Pollo A',
@@ -199,7 +203,7 @@ test('failed text delivery returns 503 without undoing a created interaction',as
  const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(result.code,503)
- assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
 })
 test('message scope and forged order reference cannot access other conversations',async()=>{
  const key=randomUUID()
@@ -211,7 +215,7 @@ test('message scope and forged order reference cannot access other conversations
  const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(reply.code,409)
- assert.deepEqual(denied.remote.map(x=>x.operation),['capacity','interaction'])
+ assert.deepEqual(denied.remote.map(x=>x.operation),['interaction'])
  const forged=harness()
  forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
  const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
