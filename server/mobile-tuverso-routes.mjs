@@ -35,7 +35,7 @@ function normalizeCustomer(input){
     !validText(input.address,180)||input.address.trim().length<6||
     !validText(input.district,80)||input.district.trim().length<2||
     (input.reference!==undefined&&(typeof input.reference!=='string'||input.reference.length>180||
-      /[\\x00-\\x1f]/.test(input.reference))))throw fail(400,'Datos de contacto o dirección inválidos')
+      /[\x00-\x1f]/.test(input.reference))))throw fail(400,'Datos de contacto o dirección inválidos')
  return {firstName:input.firstName.trim(),lastName:input.lastName.trim(),
   phone:input.phone,address:input.address.trim(),district:input.district.trim(),
   reference:(input.reference||'').trim()}
@@ -51,12 +51,12 @@ function orderSummaryText(cart,store,customer){
   'Direccion: '+customer.address,
   'Distrito: '+customer.district,
   ...(customer.reference?['Referencia: '+customer.reference]:[]),
-  'PRODUCTOS: '+cart.summary.replace(/^Solicitud de validación de pedido: /,'').replace(/\\. Subtotal [0-9]+\\.[0-9]{2}\\.$/,''),
+  'PRODUCTOS: '+cart.summary.replace(/^Solicitud de validación de pedido: /,'').replace(/\. Subtotal [0-9]+\.[0-9]{2}\.$/,''),
   'Subtotal productos: S/ '+cart.subtotal.toFixed(2),
   'Costo delivery: pendiente tras aceptacion (no cobrar)',
   'Estado: PENDIENTE DE VALIDACION',
   'Verificar productos y responder SOLO: aceptado o rechazado.'
- ].join('\\n')
+ ].join('\n')
  // TU VERSO supports 1200 characters for summary. Never omit items or truncate silently.
  if(message.length>1200)throw fail(422,'El detalle del pedido supera el limite de texto permitido. Reduce los productos o la longitud de los datos.')
  return message
