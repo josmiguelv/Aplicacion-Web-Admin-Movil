@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',cancelled=false}={}){
+  decisionMessage='',decisionMessages=null,cancelled=false}={}){
  const queries=[],remote=[]
  let referenceForTest=''
  const pool={async query(sql,args){
@@ -43,7 +43,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});return {ok:true,httpStatus:201,data:{interactionId:randomUUID(),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}},
   readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:'PENDING',externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});return {ok:true,data:{interactionId:id,messages:[
-   ...(decisionMessage?[{id:randomUUID(),direction:'OUTBOUND',text:decisionMessage,createdAt:new Date().toISOString()}]:[]),
+   ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
   ]}}},
   sendMessage:async(token,id,value)=>{remote.push({operation:'cancel',id,value});return {ok:true,data:{messageId:randomUUID(),created:true}}}
@@ -142,6 +142,14 @@ test('agent decision comes from exact outbound text; unknown remains pending',as
   assert.equal(r.code,200);assert.equal(r.payload.decision,expected)
   assert.equal(JSON.stringify(r.payload).includes('private-credential'),false)
  }
+})
+test('the first valid agent response is final even if a later text contradicts it',async()=>{
+ const interactionId=randomUUID(),key=randomUUID()
+ const h=harness({decisionMessages:[' Hola ','aceptado','rechazado']})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const r=await h.call('GET','/api/v1/mobile/interactions/'+interactionId+'/status?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(r.code,200);assert.equal(r.payload.decision,'ACCEPTED')
 })
 test('client cannot read decision with wrong key or other tenant',async()=>{
  const id=randomUUID(),key=randomUUID()
