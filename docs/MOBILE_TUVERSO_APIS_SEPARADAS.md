@@ -163,3 +163,14 @@ Si el resultado muestra `503`, verificar si `TUVERSO_LIVE_CHECKS_ENABLED` está 
 - **Bloqueo conocido:** el código inspeccionado de TU VERSO no permite que el agente envíe `OUTBOUND` durante `PENDING`; actualmente exige `ACCEPTED`. La adaptación del primer texto es una dependencia externa; mientras tanto Android permanece esperando y no simula una aceptación.
 - El flujo de reintentos de sedes vive temporalmente en Android (almacenamiento local cifrado por la protección de la aplicación, no persistencia SQL del Administrador). Para operación resiliente a varios dispositivos/cierres se requiere orquestador transaccional de intentos del Administrador.
 - Google Routes continúa siendo requisito para la cotización real, incluso para tarifa fija según la implementación actual. La falta de `GOOGLE_ROUTES_API_KEY` genera HTTP 503.
+
+
+### Envío de pedido como mensaje real de texto (21/11/2026)
+
+En `POST /api/v1/mobile/interactions`, Android puede añadir `customer` con campos `firstName`, `lastName`, `phone` (9 dígitos peruanos), `address`, `district`, `reference` opcional y `mode="delivery"`. El Administrador valida formato, tenant, local, catálogo/revisión, productos y subtotal. Nunca acepta precios ni texto libre prefabricado por el cliente.
+
+El Administrador primero crea la interacción con el `summary` informativo admitido por TU VERSO (`POST /api/v1/interactions`) y **luego envía un mensaje real INBOUND** con el detalle a `POST /api/v1/conversations/{interactionId}/messages`, el cual admite mensajes aun cuando la solicitud está `PENDING` según el contrato del canal MOBILE_APP. La clave de idempotencia del mensaje se deriva en un UUID estable y diferente del UUID de creación, para que un reintento no duplique el texto. El scope adicional `conversations.messages.write` es obligatorio para solicitudes enriquecidas. Si falla el segundo envío, el Administrador no responde éxito (el cliente conserva su clave para reintento). Sin `customer`, se mantiene el comportamiento anterior para clientes legados.
+
+El texto contiene exclusivamente información proporcionada por el comprador y el catálogo/sede publicados. No incluye costo de delivery ni pago confirmado. **No hay formulario ni botones** en este nuevo envío S2S. La capacidad de que el agente responda `aceptado` o `rechazado` en `PENDING` sigue siendo una dependencia separada de TU VERSO y debe certificarse antes de habilitar el paso al pago.
+
+No se modificó TU VERSO, otras integraciones ni producción.
