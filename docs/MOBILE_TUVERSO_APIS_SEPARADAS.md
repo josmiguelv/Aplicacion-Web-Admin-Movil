@@ -148,3 +148,18 @@ Si el resultado muestra `503`, verificar si `TUVERSO_LIVE_CHECKS_ENABLED` está 
 - `server/index.mjs`: montaje de rutas antes de las rutas móviles existentes.
 - `server/mobile-tuverso-routes.test.mjs`: respuestas booleanas, tenant cruzado, sede cerrada, flags, permisos, idempotencia y pérdida de capacidad.
 - `.github/workflows/web.yml`: pruebas en CI aislado; no son llamadas productivas a TU VERSO.
+
+
+## 8. Flujo B3 previo al pago — rama aislada (20/11/2026)
+
+**Desarrollo, no despliegue ni certificación E2E.** Se mantienen las rutas previas y no se modifica TU VERSO ni otros canales.
+
+- `POST /api/v1/mobile/interactions`: admite ahora `catalogRevision` antes de cotizar (alternativa a `quoteRevision`, nunca las dos). La sede debe estar abierta, tener `consultOrderAvailability`, un vínculo autorizado y capacidad. Devuelve `PENDING`; no hay reserva de productos ni pago.
+- `GET /api/v1/mobile/interactions/{interactionId}/status?appId=...&storeId=...` con `X-Order-Access-Key: <UUID de idempotencia original>`: consulta `GET /api/v1/interactions/{id}` y mensajes de la **misma integración**; compara en tiempo constante `externalReference` derivada del UUID, empresa, aplicación y sede. Solo un mensaje `OUTBOUND` exacto `aceptado`, `rechazado` o `rechazada` se interpreta como decisión. Un mensaje desconocido **no** produce rechazo ni aprobación.
+- `POST /api/v1/mobile/interactions/{interactionId}/cancel`, misma cabecera y cuerpo `{appId,storeId}`: emite a TU VERSO un mensaje de sistema sobre la cancelación al modificar el carrito, sin cerrar falsamente la interacción en TU VERSO. El agente sigue siendo responsable del cierre formal; la invalidación comercial de la app no equivale a un nuevo estado nativo TU VERSO.
+- `POST /api/v1/mobile/fulfillment/resolve`: cuando el cuerpo incluye `storeId` para delivery, cotiza **únicamente esa sede**, sin sustitución; verifica elegibilidad, carretera, radio, precios y horarios. Mantiene el comportamiento anterior cuando se omite el ID.
+- `TUVERSO_LIVE_CHECKS_ENABLED=true` y `TUVERSO_LIVE_REQUESTS_ENABLED=true` siguen siendo obligatorias para las operaciones que correspondan. El vínculo requiere los scopes `interactions.read`, `conversations.read`, `conversations.messages.write` además de `queue.availability.read` e `interactions.create`. Solo ejecutar pruebas con agente autorizado.
+- El UUID de idempotencia funciona como capacidad aleatoria de lectura/cancelación, no como autenticación de identidad humana. Protegerlo en el cliente, jamás incluirlo en URLs, logging ni analítica. El pago y mensajes del cliente requieren futura identidad verificada.
+- **Bloqueo conocido:** el código inspeccionado de TU VERSO no permite que el agente envíe `OUTBOUND` durante `PENDING`; actualmente exige `ACCEPTED`. La adaptación del primer texto es una dependencia externa; mientras tanto Android permanece esperando y no simula una aceptación.
+- El flujo de reintentos de sedes vive temporalmente en Android (almacenamiento local cifrado por la protección de la aplicación, no persistencia SQL del Administrador). Para operación resiliente a varios dispositivos/cierres se requiere orquestador transaccional de intentos del Administrador.
+- Google Routes continúa siendo requisito para la cotización real, incluso para tarifa fija según la implementación actual. La falta de `GOOGLE_ROUTES_API_KEY` genera HTTP 503.
