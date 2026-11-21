@@ -174,3 +174,10 @@ El Administrador primero crea la interacción con el `summary` informativo admit
 El texto contiene exclusivamente información proporcionada por el comprador y el catálogo/sede publicados. No incluye costo de delivery ni pago confirmado. **No hay formulario ni botones** en este nuevo envío S2S. La capacidad de que el agente responda `aceptado` o `rechazado` en `PENDING` sigue siendo una dependencia separada de TU VERSO y debe certificarse antes de habilitar el paso al pago.
 
 No se modificó TU VERSO, otras integraciones ni producción.
+
+
+### Corrección arquitectónica: decisiones exclusivamente en Android (21/11/2026)
+
+La ruta autenticada `GET /api/v1/mobile/interactions/{interactionId}/status?appId=...&storeId=...` usa la clave `X-Order-Access-Key` para validar la referencia de interacción, tenant y asociación de sede. El Administrador consulta a TU VERSO y **solo transmite** `interactionId`, `storeId`, `status` remoto y `agentMessages` (array ordenado de `{id,text,createdAt}` de mensajes `OUTBOUND`). No interpreta «Acepto», no decide `ACCEPTED` ni `REJECTED` basándose en texto y no inicia la siguiente fase comercial. Retiene la comprobación técnica de cancelación previamente solicitada.
+
+La aplicación móvil es propietaria del estado y la decisión: primero respeta el estado formal `ACCEPTED`/`REJECTED`/`EXPIRED`/`CANCELLED`; si sigue `PENDING`, lee mensajes autorizados `OUTBOUND`, identifica la primera palabra completa `acepto`, `aceptado`, `aceptada`, `rechazado` o `rechazada` y, según el resultado, solicita cotización para esa sede o consulta otra. Sin decisión, sigue esperando. La salida del Administrador no contiene `decision` para evitar duplicar reglas. Este cambio requiere actualizar **simultáneamente** Android y Administrador, no TU VERSO. Ninguna credencial del servidor sale al móvil.
