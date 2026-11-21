@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,cancelled=false,messageFailure=false}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  let referenceForTest=''
@@ -45,7 +45,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    if(!createdIds.has(input.idempotencyKey))createdIds.set(input.idempotencyKey,randomUUID())
    return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
   },
-  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:'PENDING',externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
+  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});return {ok:true,data:{interactionId:id,messages:[
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
@@ -218,6 +218,23 @@ test('agent decision comes from exact outbound text; unknown remains pending',as
    headers:{'x-order-access-key':key}})
   assert.equal(r.code,200);assert.equal(r.payload.decision,expected)
   assert.equal(JSON.stringify(r.payload).includes('private-credential'),false)
+ }
+})
+test('formal TU VERSO interaction state is authoritative even without free-text response',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const expectedRef='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ for(const [state,agentText,expected] of [
+  ['ACCEPTED','','ACCEPTED'],
+  ['REJECTED','Acepto','REJECTED'],
+  ['EXPIRED','Acepto',null]
+ ]){
+  const h=harness({remoteStatus:state,decisionMessage:agentText})
+  h.setReference(expectedRef)
+  const r=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{
+   headers:{'x-order-access-key':key}})
+  assert.equal(r.code,200)
+  assert.equal(r.payload.status,state)
+  assert.equal(r.payload.decision,expected)
  }
 })
 test('the first valid agent response is final even if a later text contradicts it',async()=>{
