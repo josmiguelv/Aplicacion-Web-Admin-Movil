@@ -16,7 +16,8 @@ const reference=(tenantId,appId,storeId,key)=>'mobile:'+createHash('sha256').upd
 const equals=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&
  timingSafeEqual(Buffer.from(a),Buffer.from(b))
 const decideText=messages=>{
- for(const msg of [...messages].reverse()){
+ // First valid agent decision is immutable for this attempt; later chat text cannot overturn it.
+ for(const msg of messages){
   if(msg.direction!=='OUTBOUND')continue
   const text=msg.text.trim().toLocaleLowerCase('es-PE').replace(/[.!]+$/,'').trim()
   if(text==='aceptado')return {decision:'ACCEPTED',agentMessageId:msg.id}
