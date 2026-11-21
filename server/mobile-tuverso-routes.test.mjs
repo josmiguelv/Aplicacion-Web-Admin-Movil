@@ -208,42 +208,42 @@ test('contact injection, invalid cellphone and client price fields are rejected 
   headers:headers(),payload:createBody({customer,deliveryFeePen:0})})
  assert.equal(result.code,400);assert.equal(h.remote.length,0)
 })
-test('agent decision comes from exact outbound text; unknown remains pending',async()=>{
- const interactionId=randomUUID(),key=randomUUID()
- const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
- for(const [message,expected] of [['  ACEPTADO.  ','ACCEPTED'],['Acepto','ACCEPTED'],['aceptada','ACCEPTED'],['no acepto',null],['rechazada','REJECTED'],
-  ['rechazado','REJECTED'],['Hola, ¿cómo estás?',null]]){
-  const h=harness({decisionMessage:message});h.setReference(ref)
-  const r=await h.call('GET','/api/v1/mobile/interactions/'+interactionId+'/status?appId='+appA+'&storeId='+storeA,{
-   headers:{'x-order-access-key':key}})
-  assert.equal(r.code,200);assert.equal(r.payload.decision,expected)
-  assert.equal(JSON.stringify(r.payload).includes('private-credential'),false)
- }
-})
-test('formal TU VERSO interaction state is authoritative even without free-text response',async()=>{
+test('backend relays authenticated agent text without deciding the order',async()=>{
  const id=randomUUID(),key=randomUUID()
- const expectedRef='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
- for(const [state,agentText,expected] of [
-  ['ACCEPTED','','ACCEPTED'],
-  ['REJECTED','Acepto','REJECTED'],
-  ['EXPIRED','Acepto',null]
- ]){
-  const h=harness({remoteStatus:state,decisionMessage:agentText})
-  h.setReference(expectedRef)
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ const h=harness({decisionMessages:['Hola','Acepto','rechazado']});h.setReference(ref)
+ const r=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(r.code,200)
+ assert.equal(r.payload.status,'PENDING')
+ assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Hola','Acepto','rechazado'])
+ assert.equal(r.payload.agentMessages.every(m=>typeof m.id==='string'&&typeof m.createdAt==='string'),true)
+ assert.equal('decision' in r.payload,false)
+ assert.equal('agentMessageId' in r.payload,false)
+ assert.equal(JSON.stringify(r.payload).includes('private-credential'),false)
+})
+test('backend relays formal status unchanged and never overrides it from text',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ for(const state of ['PENDING','ACCEPTED','REJECTED','EXPIRED']){
+  const h=harness({remoteStatus:state,decisionMessage:'Acepto'});h.setReference(ref)
   const r=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{
    headers:{'x-order-access-key':key}})
   assert.equal(r.code,200)
   assert.equal(r.payload.status,state)
-  assert.equal(r.payload.decision,expected)
+  assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
+  assert.equal('decision' in r.payload,false)
  }
 })
-test('the first valid agent response is final even if a later text contradicts it',async()=>{
- const interactionId=randomUUID(),key=randomUUID()
- const h=harness({decisionMessages:[' Hola ','aceptado','rechazado']})
+test('cancellation status remains authoritative; inbound client text is not relayed as agent text',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({cancelled:true,decisionMessage:'Acepto'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
- const r=await h.call('GET','/api/v1/mobile/interactions/'+interactionId+'/status?appId='+appA+'&storeId='+storeA,{
+ const r=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{
   headers:{'x-order-access-key':key}})
- assert.equal(r.code,200);assert.equal(r.payload.decision,'ACCEPTED')
+ assert.equal(r.code,200)
+ assert.equal(r.payload.status,'CANCELLED')
+ assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
+ assert.equal('decision' in r.payload,false)
 })
 test('client cannot read decision with wrong key or other tenant',async()=>{
  const id=randomUUID(),key=randomUUID()
