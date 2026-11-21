@@ -75,6 +75,16 @@ function sanitizedData(kind,json){
   if(!id(data.messageId)||typeof data.created!=='boolean')return null
   return {messageId:data.messageId,created:data.created}
  }
+ if(kind==='conversation'){
+  if(!id(data.interactionId)||data.conversationId!==data.interactionId||
+     !Array.isArray(data.messages)||data.messages.length>100||
+     data.messages.some(m=>!id(m.id)||!['INBOUND','OUTBOUND'].includes(m.direction)||
+       typeof m.text!=='string'||m.text.length>8000||typeof m.createdAt!=='string'))
+    return null
+  return {interactionId:data.interactionId,status:data.status,
+    messages:data.messages.map(m=>({id:m.id,direction:m.direction,text:m.text,createdAt:m.createdAt})),
+    hasMore:data.hasMore===true,nextCursor:typeof data.nextCursor==='string'?data.nextCursor:null}
+ }
  return null
 }
 async function perform(token,kind,path,{method='GET',requestBody,idempotencyKey}={}){
@@ -113,6 +123,10 @@ export async function createMobileInteraction(token,binding,input){
 export async function readMobileInteraction(token,interactionId){
  if(!id(interactionId))throw Error('TUVERSO_INTERACTION_INVALID')
  return perform(token,'read','/api/v1/interactions/'+interactionId)
+}
+export async function readMobileInteractionMessages(token,interactionId){
+ if(!id(interactionId))throw Error('TUVERSO_INTERACTION_INVALID')
+ return perform(token,'conversation','/api/v1/conversations/'+interactionId+'?limit=100')
 }
 export async function pollMobileInteractionEvents(token,{after=null,limit=50}={}){
  if(after!==null&&!id(after)||!Number.isInteger(limit)||limit<1||limit>100)
