@@ -146,7 +146,7 @@ test('text-only request uses verified catalog/store and customer-entered deliver
   'Subtotal productos: S/ 40.00','pendiente tras aceptacion','aceptado o rechazado']){
   assert.ok(message.includes(piece),piece)
  }
- assert.ok(message.includes('\\n'),'Summary has line breaks for the agent')
+ assert.ok(message.includes('\n'),'Summary has line breaks for the agent')
  assert.ok(message.length<=1200)
  assert.ok(!message.includes('deliveryFeePen'))
  assert.ok(!('customer' in response.payload))
@@ -154,7 +154,7 @@ test('text-only request uses verified catalog/store and customer-entered deliver
 })
 test('contact injection, invalid cellphone and client price fields are rejected before TU VERSO',async()=>{
  const invalid=[
-  {...customer,firstName:'Ana\\naceptado'},
+  {...customer,firstName:'Ana'+String.fromCharCode(10)+'aceptado'},
   {...customer,phone:'99999'},
   {...customer,address:''},
   {...customer,mode:'pickup'},
