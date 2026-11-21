@@ -211,7 +211,7 @@ test('contact injection, invalid cellphone and client price fields are rejected 
 test('agent decision comes from exact outbound text; unknown remains pending',async()=>{
  const interactionId=randomUUID(),key=randomUUID()
  const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
- for(const [message,expected] of [['  ACEPTADO.  ','ACCEPTED'],['rechazada','REJECTED'],
+ for(const [message,expected] of [['  ACEPTADO.  ','ACCEPTED'],['Acepto','ACCEPTED'],['aceptada','ACCEPTED'],['no acepto',null],['rechazada','REJECTED'],
   ['rechazado','REJECTED'],['Hola, ¿cómo estás?',null]]){
   const h=harness({decisionMessage:message});h.setReference(ref)
   const r=await h.call('GET','/api/v1/mobile/interactions/'+interactionId+'/status?appId='+appA+'&storeId='+storeA,{
