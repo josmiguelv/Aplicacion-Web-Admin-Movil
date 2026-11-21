@@ -18,6 +18,7 @@ const catalogs={
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
   decisionMessage='',decisionMessages=null,cancelled=false,messageFailure=false}={}){
  const queries=[],remote=[]
+ const createdIds=new Map()
  let referenceForTest=''
  const pool={async query(sql,args){
   queries.push({sql,args})
@@ -40,7 +41,10 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   decrypt:()=> 'private-credential',
   availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return {result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
-  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});return {ok:true,httpStatus:201,data:{interactionId:randomUUID(),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}},
+  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});
+   if(!createdIds.has(input.idempotencyKey))createdIds.set(input.idempotencyKey,randomUUID())
+   return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
+  },
   readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:'PENDING',externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});return {ok:true,data:{interactionId:id,messages:[
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
@@ -171,8 +175,8 @@ test('repeating a full text-only request uses a distinct but stable idempotency 
  }
  const outbound=h.remote.filter(x=>x.operation==='orderText')
  assert.equal(outbound.length,2)
- // Synthetic create mock produces distinct interactions each time. Each still gets a UUID
- // bound deterministically to its own interaction; real TU VERSO replay returns the same ID.
+ // A repeated upstream create returns the same conversation, and the text keeps its UUID.
+ assert.equal(outbound[0].value.idempotencyKey,outbound[1].value.idempotencyKey)
  assert.notEqual(outbound[0].value.idempotencyKey,key)
  assert.equal(outbound[0].value.text,outbound[1].value.text)
 })
