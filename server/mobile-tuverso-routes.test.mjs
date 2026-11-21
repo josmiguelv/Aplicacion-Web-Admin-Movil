@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,cancelled=false}={}){
+  decisionMessage='',decisionMessages=null,cancelled=false,messageFailure=false}={}){
  const queries=[],remote=[]
  let referenceForTest=''
  const pool={async query(sql,args){
@@ -46,7 +46,12 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
   ]}}},
-  sendMessage:async(token,id,value)=>{remote.push({operation:'cancel',id,value});return {ok:true,data:{messageId:randomUUID(),created:true}}}
+  sendMessage:async(token,id,value)=>{
+   const operation=value.text.startsWith('POLLOS B3 - SOLICITUD')?'orderText':'cancel'
+   remote.push({operation,id,value})
+   return messageFailure&&operation==='orderText'?{ok:false,httpStatus:503}:
+    {ok:true,data:{messageId:randomUUID(),created:true}}
+  }
  })
  const call=async(method,path,{payload,headers}={})=>{
   const req={method,body:payload,headers:headers||{},socket:{remoteAddress:'synthetic'}}
@@ -140,17 +145,45 @@ test('text-only request uses verified catalog/store and customer-entered deliver
  assert.equal(response.code,201)
  const sent=h.remote.find(x=>x.operation==='interaction')
  assert.ok(sent)
- const message=sent.input.summary
+ const delivered=h.remote.find(x=>x.operation==='orderText')
+ assert.ok(delivered,'The chat receives an actual INBOUND order text')
+ assert.equal(sent.input.summary.includes('2 x Pollo A'),true)
+ assert.equal(sent.input.summary.includes('+51'),false)
+ assert.match(delivered.value.idempotencyKey,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+ const message=delivered.value.text
  for(const piece of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
   'Av. Ejemplo 123','Santa Anita','Porton lateral','2 x Pollo A',
   'Subtotal productos: S/ 40.00','pendiente tras aceptacion','aceptado o rechazado']){
   assert.ok(message.includes(piece),piece)
  }
  assert.ok(message.includes('\n'),'Summary has line breaks for the agent')
- assert.ok(message.length<=1200)
+ assert.ok(message.length<=8000)
  assert.ok(!message.includes('deliveryFeePen'))
  assert.ok(!('customer' in response.payload))
  assert.ok(!('phone' in response.payload))
+})
+test('repeating a full text-only request uses a distinct but stable idempotency key',async()=>{
+ const h=harness(),key=randomUUID()
+ for(let i=0;i<2;i++){
+  const result=await h.call('POST','/api/v1/mobile/interactions',{
+   headers:{'idempotency-key':key},payload:createBody({customer})})
+  assert.equal(result.code,201)
+ }
+ const outbound=h.remote.filter(x=>x.operation==='orderText')
+ assert.equal(outbound.length,2)
+ // Synthetic create mock produces distinct interactions each time. Each still gets a UUID
+ // bound deterministically to its own interaction; real TU VERSO replay returns the same ID.
+ assert.notEqual(outbound[0].value.idempotencyKey,key)
+ assert.equal(outbound[0].value.text,outbound[1].value.text)
+})
+test('missing message scope and unsuccessful text delivery never report success',async()=>{
+ const denied=harness({scopes:['queue.availability.read','interactions.create']})
+ const r=await denied.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody({customer})})
+ assert.equal(r.code,409);assert.equal(denied.remote.length,0)
+ const failed=harness({messageFailure:true})
+ const result=await failed.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody({customer})})
+ assert.equal(result.code,503)
+ assert.deepEqual(failed.remote.map(x=>x.operation),['capacity','interaction','orderText'])
 })
 test('contact injection, invalid cellphone and client price fields are rejected before TU VERSO',async()=>{
  const invalid=[
