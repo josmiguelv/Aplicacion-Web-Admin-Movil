@@ -18,6 +18,7 @@ const catalogs={
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
   decisionMessage='',cancelled=false}={}){
  const queries=[],remote=[]
+ let referenceForTest=''
  const pool={async query(sql,args){
   queries.push({sql,args})
   if(sql.includes('FROM published_catalogs p')){
