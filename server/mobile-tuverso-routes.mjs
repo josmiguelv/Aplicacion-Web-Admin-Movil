@@ -233,10 +233,11 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     customer?('Pedido de '+cart.items.length+' productos del catálogo. Subtotal S/ '+cart.subtotal.toFixed(2)+'. Revisar detalle en conversación.'):null)
    if(!listSummary)throw fail(422,'El resumen del pedido supera el limite permitido')
    const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
-   // This is a fresh capacity check, not a reservation. If capacity was lost, refuse before creating.
-   const available=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
-   if(available.result==='UNAVAILABLE')throw fail(409,'Ya no hay capacidad de atención en esta sede')
-   if(available.result!=='AVAILABLE')throw fail(503,'No se pudo confirmar la capacidad')
+   // Do not precheck availability again here: a prior create may have succeeded
+   // upstream before its HTTP acknowledgement was lost, and the assigned agent
+   // may now occupy the last available slot. Android has already checked capacity.
+   // TU VERSO remains authoritative for actual create admission and idempotency.
+   // Replays must reach the same upstream idempotency key.
    // Stable upstream reference for retries. The public caller cannot set location, queue, price or summary.
    const externalReference=reference(ctx.tenantId,input.appId,input.storeId,idempotencyKey)
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
