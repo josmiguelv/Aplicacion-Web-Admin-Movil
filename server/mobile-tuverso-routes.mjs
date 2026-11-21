@@ -110,8 +110,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   if(row.suspended||!row.encrypted_credential||row.expires_at&&new Date(row.expires_at)<=new Date()||
      row.channel_type&&row.channel_type!=='MOBILE_APP'||
      !Array.isArray(row.scopes)||!row.scopes.includes('queue.availability.read')||
-     (kind==='create'||kind==='create_message')&&!row.scopes.includes('interactions.create')||
-      kind==='create_message'&&!row.scopes.includes('conversations.messages.write')||
+     kind==='create'&&!row.scopes.includes('interactions.create')||
+     kind==='message'&&(!row.scopes.includes('interactions.read')||
+       !row.scopes.includes('conversations.messages.write'))||
      kind==='status'&&(!row.scopes.includes('interactions.read')||!row.scopes.includes('conversations.read'))||
      kind==='cancel'&&(!row.scopes.includes('interactions.read')||!row.scopes.includes('conversations.read')||
        !row.scopes.includes('conversations.messages.write')))throw fail(409,'La integración no está habilitada para esta operación')
@@ -121,7 +122,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   const match=url.pathname.match(/^\/api\/v1\/mobile\/stores\/([0-9a-f-]{36})\/agent-availability$/i)
   const creating=url.pathname==='/api/v1/mobile/interactions'
   const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel)$/i)
-  if(!match&&!creating&&!statusMatch)return false
+  const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
+  if(!match&&!creating&&!statusMatch&&!messageMatch)return false
   try{
    rateLimit(req)
    if(match){
@@ -170,6 +172,43 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     return json(res,200,{interactionId,storeId:input.storeId,
      status:cancelled?'CANCELLED':remote.data.status,agentMessages})
    }
+   if(messageMatch){
+    if(req.method!=='POST')throw fail(405,'Método no permitido')
+    if(interactionMode()!=='LIVE')throw fail(503,'Mensajes de TU VERSO no habilitados')
+    const interactionId=messageMatch[1],access=req.headers['x-order-access-key']
+    if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
+    const input=await body(req)
+    if(!plainObject(input)||Object.keys(input).some(k=>!['appId','storeId','quoteRevision','catalogRevision','customerExternalId','items','customer'].includes(k))||
+       !APP.test(input.appId)||!VALID_UUID.test(input.storeId)||
+       (input.quoteRevision!==undefined&&input.catalogRevision!==undefined)||
+       !Number.isSafeInteger(input.catalogRevision??input.quoteRevision)||
+       (input.catalogRevision??input.quoteRevision)<1||!validText(input.customerExternalId,180))
+      throw fail(400,'Datos de solicitud de texto inválidos')
+    // The Administrator derives text from trusted published catalog and supplied contact.
+    const ctx=await context(input.appId,input.storeId,false)
+    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))
+      throw fail(409,'El catálogo cambió: no se puede enviar un detalle de otra revisión')
+    const cart=calculateOrderCart(ctx.payload.products,input.items)
+    const customer=normalizeCustomer(input.customer)
+    if(!customer)throw fail(400,'Faltan datos del cliente para enviar el pedido')
+    const text=orderSummaryText(cart,ctx.store,customer)
+    const integration=await binding(ctx.tenantId,input.appId,input.storeId,'message')
+    const remote=await readInteraction(integration.token,interactionId)
+    if(!remote.ok)throw fail(remote.httpStatus===404?404:503,'No se pudo verificar la interacción')
+    const expected=reference(ctx.tenantId,input.appId,input.storeId,access)
+    if(!equals(remote.data?.externalReference,expected)||
+       remote.data?.externalLocationId!==integration.external_location_id||
+       remote.data?.purpose!=='ORDER_REQUEST')
+      throw fail(403,'Interacción no autorizada para esta aplicación y sede')
+    if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED')
+      throw fail(409,'La solicitud ya no permite enviar mensajes')
+    const delivered=await sendMessage(integration.token,interactionId,{
+     idempotencyKey:orderMessageIdempotency(access,interactionId),text
+    })
+    if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||''))
+      throw fail(delivered.httpStatus===409?409:503,'TU VERSO no confirmó el texto del pedido')
+    return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId})
+   }
    if(req.method!=='POST')throw fail(405,'Método no permitido')
    if(interactionMode()!=='LIVE'||checkMode()==='DISABLED')throw fail(503,'Interacciones TU VERSO no habilitadas')
    const input=await body(req)
@@ -184,11 +223,11 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))throw fail(409,'El catálogo cambió: actualiza tu pedido')
    const cart=calculateOrderCart(ctx.payload.products,input.items)
    const customer=normalizeCustomer(input.customer)
-   const orderMessage=customer?orderSummaryText(cart,ctx.store,customer):null
+   // Open promptly; an agent's response is checked with separate short GET requests.
    const listSummary=cart.summary.length<=1200?cart.summary:(
     customer?('Pedido de '+cart.items.length+' productos del catálogo. Subtotal S/ '+cart.subtotal.toFixed(2)+'. Revisar detalle en conversación.'):null)
    if(!listSummary)throw fail(422,'El resumen del pedido supera el limite permitido')
-   const integration=await binding(ctx.tenantId,input.appId,input.storeId,customer?'create_message':'create')
+   const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
    // This is a fresh capacity check, not a reservation. If capacity was lost, refuse before creating.
    const available=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
    if(available.result==='UNAVAILABLE')throw fail(409,'Ya no hay capacidad de atención en esta sede')
@@ -201,16 +240,6 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:503,'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
       result.data?.purpose!=='ORDER_REQUEST')throw fail(503,'Respuesta de TU VERSO no corresponde a la sede autorizada')
-   // Write a real INBOUND message to the pending mobile conversation. Replays are idempotent.
-   if(orderMessage){
-    const messageKey=orderMessageIdempotency(idempotencyKey,result.data.interactionId)
-    const delivered=await sendMessage(integration.token,result.data.interactionId,{
-     idempotencyKey:messageKey,text:orderMessage
-    })
-    if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||'')){
-     throw fail(delivered.httpStatus===409?409:503,'TU VERSO no confirmó el texto del pedido')
-    }
-   }
    return json(res,result.httpStatus===201?201:200,{interactionId:result.data.interactionId,status:result.data.status,storeId:input.storeId,externalReference:result.data.externalReference})
   }catch(error){
    const status=safeError(error)
