@@ -134,7 +134,7 @@ async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
  if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
  const region=word(b.city,100)&&word(b.country,100)?[b.city.trim(),b.country.trim()]:legacyLimaFallback?['Lima','Perú']:[];
  const destination=hasAddress?[b.address.trim(),b.district.trim(),...region].join(', '):{latitude:b.latitude,longitude:b.longitude};
- const candidates=eligible.filter(s=>checkLatLng(s.latitude,s.longitude)&&
+ const candidates=eligible.filter(s=>(!b.storeId||s.id===b.storeId)&&checkLatLng(s.latitude,s.longitude)&&
   (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
  if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
  if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
@@ -192,7 +192,9 @@ async function quote(req,res){
  if(b.mode==='delivery'){
   limitPublicDeliveryQuotes(req);
   const candidates=await deliveryQuotes(config,b,q.rows[0].revision,true);
+  if(b.storeId&&!uuid(b.storeId))throw bad(400,'Sede solicitada inválida');
   const first=candidates[0];selected=eligible.find(s=>s.id===first.storeId);roadKm=first.routeDistanceKm;deliveryFeePen=first.deliveryFee;
+  if(b.storeId&&selected.id!==b.storeId)throw bad(409,'No se pudo cotizar la sede seleccionada');
  }else{
   selected=eligible.find(s=>s.id===b.storeId);
   if(!selected)throw bad(409,'Selecciona una sede abierta para esta modalidad');

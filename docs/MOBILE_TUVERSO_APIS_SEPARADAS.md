@@ -148,3 +148,45 @@ Si el resultado muestra `503`, verificar si `TUVERSO_LIVE_CHECKS_ENABLED` está 
 - `server/index.mjs`: montaje de rutas antes de las rutas móviles existentes.
 - `server/mobile-tuverso-routes.test.mjs`: respuestas booleanas, tenant cruzado, sede cerrada, flags, permisos, idempotencia y pérdida de capacidad.
 - `.github/workflows/web.yml`: pruebas en CI aislado; no son llamadas productivas a TU VERSO.
+
+
+## 8. Flujo B3 previo al pago — rama aislada (20/11/2026)
+
+**Desarrollo, no despliegue ni certificación E2E.** Se mantienen las rutas previas y no se modifica TU VERSO ni otros canales.
+
+- `POST /api/v1/mobile/interactions`: admite ahora `catalogRevision` antes de cotizar (alternativa a `quoteRevision`, nunca las dos). La sede debe estar abierta, tener `consultOrderAvailability`, un vínculo autorizado y capacidad. Devuelve `PENDING`; no hay reserva de productos ni pago.
+- `GET /api/v1/mobile/interactions/{interactionId}/status?appId=...&storeId=...` con `X-Order-Access-Key: <UUID de idempotencia original>`: consulta `GET /api/v1/interactions/{id}` y mensajes de la **misma integración**; compara en tiempo constante `externalReference` derivada del UUID, empresa, aplicación y sede. Solo un mensaje `OUTBOUND` exacto `aceptado`, `rechazado` o `rechazada` se interpreta como decisión. Un mensaje desconocido **no** produce rechazo ni aprobación.
+- `POST /api/v1/mobile/interactions/{interactionId}/cancel`, misma cabecera y cuerpo `{appId,storeId}`: emite a TU VERSO un mensaje de sistema sobre la cancelación al modificar el carrito, sin cerrar falsamente la interacción en TU VERSO. El agente sigue siendo responsable del cierre formal; la invalidación comercial de la app no equivale a un nuevo estado nativo TU VERSO.
+- `POST /api/v1/mobile/fulfillment/resolve`: cuando el cuerpo incluye `storeId` para delivery, cotiza **únicamente esa sede**, sin sustitución; verifica elegibilidad, carretera, radio, precios y horarios. Mantiene el comportamiento anterior cuando se omite el ID.
+- `TUVERSO_LIVE_CHECKS_ENABLED=true` y `TUVERSO_LIVE_REQUESTS_ENABLED=true` siguen siendo obligatorias para las operaciones que correspondan. El vínculo requiere los scopes `interactions.read`, `conversations.read`, `conversations.messages.write` además de `queue.availability.read` e `interactions.create`. Solo ejecutar pruebas con agente autorizado.
+- El UUID de idempotencia funciona como capacidad aleatoria de lectura/cancelación, no como autenticación de identidad humana. Protegerlo en el cliente, jamás incluirlo en URLs, logging ni analítica. El pago y mensajes del cliente requieren futura identidad verificada.
+- **Bloqueo conocido:** el código inspeccionado de TU VERSO no permite que el agente envíe `OUTBOUND` durante `PENDING`; actualmente exige `ACCEPTED`. La adaptación del primer texto es una dependencia externa; mientras tanto Android permanece esperando y no simula una aceptación.
+- El flujo de reintentos de sedes vive temporalmente en Android (almacenamiento local cifrado por la protección de la aplicación, no persistencia SQL del Administrador). Para operación resiliente a varios dispositivos/cierres se requiere orquestador transaccional de intentos del Administrador.
+- Google Routes continúa siendo requisito para la cotización real, incluso para tarifa fija según la implementación actual. La falta de `GOOGLE_ROUTES_API_KEY` genera HTTP 503.
+
+
+### Envío de pedido como mensaje real de texto (21/11/2026)
+
+En `POST /api/v1/mobile/interactions`, Android puede añadir `customer` con campos `firstName`, `lastName`, `phone` (9 dígitos peruanos), `address`, `district`, `reference` opcional y `mode="delivery"`. El Administrador valida formato, tenant, local, catálogo/revisión, productos y subtotal. Nunca acepta precios ni texto libre prefabricado por el cliente.
+
+El Administrador primero crea la interacción con el `summary` informativo admitido por TU VERSO (`POST /api/v1/interactions`) y **luego envía un mensaje real INBOUND** con el detalle a `POST /api/v1/conversations/{interactionId}/messages`, el cual admite mensajes aun cuando la solicitud está `PENDING` según el contrato del canal MOBILE_APP. La clave de idempotencia del mensaje se deriva en un UUID estable y diferente del UUID de creación, para que un reintento no duplique el texto. El scope adicional `conversations.messages.write` es obligatorio para solicitudes enriquecidas. Si falla el segundo envío, el Administrador no responde éxito (el cliente conserva su clave para reintento). Sin `customer`, se mantiene el comportamiento anterior para clientes legados.
+
+El texto contiene exclusivamente información proporcionada por el comprador y el catálogo/sede publicados. No incluye costo de delivery ni pago confirmado. **No hay formulario ni botones** en este nuevo envío S2S. La capacidad de que el agente responda `aceptado` o `rechazado` en `PENDING` sigue siendo una dependencia separada de TU VERSO y debe certificarse antes de habilitar el paso al pago.
+
+No se modificó TU VERSO, otras integraciones ni producción.
+
+
+### Corrección arquitectónica: decisiones exclusivamente en Android (21/11/2026)
+
+La ruta autenticada `GET /api/v1/mobile/interactions/{interactionId}/status?appId=...&storeId=...` usa la clave `X-Order-Access-Key` para validar la referencia de interacción, tenant y asociación de sede. El Administrador consulta a TU VERSO y **solo transmite** `interactionId`, `storeId`, `status` remoto y `agentMessages` (array ordenado de `{id,text,createdAt}` de mensajes `OUTBOUND`). No interpreta «Acepto», no decide `ACCEPTED` ni `REJECTED` basándose en texto y no inicia la siguiente fase comercial. Retiene la comprobación técnica de cancelación previamente solicitada.
+
+La aplicación móvil es propietaria del estado y la decisión: primero respeta el estado formal `ACCEPTED`/`REJECTED`/`EXPIRED`/`CANCELLED`; si sigue `PENDING`, lee mensajes autorizados `OUTBOUND`, identifica la primera palabra completa `acepto`, `aceptado`, `aceptada`, `rechazado` o `rechazada` y, según el resultado, solicita cotización para esa sede o consulta otra. Sin decisión, sigue esperando. La salida del Administrador no contiene `decision` para evitar duplicar reglas. Este cambio requiere actualizar **simultáneamente** Android y Administrador, no TU VERSO. Ninguna credencial del servidor sale al móvil.
+
+
+### Separación del HTTP 503 después de crear interacción — contrato B3 (21/11/2026)
+
+`POST /api/v1/mobile/interactions` **solo** verifica la petición, comprueba capacidad y crea o recupera la interacción mediante su `Idempotency-Key`. Devuelve `interactionId` y `status` inmediatamente después de la confirmación de TU VERSO; **no espera el envío del mensaje ni la respuesta del agente**.
+
+`POST /api/v1/mobile/interactions/{interactionId}/message` es una segunda operación autenticada con `X-Order-Access-Key` (la clave original de creación), el mismo cuerpo de pedido firmado por la sesión Android y validación del tenant/sede/referencia externa. El Administrador recalcula el texto con datos del catálogo publicado y del cliente, nunca toma texto arbitrario o precios del teléfono. Verifica la interacción remotamente y envía el texto con `orderMessageIdempotency` estable; si falla, devuelve error **solo para el mensaje**, sin anular la interacción ya creada. No se permite uso transversal de credenciales o sedes.
+
+Los límites de lectura HTTP protegen del fallo de red y no deben ser usados como plazo máximo de atención. El Administrador no asigna expiraciones comerciales ni cierra conversaciones por un timeout de red; la expiración/cancelación proviene del contrato formal de TU VERSO o de la decisión explícita del comprador. El control del tiempo de respuesta del agente corresponde exclusivamente a la configuración real de TU VERSO. Es obligatorio actualizar el Administrador y Android juntos.

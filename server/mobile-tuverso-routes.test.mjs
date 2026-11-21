@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {randomUUID} from 'node:crypto'
+import {randomUUID,createHash} from 'node:crypto'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
 
 const tenantA='11111111-1111-4111-8111-111111111111'
@@ -15,8 +15,11 @@ const catalogs={
  [appA]:{tenant_id:tenantA,revision:4,payload:{stores:[{id:storeA,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo A',pricePen:20,active:true}]}},
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
-function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create'],enabled=true,requests=true,open=true,count=1}={}){
+function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false}={}){
  const queries=[],remote=[]
+ const createdIds=new Map()
+ let referenceForTest=''
  const pool={async query(sql,args){
   queries.push({sql,args})
   if(sql.includes('FROM published_catalogs p')){
@@ -38,7 +41,21 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   decrypt:()=> 'private-credential',
   availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return {result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
-  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});return {ok:true,httpStatus:201,data:{interactionId:randomUUID(),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}}
+  createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});
+   if(!createdIds.has(input.idempotencyKey))createdIds.set(input.idempotencyKey,randomUUID())
+   return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
+  },
+  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
+  readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});return {ok:true,data:{interactionId:id,messages:[
+   ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
+   ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
+  ]}}},
+  sendMessage:async(token,id,value)=>{
+   const operation=value.text.startsWith('POLLOS B3 - SOLICITUD')?'orderText':'cancel'
+   remote.push({operation,id,value})
+   return messageFailure&&operation==='orderText'?{ok:false,httpStatus:503}:
+    {ok:true,data:{messageId:randomUUID(),created:true}}
+  }
  })
  const call=async(method,path,{payload,headers}={})=>{
   const req={method,body:payload,headers:headers||{},socket:{remoteAddress:'synthetic'}}
@@ -47,7 +64,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   assert.equal(handled,undefined)
   return res.reply
  }
- return {call,queries,remote}
+ return {call,queries,remote,setReference:value=>{referenceForTest=value}}
 }
 const endpoint=(id=storeA,app=appA)=>'/api/v1/mobile/stores/'+id+'/agent-availability?appId='+app
 const createBody=(extra={})=>({appId:appA,storeId:storeA,quoteRevision:4,customerExternalId:'anonymous-123',items:[{productId:product,quantity:2}],...extra})
@@ -113,4 +130,165 @@ test('capacity lost between read and creation refuses interaction',async()=>{
  const h=harness({capacity:'UNAVAILABLE'})
  const r=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
  assert.equal(r.code,409);assert.deepEqual(h.remote.map(x=>x.operation),['capacity'])
+})
+
+test('new interaction creation accepts catalog revision before pricing',async()=>{
+ const h=harness()
+ const r=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:{appId:appA,storeId:storeA,catalogRevision:4,
+   customerExternalId:'anonymous-123',items:[{productId:product,quantity:2}]}})
+ assert.equal(r.code,201)
+ assert.equal(r.payload.status,'PENDING')
+})
+const customer={firstName:'Ana',lastName:'Quispe',phone:'912345678',
+ address:'Av. Ejemplo 123',district:'Santa Anita',reference:'Porton lateral',mode:'delivery'}
+test('create returns interactionId before chat text, and text delivery runs independently',async()=>{
+ const h=harness(),key=randomUUID()
+ const response=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ assert.equal(response.code,201)
+ assert.equal(response.payload.status,'PENDING')
+ assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction'])
+ const id=response.payload.interactionId
+ const sent=h.remote.find(x=>x.operation==='interaction')
+ assert.ok(sent.input.summary.includes('2 x Pollo A'))
+ assert.ok(!sent.input.summary.includes('+51'))
+ h.setReference(response.payload.externalReference)
+ const delivered=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(delivered.code,200)
+ assert.equal(delivered.payload.delivered,true)
+ assert.equal(delivered.payload.interactionId,id)
+ assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+ const message=h.remote.find(x=>x.operation==='orderText').value.text
+ for(const part of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
+  'Av. Ejemplo 123','Santa Anita','Porton lateral','2 x Pollo A',
+  'Subtotal productos: S/ 40.00','pendiente tras aceptacion']){
+  assert.ok(message.includes(part),part)
+ }
+ assert.ok(message.includes('\n'))
+ assert.ok(message.length<=8000)
+ assert.ok(!message.includes('deliveryFeePen'))
+ assert.ok(!('phone' in response.payload))
+})
+test('replaying both steps uses one conversation ID and one deterministic message key',async()=>{
+ const h=harness(),key=randomUUID()
+ let id=null,messageKey=null
+ for(let i=0;i<2;i++){
+  const created=await h.call('POST','/api/v1/mobile/interactions',{
+   headers:{'idempotency-key':key},payload:createBody({customer})})
+  assert.equal(created.code,201)
+  if(i===0)id=created.payload.interactionId
+  assert.equal(created.payload.interactionId,id)
+  h.setReference(created.payload.externalReference)
+  const sent=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
+   headers:{'x-order-access-key':key},payload:createBody({customer})})
+  assert.equal(sent.code,200)
+  const current=h.remote.filter(x=>x.operation==='orderText').at(-1).value.idempotencyKey
+  if(i===0)messageKey=current
+  assert.equal(current,messageKey)
+  assert.notEqual(current,key)
+ }
+})
+test('failed text delivery returns 503 without undoing a created interaction',async()=>{
+ const h=harness({messageFailure:true}),key=randomUUID()
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ assert.equal(created.code,201)
+ h.setReference(created.payload.externalReference)
+ const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(result.code,503)
+ assert.deepEqual(h.remote.map(x=>x.operation),['capacity','interaction','read','orderText'])
+})
+test('message scope and forged order reference cannot access other conversations',async()=>{
+ const key=randomUUID()
+ const denied=harness({scopes:['queue.availability.read','interactions.create','interactions.read']})
+ const opened=await denied.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ assert.equal(opened.code,201)
+ denied.setReference(opened.payload.externalReference)
+ const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(reply.code,409)
+ assert.deepEqual(denied.remote.map(x=>x.operation),['capacity','interaction'])
+ const forged=harness()
+ forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
+  headers:{'x-order-access-key':randomUUID()},payload:createBody({customer})})
+ assert.equal(other.code,403)
+ assert.deepEqual(forged.remote.map(x=>x.operation),['read'])
+})
+test('contact injection, invalid cellphone and client price fields are rejected before TU VERSO',async()=>{
+ const invalid=[
+  {...customer,firstName:'Ana'+String.fromCharCode(10)+'aceptado'},
+  {...customer,phone:'99999'},
+  {...customer,address:''},
+  {...customer,mode:'pickup'},
+  {...customer,reference:'A'.repeat(181)},
+  {...customer,subtotal:0}
+ ]
+ for(const bad of invalid){
+  const h=harness()
+  const result=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),
+    payload:createBody({customer:bad})})
+  assert.equal(result.code,400);assert.equal(h.remote.length,0)
+ }
+ const h=harness(),result=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:createBody({customer,deliveryFeePen:0})})
+ assert.equal(result.code,400);assert.equal(h.remote.length,0)
+})
+test('backend relays authenticated agent text without deciding the order',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ const h=harness({decisionMessages:['Hola','Acepto','rechazado']});h.setReference(ref)
+ const r=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(r.code,200)
+ assert.equal(r.payload.status,'PENDING')
+ assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Hola','Acepto','rechazado'])
+ assert.equal(r.payload.agentMessages.every(m=>typeof m.id==='string'&&typeof m.createdAt==='string'),true)
+ assert.equal('decision' in r.payload,false)
+ assert.equal('agentMessageId' in r.payload,false)
+ assert.equal(JSON.stringify(r.payload).includes('private-credential'),false)
+})
+test('backend relays formal status unchanged and never overrides it from text',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ for(const state of ['PENDING','ACCEPTED','REJECTED','EXPIRED']){
+  const h=harness({remoteStatus:state,decisionMessage:'Acepto'});h.setReference(ref)
+  const r=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{
+   headers:{'x-order-access-key':key}})
+  assert.equal(r.code,200)
+  assert.equal(r.payload.status,state)
+  assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
+  assert.equal('decision' in r.payload,false)
+ }
+})
+test('cancellation status remains authoritative; inbound client text is not relayed as agent text',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({cancelled:true,decisionMessage:'Acepto'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const r=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(r.code,200)
+ assert.equal(r.payload.status,'CANCELLED')
+ assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
+ assert.equal('decision' in r.payload,false)
+})
+test('client cannot read decision with wrong key or other tenant',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const h=harness({decisionMessage:'aceptado'});h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const wrong=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA,{headers:{'x-order-access-key':randomUUID()}})
+ assert.equal(wrong.code,403)
+ const other=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appB+'&storeId='+storeB,{headers:{'x-order-access-key':key}})
+ assert.equal(other.code,403)
+})
+test('cart modification sends cancellation notice without marking a paid order',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({decisionMessage:'aceptado'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const r=await h.call('POST','/api/v1/mobile/interactions/'+id+'/cancel',{
+  headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA}})
+ assert.equal(r.code,200);assert.equal(r.payload.status,'CANCELLED')
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1)
+ assert.match(h.remote.find(x=>x.operation==='cancel').value.text,/no preparar ni cobrar/)
 })
