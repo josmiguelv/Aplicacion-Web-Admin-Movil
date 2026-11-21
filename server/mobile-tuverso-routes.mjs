@@ -155,9 +155,14 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
     const history=await readMessages(integration.token,interactionId)
-    if(!history.ok||history.data?.interactionId!==interactionId)
-      throw fail(503,'No se pudo leer la decisión del asesor')
-    const cancelled=history.data.messages.some(m=>m.direction==='INBOUND'&&m.text===CANCEL_NOTICE)
+    // Interaction status and conversation history are independent requests.
+    // For a read-only poll, a transient history failure must not make a
+    // successfully identified interaction look lost or rejected to Android.
+    const messagesAvailable=history.ok===true&&history.data?.interactionId===interactionId
+    if(!messagesAvailable&&operation==='cancel')
+      throw fail(503,'No se pudo verificar la conversación antes de cancelar')
+    const messages=messagesAvailable?history.data.messages:[]
+    const cancelled=messages.some(m=>m.direction==='INBOUND'&&m.text===CANCEL_NOTICE)
     if(operation==='cancel'){
      if(cancelled)return json(res,200,{interactionId,status:'CANCELLED'})
      if(remote.data.status==='EXPIRED')throw fail(409,'La interacción ya expiró')
@@ -167,10 +172,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     }
     // Relay verified conversation facts only. Android owns decision parsing, store
     // fallback and delivery-quote progression; the Administrator never decides.
-    const agentMessages=history.data.messages.filter(message=>message.direction==='OUTBOUND')
+    const agentMessages=messages.filter(message=>message.direction==='OUTBOUND')
      .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
-     status:cancelled?'CANCELLED':remote.data.status,agentMessages})
+     status:cancelled?'CANCELLED':remote.data.status,agentMessages,messagesAvailable})
    }
    if(messageMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
