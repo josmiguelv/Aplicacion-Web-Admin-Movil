@@ -26,7 +26,7 @@ const decideText=messages=>{
  for(const msg of messages){
   if(msg.direction!=='OUTBOUND')continue
   const text=msg.text.trim().toLocaleLowerCase('es-PE').replace(/[.!]+$/,'').trim()
-  if(text==='aceptado')return {decision:'ACCEPTED',agentMessageId:msg.id}
+  if(['aceptado','aceptada','acepto'].includes(text))return {decision:'ACCEPTED',agentMessageId:msg.id}
   if(text==='rechazado'||text==='rechazada')return {decision:'REJECTED',agentMessageId:msg.id}
  }
  return {decision:null,agentMessageId:null}
