@@ -21,16 +21,6 @@ const orderMessageIdempotency=(key,interactionId)=>{
 }
 const equals=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&
  timingSafeEqual(Buffer.from(a),Buffer.from(b))
-const decideText=messages=>{
- // First valid agent decision is immutable for this attempt; later chat text cannot overturn it.
- for(const msg of messages){
-  if(msg.direction!=='OUTBOUND')continue
-  const text=msg.text.trim().toLocaleLowerCase('es-PE').replace(/[.!]+$/,'').trim()
-  if(['aceptado','aceptada','acepto'].includes(text))return {decision:'ACCEPTED',agentMessageId:msg.id}
-  if(text==='rechazado'||text==='rechazada')return {decision:'REJECTED',agentMessageId:msg.id}
- }
- return {decision:null,agentMessageId:null}
-}
 // Text-only mobile order briefing. Never trust product names, prices or store names from Android.
 function normalizeCustomer(input){
  if(input===undefined)return null // Backward compatibility for already-issued clients.
@@ -173,17 +163,12 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      if(!sent.ok)throw fail(sent.httpStatus===409?409:503,'No se pudo notificar la cancelación')
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
-    // Formal TU VERSO decisions take precedence; otherwise read the agent's exact
-    // OUTBOUND response while PENDING. Never infer approval from the client's text.
-    const decision=cancelled?{decision:null,agentMessageId:null}:
-     remote.data.status==='ACCEPTED'?{decision:'ACCEPTED',agentMessageId:null}:
-     remote.data.status==='REJECTED'?{decision:'REJECTED',agentMessageId:null}:
-     remote.data.status==='EXPIRED'?{decision:null,agentMessageId:null}:
-     decideText(history.data.messages)
+    // Relay verified conversation facts only. Android owns decision parsing, store
+    // fallback and delivery-quote progression; the Administrator never decides.
+    const agentMessages=history.data.messages.filter(message=>message.direction==='OUTBOUND')
+     .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
-      status:cancelled?'CANCELLED':remote.data.status,
-      decision:cancelled?'CANCELLED':decision.decision,
-      agentMessageId:decision.agentMessageId})
+     status:cancelled?'CANCELLED':remote.data.status,agentMessages})
    }
    if(req.method!=='POST')throw fail(405,'Método no permitido')
    if(interactionMode()!=='LIVE'||checkMode()==='DISABLED')throw fail(503,'Interacciones TU VERSO no habilitadas')
