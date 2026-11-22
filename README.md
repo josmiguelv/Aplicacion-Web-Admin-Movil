@@ -1,5 +1,13 @@
 # Administrador SaaS — INTEGRA B2G
 
+> **Documentación vigente de mensajería MOBILE_APP, 22-11-2026:** 
+> [API pública TEXT/FORM del Administrador Web](docs/ADMIN_MOBILE_APP_TEXT_FORM_API_20261122.md)
+> y [contrato exacto para Android](docs/TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
+> Android selecciona el tipo; el Administrador valida y retransmite a TU VERSO
+> con credencial privada, sin modificar canales ajenos. Los documentos de fases
+> previas conservan su contexto histórico.
+
+
 Repositorio de la plataforma administrativa multitenant y sus APIs comerciales. Cada negocio se registra como tenant; Pollos B3 es un posible consumidor, no el tenant fijo del sistema. El alcance de este repositorio no incluye el código, base de datos ni despliegue de TU VERSO, de las aplicaciones móviles o de la web comercial.
 
 ## Empezar por aquí
