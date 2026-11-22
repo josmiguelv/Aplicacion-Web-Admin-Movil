@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false,historyFailure=false}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false,historyFailure=false,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  let referenceForTest=''
@@ -47,12 +47,13 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   storeOpen:()=>open,checkMode:()=>enabled?'LIVE':'DISABLED',
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   decrypt:()=> 'private-credential',
-  availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return {result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
+  availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return upstream.availability?{result:null,httpStatus:upstream.availability,errorCode:'UPSTREAM_'+upstream.availability}:{result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
   createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});
+   if(upstream.create)return {ok:false,httpStatus:upstream.create,errorCode:'UPSTREAM_'+upstream.create}
    if(!createdIds.has(input.idempotencyKey))createdIds.set(input.idempotencyKey,randomUUID())
    return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
   },
-  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
+  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});if(historyFailure)return {ok:false,httpStatus:503,errorCode:'CONNECTION_FAILED'};return {ok:true,data:{interactionId:id,messages:[
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
@@ -60,7 +61,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   sendMessage:async(token,id,value)=>{
    const operation=value.text.startsWith('POLLOS B3 - SOLICITUD')?'orderText':'cancel'
    remote.push({operation,id,value})
-   return messageFailure&&operation==='orderText'?{ok:false,httpStatus:503}:
+   return upstream.message?{ok:false,httpStatus:upstream.message}:messageFailure&&operation==='orderText'?{ok:false,httpStatus:503}:
     {ok:true,data:{messageId:randomUUID(),created:true}}
   }
  })
@@ -99,9 +100,9 @@ test('closed store and missing binding fail closed',async()=>{
  const b=harness({count:0}),other=await b.call('GET',endpoint())
  assert.equal(other.code,409);assert.equal(b.remote.length,0)
 })
-test('missing permission and disabled switches never call remote',async()=>{
+test('historical local scopes do not deny requests; disabled runtime switches still fail closed',async()=>{
  const a=harness({scopes:['queue.availability.read']}),r=await a.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
- assert.equal(r.code,409);assert.equal(a.remote.length,0)
+ assert.equal(r.code,201);assert.deepEqual(a.remote.map(x=>x.operation),['interaction'])
  const b=harness({enabled:false}),other=await b.call('GET',endpoint())
  assert.equal(other.code,503);assert.equal(b.remote.length,0)
  const c=harness({requests:false}),third=await c.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
@@ -212,7 +213,7 @@ test('failed text delivery returns 503 without undoing a created interaction',as
  assert.equal(result.code,503)
  assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
 })
-test('message scope and forged order reference cannot access other conversations',async()=>{
+test('stale local message scopes never reject; forged order references remain forbidden',async()=>{
  const key=randomUUID()
  const denied=harness({scopes:['queue.availability.read','interactions.create','interactions.read']})
  const opened=await denied.call('POST','/api/v1/mobile/interactions',{
@@ -221,8 +222,8 @@ test('message scope and forged order reference cannot access other conversations
  denied.setReference(opened.payload.externalReference)
  const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
- assert.equal(reply.code,409)
- assert.deepEqual(denied.remote.map(x=>x.operation),['interaction'])
+ assert.equal(reply.code,200)
+ assert.deepEqual(denied.remote.map(x=>x.operation),['interaction','read','orderText'])
  const forged=harness()
  forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
  const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
@@ -350,4 +351,40 @@ test('cart modification sends cancellation notice without marking a paid order',
  assert.equal(r.code,200);assert.equal(r.payload.status,'CANCELLED')
  assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1)
  assert.match(h.remote.find(x=>x.operation==='cancel').value.text,/no preparar ni cobrar/)
+})
+
+test('effective TU VERSO authorizations pass through as 401/403, not misleading 503',async()=>{
+ for(const status of [401,403]){
+  const availability=harness({scopes:[],upstream:{availability:status}})
+  const check=await availability.call('GET',endpoint())
+  assert.equal(check.code,status)
+  assert.deepEqual(availability.remote.map(x=>x.operation),['capacity'])
+  const create=harness({scopes:[],upstream:{create:status}})
+  const started=await create.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody()})
+  assert.equal(started.code,status)
+  assert.deepEqual(create.remote.map(x=>x.operation),['interaction'])
+  const read=harness({scopes:[],upstream:{read:status}})
+  const tracked=await read.call('GET','/api/v1/mobile/interactions/'+randomUUID()+'/status?appId='+appA+'&storeId='+storeA,{
+   headers:{'x-order-access-key':randomUUID()}
+  })
+  assert.equal(tracked.code,status)
+  assert.deepEqual(read.remote.map(x=>x.operation),['read'])
+ }
+})
+
+test('upstream failure to send text is authoritative while local order isolation is unchanged',async()=>{
+ const key=randomUUID()
+ const h=harness({scopes:[],upstream:{message:403}})
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ assert.equal(created.code,201)
+ h.setReference(created.payload.externalReference)
+ const reply=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(reply.code,403)
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
+ const other=harness({scopes:[]})
+ const unauthorized=await other.call('GET',endpoint(storeB,appA))
+ assert.equal(unauthorized.code,409)
+ assert.equal(other.remote.length,0)
 })
