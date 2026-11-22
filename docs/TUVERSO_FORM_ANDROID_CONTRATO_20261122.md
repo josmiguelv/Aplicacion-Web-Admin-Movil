@@ -1,5 +1,14 @@
 # Pollos B3 — formulario MOBILE_APP hacia TU VERSO (22/11/2026)
 
+> **Referencia técnica del gateway y sus riesgos:**
+> [API MOBILE_APP TEXT/FORM del Administrador](ADMIN_MOBILE_APP_TEXT_FORM_API_20261122.md).
+> La rama de código `fix/b3-mobile-form-to-tuverso-20261122` admite
+> `FORM` directamente con título, subtítulo y 1–5 filas, o FORM construido
+> a partir de un pedido. El retorno es mensaje saliente ordinario del agente.
+> Pruebas focalizadas del código 43/43 PASS; sin certificación E2E ni
+> instalación Windows local comprobada.
+
+
 ## Alcance y estado
 Implementado en la rama `fix/b3-mobile-form-to-tuverso-20261122`. Cambia **solamente** el envío
 del detalle del pedido: Android indica `type: "TEXT"` o `type: "FORM"` en `/message` y el Administrador mantiene esa elección en la API S2S.
