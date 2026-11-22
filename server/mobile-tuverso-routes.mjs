@@ -99,6 +99,25 @@ function orderForm(cart,store,customer){
   throw fail(422,'La información de la solicitud supera el tamaño permitido del formulario')
  return form
 }
+// A client-authored FORM is informational only: it never supplies authoritative prices,
+// store availability, fulfillment status or an approval decision.
+function validClientForm(value){
+ if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','fields'].includes(key))||
+    !validText(value.title,180)||
+    value.subtitle!==undefined&&(typeof value.subtitle!=='string'||value.subtitle.length>350||
+     /[\x00-\x1f\x7f]/.test(value.subtitle))||
+    !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>5)return false
+ const names=new Set()
+ for(const row of value.fields){
+  if(!plainObject(row)||Object.keys(row).some(k=>!['variable','value'].includes(k))||
+     !validText(row.variable,80)||!validText(row.value,500)||
+     /[\x7f]/.test(row.variable)||/[\x7f]/.test(row.value))return false
+  const label=row.variable.trim().toLowerCase()
+  if(names.has(label))return false
+  names.add(label)
+ }
+ return true
+}
 function throttled(req){
  const key=req.socket?.remoteAddress||'unknown',now=Date.now()
  if(counter.size>5000)counter.clear()
@@ -260,16 +279,23 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // TEXT for backward compatibility; new clients must select TEXT or FORM.
     const type=requestedType===undefined?'TEXT':requestedType
     const freeText=type==='TEXT'&&input?.text!==undefined
+    const directForm=type==='FORM'&&input?.form!==undefined
     const orderKeys=['appId','storeId','type','quoteRevision','catalogRevision','customerExternalId','items','customer']
     const textKeys=['appId','storeId','type','text']
+    const formKeys=['appId','storeId','type','form']
     const rawMessageKey=req.headers['idempotency-key']
+    const independentMessage=freeText||directForm
+    const independentKeyValid=VALID_UUID.test(rawMessageKey||'')&&rawMessageKey!==access&&
+     rawMessageKey!==orderMessageIdempotency(access,interactionId)
     if(!plainObject(input)||!['TEXT','FORM'].includes(type)||
        !APP.test(input.appId)||!VALID_UUID.test(input.storeId)||
-       Object.keys(input).some(k=>!(freeText?textKeys:orderKeys).includes(k))||
-       (freeText?(
+       Object.keys(input).some(k=>!(directForm?formKeys:freeText?textKeys:orderKeys).includes(k))||
+       (directForm?(
+         requestedType!=='FORM'||!independentKeyValid||!validClientForm(input.form)
+       ):freeText?(
          requestedType!=='TEXT'||typeof input.text!=='string'||!input.text.trim()||
          input.text.length>8000||/[\x00-\x09\x0b-\x1f]/.test(input.text)||
-         !VALID_UUID.test(rawMessageKey||'')||rawMessageKey===access
+         !independentKeyValid
        ):(
          input.quoteRevision!==undefined&&input.catalogRevision!==undefined||
          !Number.isSafeInteger(input.catalogRevision??input.quoteRevision)||
@@ -277,8 +303,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
          !validText(input.customerExternalId,180)
        )))
       throw fail(400,'Mensaje MOBILE_APP inválido para el tipo solicitado')
-    // Never allow free-form Android text to impersonate an order FORM.
-    // Order fields are always rebuilt from the tenant's published catalog.
+    // The structured order remains server-derived. A separately supplied
+    // FORM is displayed literally but can never authorize an order or price.
     const ctx=await context(input.appId,input.storeId,false)
     const session=await checkoutSessionState(pool,{interactionId,tenantId:ctx.tenantId,
      appId:input.appId,storeId:input.storeId,accessKey:access})
@@ -287,6 +313,12 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     let text,form,legacyText
     if(freeText){
      text=input.text
+    }else if(directForm){
+     form={
+      title:input.form.title.trim(),
+      ...(input.form.subtitle!==undefined?{subtitle:input.form.subtitle.trim()}:{}),
+      fields:input.form.fields.map(row=>({variable:row.variable.trim(),value:row.value.trim()})),
+     }
     }else{
      if(ctx.revision!==(input.catalogRevision??input.quoteRevision))
        throw fail(409,'El catálogo cambió: no se puede enviar un detalle de otra revisión')
@@ -309,15 +341,15 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
       throw fail(409,'La solicitud ya no permite enviar mensajes')
     const delivered=await sendMessage(integration.token,interactionId,
      type==='FORM'?{
-      idempotencyKey:orderMessageIdempotency(access,interactionId),type:'FORM',form
+      idempotencyKey:directForm?rawMessageKey:orderMessageIdempotency(access,interactionId),type:'FORM',form
      }:{
-      idempotencyKey:freeText?rawMessageKey:orderMessageIdempotency(access,interactionId),
+      idempotencyKey:independentMessage?rawMessageKey:orderMessageIdempotency(access,interactionId),
       type:'TEXT',text
      })
     // An already-delivered order TEXT from before the FORM cutover may hold
     // the same deterministic idempotency key. Never insert a duplicate FORM.
     // Never reinterpret an explicit TEXT request as an existing FORM.
-    if(type==='FORM'&&!delivered.ok&&delivered.httpStatus===409){
+    if(type==='FORM'&&!directForm&&!delivered.ok&&delivered.httpStatus===409){
      const history=await readMessages(integration.token,interactionId)
      const prior=history.ok&&history.data?.interactionId===interactionId&&
       history.data.messages.find(item=>item.direction==='INBOUND'&&
