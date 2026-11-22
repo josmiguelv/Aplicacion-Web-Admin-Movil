@@ -1,3 +1,16 @@
+> **VIGENCIA 22-11-2026 — leer antes del historial:** el contrato actualizado
+> de `POST /api/v1/mobile/interactions/{id}/message` está en
+> [API MOBILE_APP TEXT/FORM del Administrador](ADMIN_MOBILE_APP_TEXT_FORM_API_20261122.md)
+> y [ejemplos Android](TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
+> Android determina `type:"TEXT"` o `type:"FORM"`; un FORM puede llevar
+> `form:{title,subtitle?,fields:[{variable,value}]}` con 1–5 filas y UUID
+> nuevo de idempotencia, **o** cuerpo de pedido para generar un FORM desde
+> catálogo. Esas modalidades son excluyentes. Los clientes anteriores sin
+> `type` mantienen TEXT. El texto siguiente incluye etapas y limitaciones
+> históricas de 20–21/11: sus afirmaciones sobre ausencia de formularios o
+> recepción de texto exclusiva están sustituidas por la especificación actual.
+> 43/43 pruebas focales PASS; instalación local y E2E pendiente.
+
 # APIs móviles separadas — Disponibilidad y solicitudes TU VERSO
 
 **Sistema:** Administrador Web INTEGRA B2G (no TU VERSO ni aplicación móvil)  
