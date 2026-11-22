@@ -68,7 +68,9 @@ function sanitizedData(kind,json){
   return {interactionId:data.interactionId,externalReference:data.externalReference,
    externalLocationId:data.externalLocationId,purpose:data.purpose,status:data.status,
    estimatedMinutes:Number.isSafeInteger(data.estimatedMinutes)?data.estimatedMinutes:null,
-   decisionReason:typeof data.decisionReason==='string'?data.decisionReason.slice(0,400):null}
+   decisionReason:typeof data.decisionReason==='string'?data.decisionReason.slice(0,400):null,
+    ...(kind==='read'&&['RESOLVED','CLOSED'].includes(data.operationalConversationStatus)?
+     {operationalConversationStatus:data.operationalConversationStatus}:{})}
  }
  if(kind==='events'){
   if(!Array.isArray(data.events)||data.events.length>100||
