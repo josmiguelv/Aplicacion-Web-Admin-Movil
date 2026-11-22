@@ -11,6 +11,8 @@ const fail=(code,message)=>Object.assign(new Error(message),{code})
 const validText=(value,max)=>typeof value==='string'&&value.trim().length>0&&value.length<=max&&!/[\x00-\x1f]/.test(value)
 const plainObject=value=>value&&typeof value==='object'&&!Array.isArray(value)
 const safeError=error=>Number.isInteger(error?.code)&&error.code>=400&&error.code<=599?error.code:503
+// Only upstream TU VERSO can confirm a scope failure. Never rely on cached scopes.
+const remoteAuthStatus=remote=>[401,403].includes(remote?.httpStatus)?remote.httpStatus:503
 const counter=new Map()
 const CANCEL_NOTICE='[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
 const CANCEL_PURCHASE_NOTICE='[Pollos B3 · Sistema] El cliente canceló su compra antes del pago. Esta solicitud queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
@@ -99,8 +101,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   },live.rows[0].time_zone))throw fail(409,'La sede ya no está abierta o habilitada')
   return {tenantId:catalog.tenant_id,revision:catalog.revision,payload:catalog.payload,store}
  }
- async function binding(tenantId,appId,storeId,kind){
-  const result=await pool.query(`SELECT i.id AS integration_id,i.encrypted_credential,i.expires_at,i.suspended,i.scopes,
+ async function binding(tenantId,appId,storeId){
+  const result=await pool.query(`SELECT i.id AS integration_id,i.encrypted_credential,i.expires_at,i.suspended,
     i.channel_type,b.id AS binding_id,b.external_location_id,b.purpose
     FROM integration_bindings b JOIN tenant_integrations i
     ON i.id=b.integration_id AND i.tenant_id=b.tenant_id
@@ -109,15 +111,12 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     ORDER BY i.id`,[tenantId,appId,storeId])
   if(result.rowCount!==1)throw fail(409,'La sede no tiene una integración única y autorizada')
   const row=result.rows[0]
+  // Local tenant/app/store binding, suspension and credential remain mandatory.
+  // Historical scopes stored here are NOT effective permissions: TU VERSO
+  // authorizes the operation from the bearer, entitlement and real scope.
   if(row.suspended||!row.encrypted_credential||row.expires_at&&new Date(row.expires_at)<=new Date()||
-     row.channel_type&&row.channel_type!=='MOBILE_APP'||
-     !Array.isArray(row.scopes)||!row.scopes.includes('queue.availability.read')||
-     kind==='create'&&!row.scopes.includes('interactions.create')||
-     kind==='message'&&(!row.scopes.includes('interactions.read')||
-       !row.scopes.includes('conversations.messages.write'))||
-     kind==='status'&&(!row.scopes.includes('interactions.read')||!row.scopes.includes('conversations.read'))||
-     kind==='cancel'&&(!row.scopes.includes('interactions.read')||!row.scopes.includes('conversations.read')||
-       !row.scopes.includes('conversations.messages.write')))throw fail(409,'La integración no está habilitada para esta operación')
+     row.channel_type&&row.channel_type!=='MOBILE_APP')
+    throw fail(409,'La conexión no está activa o carece de credencial válida')
   return {...row,token:decrypt(row.encrypted_credential,tenantId,row.integration_id)}
  }
  return async function route({req,res,url}){
@@ -134,9 +133,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!VALID_UUID.test(storeId)||!APP.test(appId||''))throw fail(400,'Sede o aplicación inválida')
     const ctx=await context(appId,storeId)
     if(checkMode()==='DISABLED')throw fail(503,'Consulta de TU VERSO no habilitada')
-    const integration=await binding(ctx.tenantId,appId,storeId,'read')
+    const integration=await binding(ctx.tenantId,appId,storeId)
     const result=await availability(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST',id:integration.binding_id})
-    if(result.result!=='AVAILABLE'&&result.result!=='UNAVAILABLE')throw fail(503,'No se pudo comprobar la disponibilidad')
+    if(result.result!=='AVAILABLE'&&result.result!=='UNAVAILABLE')throw fail(remoteAuthStatus(result),'No se pudo comprobar la disponibilidad')
     return json(res,200,{storeId,status:result.result,available:result.result==='AVAILABLE',checkedAt:result.providerCheckedAt??result.checkedAt,reservation:false})
    }
    if(statusMatch){
@@ -151,10 +150,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
     const ctx=await context(input.appId,input.storeId,false)
     if(interactionMode()!=='LIVE')throw fail(503,'Seguimiento de TU VERSO no disponible')
-    const integration=await binding(ctx.tenantId,input.appId,input.storeId,operation==='cancel'?'cancel':'status')
+    const integration=await binding(ctx.tenantId,input.appId,input.storeId)
     const expected=reference(ctx.tenantId,input.appId,input.storeId,access)
     const remote=await readInteraction(integration.token,interactionId)
-    if(!remote.ok)throw fail(remote.httpStatus===404?404:503,'No se pudo consultar la interacción')
+    if(!remote.ok)throw fail(remote.httpStatus===404?404:remoteAuthStatus(remote),'No se pudo consultar la interacción')
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
@@ -177,7 +176,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      if(cancelled){await closeCheckoutPayment(pool,owner);return json(res,200,{interactionId,status:'CANCELLED'})}
      if(remote.data.status==='EXPIRED')throw fail(409,'La interacción ya expiró')
      const sent=await sendMessage(integration.token,interactionId,{idempotencyKey:access,text:input.reason==='CANCEL'?CANCEL_PURCHASE_NOTICE:CANCEL_NOTICE})
-     if(!sent.ok)throw fail(sent.httpStatus===409?409:503,'No se pudo notificar la cancelación')
+     if(!sent.ok)throw fail(sent.httpStatus===409?409:remoteAuthStatus(sent),'No se pudo notificar la cancelación')
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
@@ -208,9 +207,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const customer=normalizeCustomer(input.customer)
     if(!customer)throw fail(400,'Faltan datos del cliente para enviar el pedido')
     const text=orderSummaryText(cart,ctx.store,customer)
-    const integration=await binding(ctx.tenantId,input.appId,input.storeId,'message')
+    const integration=await binding(ctx.tenantId,input.appId,input.storeId)
     const remote=await readInteraction(integration.token,interactionId)
-    if(!remote.ok)throw fail(remote.httpStatus===404?404:503,'No se pudo verificar la interacción')
+    if(!remote.ok)throw fail(remote.httpStatus===404?404:remoteAuthStatus(remote),'No se pudo verificar la interacción')
     const expected=reference(ctx.tenantId,input.appId,input.storeId,access)
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
@@ -222,7 +221,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      idempotencyKey:orderMessageIdempotency(access,interactionId),text
     })
     if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||''))
-      throw fail(delivered.httpStatus===409?409:503,'TU VERSO no confirmó el texto del pedido')
+      throw fail(delivered.httpStatus===409?409:remoteAuthStatus(delivered),'TU VERSO no confirmó el texto del pedido')
     return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId})
    }
    if(req.method!=='POST')throw fail(405,'Método no permitido')
@@ -243,7 +242,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    const listSummary=cart.summary.length<=1200?cart.summary:(
     customer?('Pedido de '+cart.items.length+' productos del catálogo. Subtotal S/ '+cart.subtotal.toFixed(2)+'. Revisar detalle en conversación.'):null)
    if(!listSummary)throw fail(422,'El resumen del pedido supera el limite permitido')
-   const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
+   const integration=await binding(ctx.tenantId,input.appId,input.storeId)
    // Do not precheck availability again here: a prior create may have succeeded
    // upstream before its HTTP acknowledgement was lost, and the assigned agent
    // may now occupy the last available slot. Android has already checked capacity.
@@ -254,7 +253,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
     customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey
    })
-   if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:503,'TU VERSO no pudo iniciar la solicitud')
+   if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:remoteAuthStatus(result),'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
       result.data?.purpose!=='ORDER_REQUEST')throw fail(503,'Respuesta de TU VERSO no corresponde a la sede autorizada')
    return json(res,result.httpStatus===201?201:200,{interactionId:result.data.interactionId,status:result.data.status,storeId:input.storeId,externalReference:result.data.externalReference})
