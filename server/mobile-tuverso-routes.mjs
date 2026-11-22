@@ -3,6 +3,7 @@ import {decryptCredential} from './integration-crypto.mjs'
 import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
+import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const APP=/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,149}$/
@@ -12,6 +13,7 @@ const plainObject=value=>value&&typeof value==='object'&&!Array.isArray(value)
 const safeError=error=>Number.isInteger(error?.code)&&error.code>=400&&error.code<=599?error.code:503
 const counter=new Map()
 const CANCEL_NOTICE='[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
+const CANCEL_PURCHASE_NOTICE='[Pollos B3 · Sistema] El cliente canceló su compra antes del pago. Esta solicitud queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
 const reference=(tenantId,appId,storeId,key)=>'mobile:'+createHash('sha256').update([tenantId,appId,storeId,key].join(':')).digest('hex').slice(0,48)
 const orderMessageIdempotency=(key,interactionId)=>{
  const bytes=createHash('sha256').update('b3-order-text:'+key+':'+interactionId).digest().subarray(0,16)
@@ -121,7 +123,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  return async function route({req,res,url}){
   const match=url.pathname.match(/^\/api\/v1\/mobile\/stores\/([0-9a-f-]{36})\/agent-availability$/i)
   const creating=url.pathname==='/api/v1/mobile/interactions'
-  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel)$/i)
+  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
   if(!match&&!creating&&!statusMatch&&!messageMatch)return false
   try{
@@ -139,21 +141,29 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    }
    if(statusMatch){
     const interactionId=statusMatch[1],operation=statusMatch[2]
-    if(req.method!==(operation==='status'?'GET':'POST'))throw fail(405,'Método no permitido')
-    const input=operation==='status'?Object.fromEntries(url.searchParams):await body(req)
-    if(!plainObject(input)||Object.keys(input).some(k=>!['appId','storeId'].includes(k))||
+    if(req.method!==(operation==='status'?'GET':'POST')&&!(operation==='payment'&&req.method==='GET'))throw fail(405,'Método no permitido')
+    const input=(operation==='status'||operation==='payment'&&req.method==='GET')?Object.fromEntries(url.searchParams):await body(req)
+    if(!plainObject(input)||Object.keys(input).some(k=>!['appId','storeId','fcmToken','reason'].includes(k))||
+       (operation!=='device'&&input.fcmToken!==undefined)||
+       (operation!=='cancel'&&input.reason!==undefined)||
        !APP.test(input.appId||'')||!VALID_UUID.test(input.storeId||''))throw fail(400,'Identificadores de seguimiento inválidos')
     const access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
     const ctx=await context(input.appId,input.storeId,false)
     if(interactionMode()!=='LIVE')throw fail(503,'Seguimiento de TU VERSO no disponible')
-    const integration=await binding(ctx.tenantId,input.appId,input.storeId,operation==='status'?'status':'cancel')
+    const integration=await binding(ctx.tenantId,input.appId,input.storeId,operation==='cancel'?'cancel':'status')
     const expected=reference(ctx.tenantId,input.appId,input.storeId,access)
     const remote=await readInteraction(integration.token,interactionId)
     if(!remote.ok)throw fail(remote.httpStatus===404?404:503,'No se pudo consultar la interacción')
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
+    const owner={interactionId,tenantId:ctx.tenantId,appId:input.appId,storeId:input.storeId,accessKey:access}
+    if(operation==='device')return json(res,200,await bindPersonalDevice(pool,owner,input.fcmToken))
+    if(operation==='payment'){
+     const data=req.method==='GET'?await readCheckoutPayment(pool,owner):await beginCheckoutPayment(pool,owner)
+     return json(res,200,data)
+    }
     const history=await readMessages(integration.token,interactionId)
     // Interaction status and conversation history are independent requests.
     // For a read-only poll, a transient history failure must not make a
@@ -162,12 +172,13 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!messagesAvailable&&operation==='cancel')
       throw fail(503,'No se pudo verificar la conversación antes de cancelar')
     const messages=messagesAvailable?history.data.messages:[]
-    const cancelled=messages.some(m=>m.direction==='INBOUND'&&m.text===CANCEL_NOTICE)
+    const cancelled=messages.some(m=>m.direction==='INBOUND'&&(m.text===CANCEL_NOTICE||m.text===CANCEL_PURCHASE_NOTICE))
     if(operation==='cancel'){
-     if(cancelled)return json(res,200,{interactionId,status:'CANCELLED'})
+     if(cancelled){await closeCheckoutPayment(pool,owner);return json(res,200,{interactionId,status:'CANCELLED'})}
      if(remote.data.status==='EXPIRED')throw fail(409,'La interacción ya expiró')
-     const sent=await sendMessage(integration.token,interactionId,{idempotencyKey:access,text:CANCEL_NOTICE})
+     const sent=await sendMessage(integration.token,interactionId,{idempotencyKey:access,text:input.reason==='CANCEL'?CANCEL_PURCHASE_NOTICE:CANCEL_NOTICE})
      if(!sent.ok)throw fail(sent.httpStatus===409?409:503,'No se pudo notificar la cancelación')
+     await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
     // Relay verified conversation facts only. Android owns decision parsing, store
