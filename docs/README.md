@@ -1,5 +1,15 @@
 # Documentación técnica del Administrador INTEGRA B2G
 
+> **Actualización vigente 22-11-2026 — MOBILE_APP:** 
+> [API TEXT/FORM pública del Administrador](ADMIN_MOBILE_APP_TEXT_FORM_API_20261122.md)
+> y [contrato Android y ejemplos de hasta cinco filas](TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
+> El Administrador permite TEXT libre o de pedido; FORM preparado desde 
+> `{title,subtitle,fields}` del móvil o FORM construido desde catálogo.
+> Respuesta del agente: texto ordinario `aceptar`/`rechazar`; el gateway la
+> retransmite sin interpretarla. Estado del código en rama de desarrollo,
+> pruebas 43/43 PASS; instalación local y E2E no certificados.
+
+
 Este conjunto documenta el repositorio `josmiguelv/Aplicacion-Web-Admin-Movil`. El producto es una plataforma SaaS multitenant de INTEGRA B2G; Pollos B3 es un tenant potencial, no una dependencia ni una configuración inicial fija.
 
 ## Índice
