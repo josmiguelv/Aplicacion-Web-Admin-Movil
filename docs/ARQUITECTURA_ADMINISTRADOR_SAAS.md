@@ -1,5 +1,36 @@
 # Arquitectura del Administrador SaaS — INTEGRA B2G
 
+## Actualización de arquitectura: gateway MOBILE_APP TEXT/FORM (22-11-2026)
+
+**Contrato actual:** [API del Administrador y mapa de mantenimiento](ADMIN_MOBILE_APP_TEXT_FORM_API_20261122.md).
+Android crea una interacción con `POST /api/v1/mobile/interactions` y luego
+envía `POST /api/v1/mobile/interactions/{interactionId}/message`, indicando
+explícitamente `type:"TEXT"` o `type:"FORM"`.
+El backend `server/mobile-tuverso-routes.mjs` valida propiedad de
+`appId`/`storeId`, UUID de acceso y de idempotencia, vínculo por tenant,
+sesión no finalizada y estado remoto antes de pasar un mensaje a
+`server/tuverso-mobile-connector.mjs`. Este módulo guarda el bearer en
+servidor y llama al S2S de TU VERSO; no se usan cookies del portal en TU VERSO.
+
+Un FORM puede venir con `form:{title,subtitle?,fields:[{variable,value}]}`
+validado (1–5 filas) o como datos de pedido que el Administrador transforma
+desde catálogo publicado. En ninguno de los dos casos el formulario es
+autoridad para precio, inventario, pago o aceptación de pedido.
+`TEXT` libre requiere clave UUID independiente y no admite filas FORM.
+Los clientes legados sin `type` conservan pedido `TEXT`.
+TU VERSO, exclusivamente en su canal MOBILE_APP, genera Aceptar/Rechazar y
+produce mensaje de salida `aceptar` o `rechazar`. El Administrador entrega
+solo `agentMessages[].text` verificados mediante su endpoint de seguimiento;
+la decisión comercial ocurre en Android. El formulario no cambia WhatsApp,
+no requiere migración nueva del Administrador ni un nuevo servicio.
+
+**Estado:** código documentado desde la rama de desarrollo
+`fix/b3-mobile-form-to-tuverso-20261122`, 43/43 pruebas focales aprobadas.
+No se ha constatado aquí la instalación local del Administrador ni un E2E
+Android→agente→Android. Los apartados fechados 20-11-2026 abajo son su
+marco histórico, no una afirmación de que las rutas TEXT/FORM no existan.
+
+
 **Repositorio:** `josmiguelv/Aplicacion-Web-Admin-Movil`  
 **Corte de esta documentación:** 20-11-2026  
 **Alcance:** portal administrativo, backend y APIs de este repositorio. No describe ni cambia el repositorio, base de datos o despliegue de TU VERSO.
