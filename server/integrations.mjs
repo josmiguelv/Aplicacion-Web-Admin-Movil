@@ -128,8 +128,8 @@ export async function integrationRoutes({req,res,url,user,pool,body,json,tenantO
    if(row.suspended||!row.encrypted_credential||
       row.expires_at&&new Date(row.expires_at)<=new Date())
      throw fail(409,'La conexión carece de credencial vigente')
-   if(!row.scopes?.includes('interactions.create'))
-     throw fail(403,'La conexión no tiene permiso para enviar solicitudes')
+   // Never pre-deny using the local metadata mirror of scopes: TU VERSO
+   // validates interactions.create on the actual bearer per request.
    if(row.channel_type&&row.channel_type!=='MOBILE_APP')
      throw fail(409,'El conector solo admite cuentas de aplicación móvil')
    const binding=(await client.query(
