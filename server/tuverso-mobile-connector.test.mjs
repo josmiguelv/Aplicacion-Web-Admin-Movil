@@ -80,6 +80,34 @@ test('S2S create sends exact authorized location, scoped bearer and stable idemp
   if(oldTarget===undefined)delete process.env.TUVERSO_INTERACTIONS_TEST_URL;else process.env.TUVERSO_INTERACTIONS_TEST_URL=oldTarget
  }
 })
+test('S2S create forwards valid structured customer to TU VERSO without adding secrets',async()=>{
+ const previous={mode:process.env.NODE_ENV,enabled:process.env.TUVERSO_LIVE_REQUESTS_ENABLED,
+  target:process.env.TUVERSO_INTERACTIONS_TEST_URL}
+ process.env.NODE_ENV='test'
+ process.env.TUVERSO_LIVE_REQUESTS_ENABLED='true'
+ process.env.TUVERSO_INTERACTIONS_TEST_URL='http://127.0.0.1/tuverso'
+ const customer={firstName:'Ana',lastName:'Quispe',phone:'+51912345678',
+  email:'ana@example.com',phoneVerified:false,emailVerified:false}
+ try{
+  await withFetch(async(url,options)=>{
+   assert.equal(String(url),'http://127.0.0.1/tuverso/api/v1/interactions')
+   const body=JSON.parse(options.body)
+   assert.deepEqual(body.customer,customer)
+   assert.equal(body.customerExternalId,input.customerExternalId)
+   return ok(remote)
+  },async()=>{assert.equal((await createMobileInteraction(token,binding,{...input,customer})).ok,true)})
+  await assert.rejects(()=>createMobileInteraction(token,binding,{...input,
+   customer:{...customer,phoneVerified:true}}))
+  await assert.rejects(()=>createMobileInteraction(token,binding,{...input,
+   customer:{...customer,phone:'912345678'}}))
+ }finally{
+  for(const [key,name] of [['mode','NODE_ENV'],['enabled','TUVERSO_LIVE_REQUESTS_ENABLED'],
+   ['target','TUVERSO_INTERACTIONS_TEST_URL']]){
+   if(previous[key]===undefined)delete process.env[name]
+   else process.env[name]=previous[key]
+  }
+ }
+})
 test('unapproved data, other-provider credentials and invalid ids fail before any call',async()=>{
  for(const changes of [
   {idempotencyKey:'not-a-uuid'},{summary:''},{customerExternalId:'bad\nline'},
