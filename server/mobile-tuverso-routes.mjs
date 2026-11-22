@@ -258,7 +258,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const requestedType=input?.type
     // Pre-existing Android clients sent an order body without type. They remain
     // TEXT for backward compatibility; new clients must select TEXT or FORM.
-    const type=requestedType??'TEXT'
+    const type=requestedType===undefined?'TEXT':requestedType
     const freeText=type==='TEXT'&&input?.text!==undefined
     const orderKeys=['appId','storeId','type','quoteRevision','catalogRevision','customerExternalId','items','customer']
     const textKeys=['appId','storeId','type','text']
