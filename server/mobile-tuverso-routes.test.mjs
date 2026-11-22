@@ -69,7 +69,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    ...(legacyText?[{id:randomUUID(),direction:'INBOUND',text:legacyText,createdAt:new Date().toISOString()}]:[])
   ]}}},
   sendMessage:async(token,id,value)=>{
-   const operation=value.type==='FORM'?'orderForm':value.text?.startsWith('POLLOS B3 - SOLICITUD')?'orderText':'cancel'
+   const operation=value.type==='FORM'?'orderForm':value.type==='TEXT'&&value.text?.startsWith('POLLOS B3 - SOLICITUD')?'orderText':value.type==='TEXT'?'plainText':'cancel'
    remote.push({operation,id,value})
    return upstream.message?{ok:false,httpStatus:upstream.message}:messageFailure&&operation==='orderForm'?{ok:false,httpStatus:503}:
     {ok:true,data:{messageId:randomUUID(),created:true}}
@@ -258,7 +258,7 @@ test('legacy Android without type remains TEXT; explicit FORM is never inferred'
 })
 
 test('explicit TEXT sends exact authorized message with independent UUID, never FORM',async()=>{
- const h=harness(),key=randomUUID(),messageKey=randomUUID(),text='El cliente solicita cambiar el pedido.\\nPendiente.'
+ const h=harness(),key=randomUUID(),messageKey=randomUUID(),text='El cliente solicita cambiar el pedido.\nPendiente.'
  const created=await h.call('POST','/api/v1/mobile/interactions',{
   headers:{'idempotency-key':key},payload:createBody({customer})})
  h.setReference(created.payload.externalReference)
@@ -268,7 +268,7 @@ test('explicit TEXT sends exact authorized message with independent UUID, never 
   payload:{appId:appA,storeId:storeA,type:'TEXT',text}})
  assert.equal(sent.code,200)
  assert.equal(sent.payload.type,'TEXT')
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','plainText'])
  assert.deepEqual(h.remote.at(-1).value,{type:'TEXT',text,idempotencyKey:messageKey})
  const next=await h.call('POST',path,{
   headers:{'x-order-access-key':key,'idempotency-key':randomUUID()},
@@ -287,7 +287,7 @@ test('reject type confusion, cross-content fields, and unsafe TEXT before contac
   {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola',form:{title:'Mock',fields:[]}}},
   {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola',catalogRevision:4}},
   {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola',items:[]}},
-  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola\\rInyección'}},
+  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola\rInyección'}},
   {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola'},key:null},
   {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola'},key:access},
  ]
