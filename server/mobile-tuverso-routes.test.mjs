@@ -480,7 +480,8 @@ test('closed MOBILE_APP agent conversation is visible and customer cancel is ide
  const read=await noHistory.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:owner.headers});
  assert.equal(read.code,200);
  assert.equal(read.payload.messagesAvailable,false);
- assert.equal('operationalConversationStatus' in read.payload,false);
+ assert.equal(read.payload.operationalConversationStatus,'RESOLVED',
+  'Verified closure is independent of message-history availability');
  assert.equal((await noHistory.call('POST',path+'/cancel',owner)).code,200);
  const unverified=harness({remoteStatus:'ACCEPTED',upstream:{message:409}});
  unverified.setReference(ref);
