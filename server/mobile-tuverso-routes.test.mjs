@@ -19,6 +19,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false,historyFailure=false}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
+ const terminalSessions=new Map()
  let referenceForTest=''
  const pool={async query(sql,args){
   queries.push({sql,args})
@@ -33,8 +34,16 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   if(sql.includes('FROM integration_bindings b')){
    return {rowCount:count,rows:count?[{integration_id:integration,encrypted_credential:'ciphertext',expires_at:null,suspended:false,scopes,channel_type:'MOBILE_APP',binding_id:bindingId,external_location_id:args[2]===storeA?'location-a':'location-b',purpose:'ORDER_REQUEST'}]:[]}
   }
+  if(sql.startsWith('SELECT state FROM mobile_checkout_followups')){
+   const state=terminalSessions.get(args.join('|'))
+   return {rowCount:state?1:0,rows:state?[{state}]:[]}
+  }
   if(sql.startsWith('SELECT payment_wait_minutes'))return {rowCount:0,rows:[]}
   if(sql.startsWith('INSERT INTO mobile_checkout_followups')){
+   if(sql.includes('state,agent_notice_sent,expiry_notice_sent')){
+    terminalSessions.set(args.join('|'),'CANCELLED')
+    return {rowCount:1,rows:[{state:'CANCELLED'}]}
+   }
    if(sql.includes('fcm_token)'))return {rowCount:1,rows:[{interaction_id:args[0]}]}
    return {rowCount:1,rows:[{state:'PAYMENT_PENDING',checkout_expires_at:'2099-01-01T00:00:00Z'}]}
   }
@@ -272,7 +281,7 @@ test('backend relays formal status unchanged and never overrides it from text',a
    headers:{'x-order-access-key':key}})
   assert.equal(r.code,200)
   assert.equal(r.payload.status,state)
-  assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
+  assert.deepEqual(r.payload.agentMessages,[])
   assert.equal('decision' in r.payload,false)
  }
 })
@@ -341,6 +350,46 @@ test('client cannot read decision with wrong key or other tenant',async()=>{
  assert.equal(wrong.code,403)
  const other=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appB+'&storeId='+storeB,{headers:{'x-order-access-key':key}})
  assert.equal(other.code,403)
+})
+test('customer cancellation sends one notice then permanently blocks mobile messages and late replies',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({decisionMessage:'aceptado'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const path='/api/v1/mobile/interactions/'+id
+ const credentials={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ const cancel=await h.call('POST',path+'/cancel',credentials)
+ assert.equal(cancel.code,200)
+ assert.equal(cancel.payload.status,'CANCELLED')
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1)
+ assert.match(h.remote.find(x=>x.operation==='cancel').value.text,/El cliente canceló su compra/)
+ const callsBefore=h.remote.length
+ const replay=await h.call('POST',path+'/cancel',credentials)
+ assert.equal(replay.code,200)
+ assert.equal(h.remote.length,callsBefore,'a second cancellation must not post another message')
+ const status=await h.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(status.code,200)
+ assert.equal(status.payload.status,'CANCELLED')
+ assert.deepEqual(status.payload.agentMessages,[])
+ assert.equal(status.payload.messagesAvailable,false)
+ const payment=await h.call('GET',path+'/payment?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(payment.code,200)
+ assert.equal(payment.payload.status,'CANCELLED')
+ const originalOrder=createBody({customer:{firstName:'Ana',lastName:'Flores',phone:'999999999',
+  mode:'delivery',address:'Av. Los Nogales 123',district:'Santa Anita'}})
+ const message=await h.call('POST',path+'/message',{
+  headers:{'x-order-access-key':key},payload:originalOrder})
+ assert.equal(message.code,409)
+ assert.equal(h.remote.length,callsBefore,'closed backend must never read or send to remote')
+})
+test('cancellation without prior notification registration persists a local closed state',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness()
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const cancelled=await h.call('POST','/api/v1/mobile/interactions/'+id+'/cancel',{
+  headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'MODIFY'}})
+ assert.equal(cancelled.code,200)
+ const inserts=h.queries.filter(x=>x.sql.startsWith('INSERT INTO mobile_checkout_followups')&&x.sql.includes('state,agent_notice_sent'))
+ assert.equal(inserts.length,1,'cancellation tombstone must be created even without a device token')
 })
 test('cart modification sends cancellation notice without marking a paid order',async()=>{
  const id=randomUUID(),key=randomUUID(),h=harness({decisionMessage:'aceptado'})
