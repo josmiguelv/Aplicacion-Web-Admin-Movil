@@ -45,7 +45,7 @@ test('payment window starts once from server, independent of Android foreground'
  assert.equal(first.expiresAt,expiry)
  assert.equal(first.reminderCount,2)
  assert.ok(seen.some(sql=>sql.includes('COALESCE(mobile_checkout_followups.checkout_started_at,now())')))
- assert.equal((await readCheckoutPayment(pool,owner)).status,'EXPIRED')
+ assert.equal((await readCheckoutPayment(pool,owner)).status,'PAYMENT_PENDING')
 })
 test('scheduler sends reminder only to that checkout device; no global broadcast',async()=>{
  const now=Date.now()
