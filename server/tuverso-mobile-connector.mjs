@@ -137,7 +137,10 @@ export async function pollMobileInteractionEvents(token,{after=null,limit=50}={}
  return perform(token,'events',url.pathname+url.search)
 }
 export async function sendMobileInteractionMessage(token,interactionId,{idempotencyKey,text}){
- if(!id(interactionId)||!id(idempotencyKey)||!field(text,8000))
+ // The published order summary is multi-line. Allow LF in message bodies while
+ // forbidding other control characters; credentials and identifiers remain strict.
+ if(!id(interactionId)||!id(idempotencyKey)||typeof text!=='string'||
+    !text.trim()||text.length>8000||/[\x00-\x09\x0b-\x1f]/.test(text))
   throw Error('TUVERSO_MESSAGE_INVALID')
  return perform(token,'message',`/api/v1/conversations/${interactionId}/messages`,{
   method:'POST',idempotencyKey,requestBody:{text},
