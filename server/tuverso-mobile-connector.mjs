@@ -174,7 +174,7 @@ export async function sendMobileInteractionMessage(token,interactionId,{idempote
   if(text!==undefined||!validMobileForm(form))throw Error('TUVERSO_FORM_INVALID')
  }else if(type!==undefined&&type!=='TEXT'||form!==undefined||
     typeof text!=='string'||!text.trim()||text.length>8000||
-    /[\\x00-\\x09\\x0b-\\x1f]/.test(text)){
+    /[\x00-\x09\x0b-\x1f]/.test(text)){
   // Preserve legacy free-text messages for cancellation and older clients.
   throw Error('TUVERSO_MESSAGE_INVALID')
  }
