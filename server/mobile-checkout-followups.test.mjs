@@ -67,3 +67,48 @@ test('scheduler sends reminder only to that checkout device; no global broadcast
  assert.equal(calls[0][2],interactionId)
  assert.deepEqual(updates,[[interactionId,0]])
 })
+
+test('only exact agent decision triggers private accepted hint; backend never approves an order',async()=>{
+ const calls=[],updates=[]
+ const row={interaction_id:interactionId,tenant_id:tenantId,app_id:owner.appId,store_id:storeId,
+  fcm_token:fcmA,state:'WAITING',agent_notice_sent:false}
+ const pool={query:async(sql,args)=>{
+  if(sql.startsWith('SELECT f.*'))return {rows:[]}
+  if(sql.startsWith('SELECT * FROM mobile_checkout_followups WHERE state=\'WAITING\''))return {rows:[row]}
+  if(sql.startsWith('SELECT * FROM mobile_checkout_followups WHERE state=\'EXPIRED\''))return {rows:[]}
+  if(sql.startsWith('UPDATE mobile_checkout_followups')){updates.push(sql);return {rowCount:1}}
+  throw Error('unhandled SQL')
+ }}
+ await runCheckoutNotifications(pool,{
+  resolveRemoteToken:async()=> 'synthetic-remote-bearer',
+  readMessages:async()=>({ok:true,data:{messages:[
+   {direction:'OUTBOUND',text:'Hola, reviso tu pedido'},
+   {direction:'OUTBOUND',text:' ACEPTADO. '}
+  ]}}),
+  sendPush:async(...args)=>{calls.push(args);return true}
+ })
+ assert.equal(calls.length,1)
+ assert.equal(calls[0][0],fcmA)
+ assert.equal(calls[0][1],'order_status')
+ assert.equal(calls[0][2],interactionId)
+ assert.equal(calls[0][5],'ACCEPTED')
+ assert.ok(updates.every(q=>!q.includes('state=\'PAYMENT_PENDING\'')))
+});
+test('a generic message from the agent is not misrepresented as an order decision',async()=>{
+ const calls=[]
+ const row={interaction_id:interactionId,tenant_id:tenantId,app_id:owner.appId,store_id:storeId,
+  fcm_token:fcmA,state:'WAITING',agent_notice_sent:false}
+ const pool={query:async(sql)=>{
+  if(sql.startsWith('SELECT f.*'))return {rows:[]}
+  if(sql.startsWith('SELECT * FROM mobile_checkout_followups WHERE state=\'WAITING\''))return {rows:[row]}
+  if(sql.startsWith('SELECT * FROM mobile_checkout_followups WHERE state=\'EXPIRED\''))return {rows:[]}
+  if(sql.startsWith('UPDATE mobile_checkout_followups'))return {rowCount:1}
+  throw Error('unhandled SQL')
+ }}
+ await runCheckoutNotifications(pool,{
+  resolveRemoteToken:async()=> 'synthetic-remote-bearer',
+  readMessages:async()=>({ok:true,data:{messages:[{direction:'OUTBOUND',text:'Tu pedido está en revisión'}]}}),
+  sendPush:async(...args)=>{calls.push(args);return true}
+ })
+ assert.equal(calls.length,0)
+});
