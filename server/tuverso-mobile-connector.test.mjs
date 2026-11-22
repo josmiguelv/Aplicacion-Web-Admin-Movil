@@ -106,3 +106,49 @@ test('polling and replies are private, fixed-route and validate response shape',
   },async()=>{assert.equal((await sendMobileInteractionMessage(token,xid,{idempotencyKey:randomUUID(),text:'Hola'})).ok,true)})
  }finally{if(old===undefined)delete process.env.TUVERSO_LIVE_REQUESTS_ENABLED;else process.env.TUVERSO_LIVE_REQUESTS_ENABLED=old}
 })
+
+test('Pollos B3 multiline order detail preserves line breaks without allowing unsafe controls',async()=>{
+ const previous={
+  mode:process.env.NODE_ENV,
+  enabled:process.env.TUVERSO_LIVE_REQUESTS_ENABLED,
+  target:process.env.TUVERSO_INTERACTIONS_TEST_URL
+ };
+ process.env.NODE_ENV='test';
+ process.env.TUVERSO_LIVE_REQUESTS_ENABLED='true';
+ process.env.TUVERSO_INTERACTIONS_TEST_URL='http://127.0.0.1/tuverso';
+ const detail=[
+  'POLLOS B3 - SOLICITUD DE VALIDACION',
+  'Sede consultada: Nogales',
+  'PRODUCTOS: Un producto del catálogo',
+  'Subtotal productos: S/ 13.00',
+  'Verificar productos y responder SOLO: aceptado o rechazado.'
+ ].join('\n');
+ try{
+  let calls=0;
+  await withFetch(async(url,options)=>{
+   calls++;
+   assert.equal(String(url),'http://127.0.0.1/tuverso/api/v1/conversations/'+xid+'/messages');
+   assert.equal(options.method,'POST');
+   assert.equal(options.headers.Authorization,'Bearer '+token);
+   assert.equal(JSON.parse(options.body).text,detail);
+   assert.equal(options.headers['Idempotency-Key'].length,36);
+   return ok({created:true,messageId:randomUUID()},201);
+  },async()=>{
+   const key=randomUUID();
+   const result=await sendMobileInteractionMessage(token,xid,{idempotencyKey:key,text:detail});
+   assert.equal(result.ok,true);
+   assert.equal(result.httpStatus,201);
+   assert.ok(result.data.messageId);
+  });
+  assert.equal(calls,1);
+  for(const text of ['Uno\rDos','Uno\tDos','Uno\0Dos','']) {
+   await assert.rejects(()=>sendMobileInteractionMessage(token,xid,{idempotencyKey:randomUUID(),text}));
+  }
+ }finally{
+  for(const [key,name] of [['mode','NODE_ENV'],['enabled','TUVERSO_LIVE_REQUESTS_ENABLED'],
+   ['target','TUVERSO_INTERACTIONS_TEST_URL']]){
+   if(previous[key]===undefined)delete process.env[name];
+   else process.env[name]=previous[key];
+  }
+ }
+});
