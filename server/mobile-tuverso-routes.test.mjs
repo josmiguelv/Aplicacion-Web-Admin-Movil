@@ -281,7 +281,7 @@ test('backend relays formal status unchanged and never overrides it from text',a
    headers:{'x-order-access-key':key}})
   assert.equal(r.code,200)
   assert.equal(r.payload.status,state)
-  assert.deepEqual(r.payload.agentMessages,[])
+  assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
   assert.equal('decision' in r.payload,false)
  }
 })
@@ -292,7 +292,7 @@ test('cancellation status remains authoritative; inbound client text is not rela
   headers:{'x-order-access-key':key}})
  assert.equal(r.code,200)
  assert.equal(r.payload.status,'CANCELLED')
- assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
+ assert.deepEqual(r.payload.agentMessages,[])
  assert.equal('decision' in r.payload,false)
 })
 test('temporary history outage keeps accepted interaction pending for Android without inventing a reply',async()=>{
