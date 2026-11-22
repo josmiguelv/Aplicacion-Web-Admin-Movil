@@ -268,7 +268,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        Object.keys(input).some(k=>!(freeText?textKeys:orderKeys).includes(k))||
        (freeText?(
          requestedType!=='TEXT'||typeof input.text!=='string'||!input.text.trim()||
-         input.text.length>8000||/[\\x00-\\x09\\x0b-\\x1f]/.test(input.text)||
+         input.text.length>8000||/[\x00-\x09\x0b-\x1f]/.test(input.text)||
          !VALID_UUID.test(rawMessageKey||'')||rawMessageKey===access
        ):(
          input.quoteRevision!==undefined&&input.catalogRevision!==undefined||
