@@ -180,3 +180,46 @@ test('Pollos B3 multiline order detail preserves line breaks without allowing un
   }
  }
 });
+
+test('MOBILE_APP FORM posts exact server-side typed fields; rejects cross-content replay',async()=>{
+ const env={mode:process.env.NODE_ENV,enabled:process.env.TUVERSO_LIVE_REQUESTS_ENABLED,
+  target:process.env.TUVERSO_INTERACTIONS_TEST_URL}
+ process.env.NODE_ENV='test'
+ process.env.TUVERSO_LIVE_REQUESTS_ENABLED='true'
+ process.env.TUVERSO_INTERACTIONS_TEST_URL='http://127.0.0.1/tuverso'
+ const form={title:'SOLICITUD DE VALIDACION',subtitle:'No preparar antes de aceptar',
+  fields:[{variable:'Sede',value:'Nogales'},
+   {variable:'Productos',value:'2 x Pollo A'},
+   {variable:'Subtotal',value:'S/ 40.00'}]}
+ try{
+  const idempotencyKey=randomUUID()
+  await withFetch(async(url,opts)=>{
+   assert.equal(String(url),'http://127.0.0.1/tuverso/api/v1/conversations/'+xid+'/messages')
+   assert.equal(opts.method,'POST')
+   assert.equal(opts.headers['Idempotency-Key'],idempotencyKey)
+   assert.equal(opts.headers.Authorization,'Bearer '+token)
+   assert.deepEqual(JSON.parse(opts.body),{type:'FORM',form})
+   return ok({created:true,messageId:randomUUID()})
+  },async()=>{
+   const result=await sendMobileInteractionMessage(token,xid,{idempotencyKey,type:'FORM',form})
+   assert.equal(result.ok,true)
+  })
+  await withFetch(()=>{throw Error('INVALID FORM MUST NOT REACH NETWORK')},async()=>{
+   for(const invalid of [
+    {type:'FORM',form,text:'Texto ambiguo'},
+    {type:'FORM',form:{...form,fields:[{variable:'Sede',value:'Nogales'},{variable:'sede',value:'Otra'}]}},
+    {type:'FORM',form:{...form,fields:[{variable:'Pedido',value:'x'.repeat(501)}]}},
+    {type:'FORM',form:{...form,fields:Array(6).fill({variable:'Sede',value:'x'})}},
+    {type:'FORM',form:{...form,fields:[],buttons:['aceptar','rechazar']}},
+    {type:'TEXT',form,text:'Mensaje'},
+    {type:'UNSUPPORTED',form},
+    {type:'FORM',form:null},
+   ])await assert.rejects(()=>sendMobileInteractionMessage(token,xid,{idempotencyKey:randomUUID(),...invalid}))
+  })
+ }finally{
+  for(const [key,name] of [['mode','NODE_ENV'],['enabled','TUVERSO_LIVE_REQUESTS_ENABLED'],
+   ['target','TUVERSO_INTERACTIONS_TEST_URL']]){
+   if(env[key]===undefined)delete process.env[name];else process.env[name]=env[key]
+  }
+ }
+})
