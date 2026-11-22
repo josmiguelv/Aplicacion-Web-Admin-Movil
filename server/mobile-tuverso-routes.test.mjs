@@ -174,6 +174,8 @@ test('create returns interactionId before chat text, and text delivery runs inde
  const sent=h.remote.find(x=>x.operation==='interaction')
  assert.ok(sent.input.summary.includes('2 x Pollo A'))
  assert.ok(!sent.input.summary.includes('+51'))
+ assert.deepEqual(sent.input.customer,{firstName:'Ana',lastName:'Quispe',
+  phone:'+51912345678',phoneVerified:false,emailVerified:false})
  h.setReference(response.payload.externalReference)
  const delivered=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
@@ -191,6 +193,20 @@ test('create returns interactionId before chat text, and text delivery runs inde
  assert.ok(message.length<=8000)
  assert.ok(!message.includes('deliveryFeePen'))
  assert.ok(!('phone' in response.payload))
+})
+test('optional email is forwarded in structured customer; unverified flags never claim verification',async()=>{
+ const h=harness()
+ const enriched={...customer,email:'ANA@Example.com',phoneVerified:false,emailVerified:false}
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:createBody({customer:enriched})})
+ assert.equal(created.code,201)
+ assert.deepEqual(h.remote[0].input.customer,{firstName:'Ana',lastName:'Quispe',
+  phone:'+51912345678',email:'ana@example.com',phoneVerified:false,emailVerified:false})
+ const legacy=harness()
+ const old=await legacy.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:createBody()})
+ assert.equal(old.code,201)
+ assert.equal('customer' in legacy.remote[0].input,false)
 })
 test('replaying both steps uses one conversation ID and one deterministic message key',async()=>{
  const h=harness(),key=randomUUID()
@@ -247,7 +263,10 @@ test('contact injection, invalid cellphone and client price fields are rejected 
   {...customer,address:''},
   {...customer,mode:'pickup'},
   {...customer,reference:'A'.repeat(181)},
-  {...customer,subtotal:0}
+  {...customer,subtotal:0},
+  {...customer,email:'invalid-email'},
+  {...customer,phoneVerified:true},
+  {...customer,emailVerified:true}
  ]
  for(const bad of invalid){
   const h=harness()
