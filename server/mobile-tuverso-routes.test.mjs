@@ -301,6 +301,84 @@ test('reject type confusion, cross-content fields, and unsafe TEXT before contac
  assert.equal(h.remote.length,0)
 })
 
+
+test('Android sends title, subtitle and five independent FORM rows unchanged to TU VERSO',async()=>{
+ const h=harness(),access=randomUUID(),messageKey=randomUUID(),interactionId=randomUUID()
+ const external='mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48)
+ h.setReference(external)
+ const form={title:'VALIDACIÓN DE PEDIDO',subtitle:'Confirmar disponibilidad para delivery',fields:[
+  {variable:'Cliente',value:'Ana Quispe'},
+  {variable:'Teléfono',value:'912345678'},
+  {variable:'Productos',value:'2 pollos a la brasa'},
+  {variable:'Subtotal',value:'S/ 90.00'},
+  {variable:'Dirección',value:'Av. Principal 123, Santa Anita'},
+ ]}
+ const payload={type:'FORM',appId:appA,storeId:storeA,form}
+ const path='/api/v1/mobile/interactions/'+interactionId+'/message'
+ for(let n=0;n<2;n++){
+  const r=await h.call('POST',path,{headers:{
+   'x-order-access-key':access,'idempotency-key':messageKey},payload})
+  assert.equal(r.code,200)
+  assert.equal(r.payload.delivered,true)
+  assert.equal(r.payload.type,'FORM')
+ }
+ assert.deepEqual(h.remote.map(x=>x.operation),['read','orderForm','read','orderForm'])
+ for(const send of h.remote.filter(x=>x.operation==='orderForm')){
+  assert.equal(send.value.idempotencyKey,messageKey)
+  assert.equal(send.value.type,'FORM')
+  assert.deepEqual(send.value.form,form)
+  assert.equal('text' in send.value,false)
+ }
+})
+test('direct FORM rejects invalid rows, missing independent key, and mixed order data',async()=>{
+ const h=harness(),access=randomUUID(),interactionId=randomUUID(),messageKey=randomUUID()
+ const valid={title:'SOLICITUD',subtitle:'Revisar sede',fields:[{variable:'Cliente',value:'Ana'}]}
+ const bad=[
+  {form:{...valid,fields:[]}},
+  {form:{...valid,fields:Array(6).fill({variable:'A',value:'B'})}},
+  {form:{...valid,fields:[{variable:'A',value:'1'},{variable:'a',value:'2'}]}},
+  {form:{...valid,title:' '}},
+  {form:{...valid,subtitle:'A'.repeat(351)}},
+  {form:{...valid,fields:[{variable:'X',value:'B'.repeat(501)}]}},
+  {form:{...valid,fields:[{variable:'',value:'B'}]}},
+  {form:{...valid,fields:[{variable:'A\nAceptado',value:'B'}]}},
+  {form:{...valid,extra:'not-allowed'}},
+  {form:{...valid},extra:{items:[{productId:product,quantity:1}]}},
+  {form:{...valid},extra:{text:'Esto no es un FORM'}},
+  {form:{...valid},extra:{catalogRevision:4}},
+  {form:{...valid},key:null},
+  {form:{...valid},key:access},
+ ]
+ const url='/api/v1/mobile/interactions/'+interactionId+'/message'
+ for(const item of bad){
+  const r=await h.call('POST',url,{
+   headers:{'x-order-access-key':access,...(item.key===null?{}:{
+    'idempotency-key':item.key??messageKey
+   })},payload:{appId:appA,storeId:storeA,type:'FORM',form:item.form,...item.extra}
+  })
+  assert.equal(r.code,400,JSON.stringify(item))
+ }
+ assert.equal(h.remote.length,0,'invalid FORM must not query tenant data or TU VERSO')
+})
+test('direct FORM retains tenant and reference authorization and surfaces upstream conflict',async()=>{
+ const interactionId=randomUUID(),access=randomUUID(),key=randomUUID()
+ const form={title:'Pedido',fields:[{variable:'Sede',value:'Nogales'}]}
+ const path='/api/v1/mobile/interactions/'+interactionId+'/message'
+ const mismatch=harness()
+ mismatch.setReference('mobile:'+createHash('sha256').update([tenantB,appB,storeB,access].join(':')).digest('hex').slice(0,48))
+ const invalid=await mismatch.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},
+  payload:{appId:appA,storeId:storeA,type:'FORM',form}})
+ assert.equal(invalid.code,403)
+ assert.deepEqual(mismatch.remote.map(x=>x.operation),['read'])
+ const conflicts=harness({upstream:{message:409}})
+ conflicts.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const conflict=await conflicts.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},
+  payload:{appId:appA,storeId:storeA,type:'FORM',form}})
+ assert.equal(conflict.code,409)
+ assert.deepEqual(conflicts.remote.map(x=>x.operation),['read','orderForm'],
+  'custom FORM must never invoke historical TEXT recovery')
+})
+
 test('already-delivered legacy TEXT is recovered without sending a duplicate FORM',async()=>{
  const key=randomUUID()
  const oldDetail=[
