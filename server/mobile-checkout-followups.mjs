@@ -79,14 +79,14 @@ async function oauthToken() {
   return oauth.value
  }finally{clearTimeout(timer)}
 }
-async function sendPersonalPush(token,type,interactionId,title,message) {
+async function sendPersonalPush(token,type,interactionId,title,message,statusHint='') {
  const auth=await oauthToken()
  if(!auth||!token)return false
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000)
  try{
   const response=await fetch('https://fcm.googleapis.com/v1/projects/'+encodeURIComponent(oauth.projectId)+'/messages:send',{
    method:'POST',signal:controller.signal,headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json'},
-   body:JSON.stringify({message:{token,android:{priority:'high'},data:{type,interactionId,title,body:message}}})
+   body:JSON.stringify({message:{token,android:{priority:'high'},data:{type,interactionId,title,body:message,statusHint}}})
   })
   if(!response.ok)throw new Error('FCM send HTTP '+response.status)
   return true
@@ -99,7 +99,7 @@ async function tokenFor(pool,row) {
  if(r.rowCount!==1)return null
  return decryptCredential(r.rows[0].encrypted_credential,row.tenant_id,r.rows[0].id)
 }
-export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,readMessages=readMobileInteractionMessages,readInteraction=readMobileInteraction,sendMessage=sendMobileInteractionMessage}={}) {
+export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,readMessages=readMobileInteractionMessages,readInteraction=readMobileInteraction,sendMessage=sendMobileInteractionMessage,resolveRemoteToken=tokenFor}={}) {
  // Claim each step only after successful delivery, and never send to a topic.
  const due=await pool.query('SELECT f.*,COALESCE(p.reminder_count,2) AS reminder_count FROM mobile_checkout_followups f LEFT JOIN mobile_checkout_policies p ON p.tenant_id=f.tenant_id WHERE f.state=\'PAYMENT_PENDING\' AND f.checkout_expires_at IS NOT NULL AND (f.checkout_expires_at<=now() OR (f.fcm_token IS NOT NULL AND f.reminder_sent_count<COALESCE(p.reminder_count,2) AND now()>=f.checkout_started_at+(f.checkout_expires_at-f.checkout_started_at)*((f.reminder_sent_count+1.0)/(COALESCE(p.reminder_count,2)+1)))) ORDER BY f.checkout_expires_at LIMIT '+MAX_BATCH)
  for(const row of due.rows){
@@ -124,10 +124,21 @@ export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,r
  for(const row of waiting.rows){
   try{
    await pool.query('UPDATE mobile_checkout_followups SET agent_checked_at=now() WHERE interaction_id=$1 AND state=\'WAITING\'',[row.interaction_id])
-   const token=await tokenFor(pool,row);if(!token)continue
+   const token=await resolveRemoteToken(pool,row);if(!token)continue
    const history=await readMessages(token,row.interaction_id)
-   if(!history.ok||!history.data?.messages?.some(m=>m.direction==='OUTBOUND'))continue
-   if(await sendPush(row.fcm_token,'order_status',row.interaction_id,'Novedades de tu pedido','La sede respondió a tu solicitud. Ábrela para revisar el resultado.'))
+   if(!history.ok)continue
+   // Exact text is used only to label a personal notification, NEVER to approve
+   // an order, calculate a price, change the backend order state or take payment.
+   // Android remains the sole consumer of the decision after re-reading the chat.
+   const response=(history.data?.messages||[]).filter(m=>m.direction==='OUTBOUND')
+    .map(m=>String(m.text||'').trim().toLocaleLowerCase('es-PE').replace(/[.!]+$/,'').trim())
+    .find(t=>['acepto','aceptado','aceptada','rechazado','rechazada'].includes(t))
+   if(!response)continue
+   const accepted=['acepto','aceptado','aceptada'].includes(response)
+   if(await sendPush(row.fcm_token,'order_status',row.interaction_id,
+     accepted?'¡Tu pedido fue aceptado!':'La sede no pudo atender tu pedido',
+     accepted?'Abre Pollos B3 para revisar el total y continuar con el pago.':'Revisa las alternativas en la aplicación.',
+     accepted?'ACCEPTED':'REJECTED'))
     await pool.query('UPDATE mobile_checkout_followups SET agent_notice_sent=true WHERE interaction_id=$1 AND state=\'WAITING\'',[row.interaction_id])
   }catch(error){console.error('Pollos B3 agent follow-up:',error.message)}
  }
