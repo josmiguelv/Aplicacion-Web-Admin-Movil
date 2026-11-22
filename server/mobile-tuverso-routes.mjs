@@ -28,16 +28,21 @@ const equals=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.lengt
 // Text-only mobile order briefing. Never trust product names, prices or store names from Android.
 function normalizeCustomer(input){
  if(input===undefined)return null // Backward compatibility for already-issued clients.
- if(!plainObject(input)||Object.keys(input).some(k=>!['firstName','lastName','phone','address','district','reference','mode'].includes(k))||
+ if(!plainObject(input)||Object.keys(input).some(k=>!['firstName','lastName','phone','email','phoneVerified','emailVerified','address','district','reference','mode'].includes(k))||
     input.mode!=='delivery'||!validText(input.firstName,60)||input.firstName.trim().length<2||
     !validText(input.lastName,60)||input.lastName.trim().length<2||
     typeof input.phone!=='string'||!/^9[0-9]{8}$/.test(input.phone)||
     !validText(input.address,180)||input.address.trim().length<6||
     !validText(input.district,80)||input.district.trim().length<2||
     (input.reference!==undefined&&(typeof input.reference!=='string'||input.reference.length>180||
-      /[\x00-\x1f]/.test(input.reference))))throw fail(400,'Datos de contacto o dirección inválidos')
+      /[\x00-\x1f]/.test(input.reference)))||
+    (input.email!==undefined&&(typeof input.email!=='string'||input.email.length>254||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)))||
+    (input.phoneVerified!==undefined&&input.phoneVerified!==false)||
+    (input.emailVerified!==undefined&&input.emailVerified!==false))throw fail(400,'Datos de contacto o dirección inválidos')
  return {firstName:input.firstName.trim(),lastName:input.lastName.trim(),
-  phone:input.phone,address:input.address.trim(),district:input.district.trim(),
+  phone:input.phone,email:input.email?.trim().toLowerCase(),
+  phoneVerified:false,emailVerified:false,address:input.address.trim(),district:input.district.trim(),
   reference:(input.reference||'').trim()}
 }
 function orderSummaryText(cart,store,customer){
@@ -270,7 +275,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    // Stable upstream reference for retries. The public caller cannot set location, queue, price or summary.
    const externalReference=reference(ctx.tenantId,input.appId,input.storeId,idempotencyKey)
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
-    customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey
+    customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey,
+     ...(customer?{customer:{firstName:customer.firstName,lastName:customer.lastName,
+      phone:'+51'+customer.phone,...(customer.email?{email:customer.email}:{}),
+      phoneVerified:false,emailVerified:false}}:{})
    })
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:remoteAuthStatus(result),'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
