@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false,historyFailure=false,upstream={}}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  const terminalSessions=new Map()
@@ -62,7 +62,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    if(!createdIds.has(input.idempotencyKey))createdIds.set(input.idempotencyKey,randomUUID())
    return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
   },
-  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
+  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST',...(operationalConversationStatus?{operationalConversationStatus}:{})}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});if(historyFailure)return {ok:false,httpStatus:503,errorCode:'CONNECTION_FAILED'};return {ok:true,data:{interactionId:id,messages:[
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
@@ -456,3 +456,33 @@ test('upstream failure to send text is authoritative while local order isolation
  assert.equal(unauthorized.code,409)
  assert.equal(other.remote.length,0)
 })
+
+test('closed MOBILE_APP agent conversation is visible and customer cancel is idempotent without message',async()=>{
+ const id=randomUUID(),key=randomUUID();
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48);
+ const path='/api/v1/mobile/interactions/'+id;
+ const owner={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}};
+ const closed=harness({remoteStatus:'ACCEPTED',operationalConversationStatus:'CLOSED',upstream:{message:409}});
+ closed.setReference(ref);
+ const status=await closed.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:owner.headers});
+ assert.equal(status.code,200);
+ assert.equal(status.payload.operationalConversationStatus,'CLOSED');
+ assert.equal(status.payload.messagesAvailable,true);
+ const cancelled=await closed.call('POST',path+'/cancel',owner);
+ assert.equal(cancelled.code,200);
+ assert.equal(cancelled.payload.status,'CANCELLED');
+ assert.equal(closed.remote.filter(x=>x.operation==='cancel').length,0);
+ const repeat=await closed.call('POST',path+'/cancel',owner);
+ assert.equal(repeat.code,200);
+ assert.equal(closed.remote.filter(x=>x.operation==='cancel').length,0);
+ const noHistory=harness({remoteStatus:'ACCEPTED',operationalConversationStatus:'RESOLVED',historyFailure:true});
+ noHistory.setReference(ref);
+ const read=await noHistory.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:owner.headers});
+ assert.equal(read.code,200);
+ assert.equal(read.payload.messagesAvailable,false);
+ assert.equal('operationalConversationStatus' in read.payload,false);
+ assert.equal((await noHistory.call('POST',path+'/cancel',owner)).code,200);
+ const unverified=harness({remoteStatus:'ACCEPTED',upstream:{message:409}});
+ unverified.setReference(ref);
+ assert.equal((await unverified.call('POST',path+'/cancel',owner)).code,409);
+});
