@@ -1,5 +1,32 @@
 # Integraciones TU VERSO por empresa
 
+## Addenda vigente: mensajería S2S MOBILE_APP (22-11-2026)
+
+La referencia PDF de 18/11/2026 citada en la siguiente sección describe la
+etapa inicial de consulta de disponibilidad; las frases antiguas que indican
+«solo disponibilidad» o «sin mensajes» **no describen el código actual** de
+mensajería MOBILE_APP del Administrador.
+La fuente de contrato HTTP vigente está en
+[API TEXT/FORM del Administrador](ADMIN_MOBILE_APP_TEXT_FORM_API_20261122.md)
+y [ejemplos para Android](TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
+
+El backend público recibe el tipo `TEXT` o `FORM` de Android, valida
+`appId`, sede, referencia del pedido y permiso por empresa, y llama a TU VERSO
+solo desde `server/tuverso-mobile-connector.mjs` con el bearer custodiado
+en `tenant_integrations`. `TEXT` usa `text`; `FORM` usa
+`form:{title,subtitle?,fields:[{variable,value}]}` de hasta cinco filas
+en el receptor S2S. El Administrador exige 1–5 filas a Android.
+Los botones Aceptar/Rechazar y el mensaje saliente `aceptar`/`rechazar`
+son responsabilidad de TU VERSO, no de la interfaz administrativa.
+Credenciales, integraciones, binding por sede, permisos efectivos y
+`TUVERSO_LIVE_REQUESTS_ENABLED` permanecen sujetos a la configuración
+autorizada y no se modifican por actualizar los documentos.
+
+**Estado:** código de rama de desarrollo, 43/43 pruebas focales aprobadas;
+instalación local y E2E real todavía no acreditados. No ampliar a WEB,
+WhatsApp u otros canales por la presencia de este contrato.
+
+
 ## Alcance y fuente
 
 Referencia obligatoria revisada: `TU_VERSO_APIs_Globales_Documentacion_Tecnica_v1_18-11-2026.pdf`,
