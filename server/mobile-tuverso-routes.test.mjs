@@ -259,7 +259,7 @@ test('already-delivered legacy TEXT is recovered without sending a duplicate FOR
   'Costo delivery: pendiente tras aceptacion (no cobrar)',
   'Estado: PENDIENTE DE VALIDACION',
   'Verificar productos y responder SOLO: aceptado o rechazado.',
- ].join('\\n')
+ ].join('\n')
  const h=harness({legacyText:oldDetail,upstream:{message:409}})
  const created=await h.call('POST','/api/v1/mobile/interactions',{
   headers:{'idempotency-key':key},payload:createBody({customer})})
