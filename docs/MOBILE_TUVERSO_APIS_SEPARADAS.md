@@ -192,16 +192,21 @@ La aplicación móvil es propietaria del estado y la decisión: primero respeta 
 Los límites de lectura HTTP protegen del fallo de red y no deben ser usados como plazo máximo de atención. El Administrador no asigna expiraciones comerciales ni cierra conversaciones por un timeout de red; la expiración/cancelación proviene del contrato formal de TU VERSO o de la decisión explícita del comprador. El control del tiempo de respuesta del agente corresponde exclusivamente a la configuración real de TU VERSO. Es obligatorio actualizar el Administrador y Android juntos.
 
 
-### Contrato vigente: FORM MOBILE_APP (22/11/2026)
+### Contrato vigente: selección explícita TEXT / FORM MOBILE_APP (22/11/2026)
 
-Desde la rama `fix/b3-mobile-form-to-tuverso-20261122`, el Administrador **conserva**
-`POST /api/v1/mobile/interactions` y `POST /api/v1/mobile/interactions/{interactionId}/message`,
-pero el segundo construye un `FORM` solo con el catálogo, la sede y el contacto verificados.
-TU VERSO muestra los botones de Aceptar/Rechazar; nunca los proporciona Android.
-Las respuestas exactas `aceptar`/`rechazar` viajan como mensajes salientes por la ruta actual
-de seguimiento `GET /api/v1/mobile/interactions/{interactionId}/status`.
-La app debe reconocer ambos verbos exactos además de los términos legados.
-Ver [contrato actualizado de Android y FORM](TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
+Android conserva `POST /api/v1/mobile/interactions` y
+`POST /api/v1/mobile/interactions/{interactionId}/message`.
+En la segunda llamada debe incluir `type:"FORM"` para solicitar el formulario
+con Aceptar/Rechazar, o `type:"TEXT"` para un mensaje normal sin botones.
+El Administrador valida el tipo y lo transmite sin reinterpretarlo. Para el
+pedido estructurado, deriva los campos desde el catálogo publicado; no recibe
+un formulario arbitrario desde Android. Para texto libre se exige
+`Idempotency-Key` adicional y `X-Order-Access-Key` original.
+En los clientes anteriores que omiten `type`, el detalle de pedido permanece
+como TEXT, para evitar una conversión silenciosa a FORM.
+El seguimiento devuelve las respuestas salientes en `agentMessages[].text`,
+sin asumir aprobación comercial por el estado de asignación de la interacción.
+Ver el [contrato Android TEXT/FORM actualizado](TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
 
 ### Identidad estructurada hacia TU VERSO (22/11/2026)
 
