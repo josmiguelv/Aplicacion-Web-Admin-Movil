@@ -33,6 +33,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   if(sql.includes('FROM integration_bindings b')){
    return {rowCount:count,rows:count?[{integration_id:integration,encrypted_credential:'ciphertext',expires_at:null,suspended:false,scopes,channel_type:'MOBILE_APP',binding_id:bindingId,external_location_id:args[2]===storeA?'location-a':'location-b',purpose:'ORDER_REQUEST'}]:[]}
   }
+  if(sql.includes('UPDATE mobile_checkout_followups'))return {rowCount:1,rows:[]}
   throw Error('Unexpected SQL: '+sql)
  }}
  const route=createMobileTuVersoRoutes({pool,body:async req=>req.body,
