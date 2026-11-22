@@ -178,6 +178,13 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      const data=req.method==='GET'?await readCheckoutPayment(pool,owner):await beginCheckoutPayment(pool,owner)
      return json(res,200,data)
     }
+    // A canonical MOBILE_APP conversation may be closed before the customer
+    // presses Cancel. Do not attempt to send a message into an already closed chat.
+    const operationalConversationStatus=remote.data?.operationalConversationStatus
+    if(operation==='cancel'&&['CLOSED','RESOLVED'].includes(operationalConversationStatus)){
+     await closeCheckoutPayment(pool,owner)
+     return json(res,200,{interactionId,status:'CANCELLED'})
+    }
     const history=await readMessages(integration.token,interactionId)
     // Interaction status and conversation history are independent requests.
     // For a read-only poll, a transient history failure must not make a
@@ -205,7 +212,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const agentMessages=messages.filter(message=>message.direction==='OUTBOUND')
      .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
-     status:remote.data.status,agentMessages,messagesAvailable})
+     status:remote.data.status,agentMessages,messagesAvailable,
+     ...(messagesAvailable&&['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
+      {operationalConversationStatus}:{})})
    }
    if(messageMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
