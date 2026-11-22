@@ -213,7 +213,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
      status:remote.data.status,agentMessages,messagesAvailable,
-     ...(messagesAvailable&&['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
+     ...(['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
       {operationalConversationStatus}:{})})
    }
    if(messageMatch){
