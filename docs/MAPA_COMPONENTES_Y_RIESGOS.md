@@ -4,6 +4,26 @@
 
 Este mapa corresponde únicamente a `Aplicacion-Web-Admin-Movil`. El repositorio contiene el administrador SaaS de INTEGRA B2G y sus APIs. No es el repositorio de TU VERSO ni de una aplicación Android o web consumidora.
 
+## Cambio vigente — API de mensajes MOBILE_APP 22-11-2026
+
+El contrato actualizado está en [API TEXT/FORM del Administrador](ADMIN_MOBILE_APP_TEXT_FORM_API_20261122.md)
+y en el [contrato Android](TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
+
+| Componente / riesgo | Autoridad | Prueba focal |
+| --- | --- | --- |
+| `type:"TEXT"` vs `type:"FORM"`, validación de 1–5 filas, rechazo de campos cruzados, origen y idempotencia | `server/mobile-tuverso-routes.mjs` → ruta `/api/v1/mobile/interactions/{id}/message`, `validClientForm` | `server/mobile-tuverso-routes.test.mjs` |
+| Conversión de pedido estructurado a FORM sin confiar en precios de Android | `server/mobile-tuverso-routes.mjs` → `orderForm`, `calculateOrderCart` | `server/mobile-tuverso-routes.test.mjs` |
+| S2S HTTP, bearer privado, relectura de historial y serialización de FORM/TEXT | `server/tuverso-mobile-connector.mjs` → `sendMobileInteractionMessage` | `server/tuverso-mobile-connector.test.mjs` |
+| Respuesta del agente y cierre sin decisión: Android no debe esperar indefinidamente | `GET /api/v1/mobile/interactions/{id}/status` transmite `agentMessages` sin traducir; Android interpreta | Prueba E2E focal pendiente |
+| Integridad por tenant, sede y capacidades de WhatsApp independientes | `binding()`, `reference()` + TU VERSO S2S MOBILE_APP | Casos cross-tenant de las pruebas de ruta |
+
+**Precaución:** no intentar corregir el envío FORM en `src/app/MobileOperations.tsx`;
+esa pantalla administra catálogo, **el contrato HTTP está en backend**.
+No mezclar `type`/campos con el flujo de cancelación, que transmite un TEXT
+de sistema. Un `messageId` confirmado no equivale a aceptación ni pago.
+Código preparado, pruebas 43/43; falta instalar local y validar E2E.
+Los mapas históricos posteriores se conservan para otros módulos.
+
 ## Mapa rápido: qué archivo revisar
 
 | Necesidad | Punto de entrada principal | Dependencias que también se deben revisar |
