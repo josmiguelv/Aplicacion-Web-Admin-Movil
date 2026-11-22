@@ -179,7 +179,7 @@ test('create returns interactionId before FORM, and FORM delivery runs independe
   phone:'+51912345678',phoneVerified:false,emailVerified:false})
  h.setReference(response.payload.externalReference)
  const delivered=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
-  headers:{'x-order-access-key':key},payload:createBody({customer})})
+  headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(delivered.code,200)
  assert.equal(delivered.payload.delivered,true)
  assert.equal(delivered.payload.interactionId,id)
@@ -223,7 +223,7 @@ test('replaying both steps uses one conversation ID and one deterministic messag
   assert.equal(created.payload.interactionId,id)
   h.setReference(created.payload.externalReference)
   const sent=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
-   headers:{'x-order-access-key':key},payload:createBody({customer})})
+   headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
   assert.equal(sent.code,200)
   const current=h.remote.filter(x=>x.operation==='orderForm').at(-1).value.idempotencyKey
   if(i===0)messageKey=current
@@ -238,9 +238,66 @@ test('failed FORM delivery returns 503 without undoing a created interaction',as
  assert.equal(created.code,201)
  h.setReference(created.payload.externalReference)
  const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
-  headers:{'x-order-access-key':key},payload:createBody({customer})})
+  headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(result.code,503)
  assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
+})
+
+test('legacy Android without type remains TEXT; explicit FORM is never inferred',async()=>{
+ const h=harness(),key=randomUUID()
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ h.setReference(created.payload.externalReference)
+ const sent=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(sent.code,200)
+ assert.equal(sent.payload.type,'TEXT')
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
+ assert.equal(h.remote.at(-1).value.type,'TEXT')
+ assert.match(h.remote.at(-1).value.text,/POLLOS B3 - SOLICITUD DE VALIDACION/)
+})
+
+test('explicit TEXT sends exact authorized message with independent UUID, never FORM',async()=>{
+ const h=harness(),key=randomUUID(),messageKey=randomUUID(),text='El cliente solicita cambiar el pedido.\\nPendiente.'
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ h.setReference(created.payload.externalReference)
+ const path='/api/v1/mobile/interactions/'+created.payload.interactionId+'/message'
+ const sent=await h.call('POST',path,{
+  headers:{'x-order-access-key':key,'idempotency-key':messageKey},
+  payload:{appId:appA,storeId:storeA,type:'TEXT',text}})
+ assert.equal(sent.code,200)
+ assert.equal(sent.payload.type,'TEXT')
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
+ assert.deepEqual(h.remote.at(-1).value,{type:'TEXT',text,idempotencyKey:messageKey})
+ const next=await h.call('POST',path,{
+  headers:{'x-order-access-key':key,'idempotency-key':randomUUID()},
+  payload:{appId:appA,storeId:storeA,type:'TEXT',text:'Otro mensaje independiente'}})
+ assert.equal(next.code,200)
+ assert.notEqual(h.remote.at(-1).value.idempotencyKey,messageKey)
+})
+
+test('reject type confusion, cross-content fields, and unsafe TEXT before contacting TU VERSO',async()=>{
+ const h=harness(),access=randomUUID(),path='/api/v1/mobile/interactions/'+randomUUID()+'/message'
+ const invalid=[
+  {body:{...createBody({customer}),type:'FORM',text:'aceptar'}},
+  {body:{...createBody({customer}),type:'X'}},
+  {body:{...createBody({customer}),type:'TEXT',form:{title:'Fake',fields:[]}}},
+  {body:{appId:appA,storeId:storeA,type:'FORM',text:'texto'}},
+  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola',form:{title:'Mock',fields:[]}}},
+  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola',catalogRevision:4}},
+  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola',items:[]}},
+  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola\\rInyección'}},
+  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola'},key:null},
+  {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola'},key:access},
+ ]
+ for(const item of invalid){
+  const got=await h.call('POST',path,{headers:{
+   'x-order-access-key':access,...(item.key===null?{}:{'idempotency-key':item.key??randomUUID()})},
+   payload:item.body})
+  assert.equal(got.code,400)
+ }
+ assert.equal(h.remote.length,0)
 })
 
 test('already-delivered legacy TEXT is recovered without sending a duplicate FORM',async()=>{
@@ -265,7 +322,7 @@ test('already-delivered legacy TEXT is recovered without sending a duplicate FOR
   headers:{'idempotency-key':key},payload:createBody({customer})})
  h.setReference(created.payload.externalReference)
  const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
-  headers:{'x-order-access-key':key},payload:createBody({customer})})
+  headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(result.code,200)
  assert.equal(result.payload.delivered,true)
  assert.ok(result.payload.messageId)
@@ -273,7 +330,7 @@ test('already-delivered legacy TEXT is recovered without sending a duplicate FOR
  const conflict=harness({upstream:{message:409}})
  conflict.setReference(created.payload.externalReference)
  const rejected=await conflict.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
-  headers:{'x-order-access-key':key},payload:createBody({customer})})
+  headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(rejected.code,409)
 })
 
@@ -285,13 +342,13 @@ test('stale local message scopes never reject; forged order references remain fo
  assert.equal(opened.code,201)
  denied.setReference(opened.payload.externalReference)
  const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
-  headers:{'x-order-access-key':key},payload:createBody({customer})})
+  headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(reply.code,200)
  assert.deepEqual(denied.remote.map(x=>x.operation),['interaction','read','orderForm'])
  const forged=harness()
  forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
  const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
-  headers:{'x-order-access-key':randomUUID()},payload:createBody({customer})})
+  headers:{'x-order-access-key':randomUUID()},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(other.code,403)
  assert.deepEqual(forged.remote.map(x=>x.operation),['read'])
 })
@@ -487,7 +544,7 @@ test('upstream failure to send FORM is authoritative while local order isolation
  assert.equal(created.code,201)
  h.setReference(created.payload.externalReference)
  const reply=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
-  headers:{'x-order-access-key':key},payload:createBody({customer})})
+  headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(reply.code,403)
  assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
  const other=harness({scopes:[]})
