@@ -165,13 +165,13 @@ Si el resultado muestra `503`, verificar si `TUVERSO_LIVE_CHECKS_ENABLED` está 
 - Google Routes continúa siendo requisito para la cotización real, incluso para tarifa fija según la implementación actual. La falta de `GOOGLE_ROUTES_API_KEY` genera HTTP 503.
 
 
-### Envío de pedido como mensaje real de texto (21/11/2026)
+### Envío histórico de pedido como texto (21/11/2026; sustituido por FORM el 22/11)
 
 En `POST /api/v1/mobile/interactions`, Android puede añadir `customer` con campos `firstName`, `lastName`, `phone` (9 dígitos peruanos), `address`, `district`, `reference` opcional y `mode="delivery"`. El Administrador valida formato, tenant, local, catálogo/revisión, productos y subtotal. Nunca acepta precios ni texto libre prefabricado por el cliente.
 
 El Administrador primero crea la interacción con el `summary` informativo admitido por TU VERSO (`POST /api/v1/interactions`) y **luego envía un mensaje real INBOUND** con el detalle a `POST /api/v1/conversations/{interactionId}/messages`, el cual admite mensajes aun cuando la solicitud está `PENDING` según el contrato del canal MOBILE_APP. La clave de idempotencia del mensaje se deriva en un UUID estable y diferente del UUID de creación, para que un reintento no duplique el texto. El scope adicional `conversations.messages.write` es obligatorio para solicitudes enriquecidas. Si falla el segundo envío, el Administrador no responde éxito (el cliente conserva su clave para reintento). Sin `customer`, se mantiene el comportamiento anterior para clientes legados.
 
-El texto contiene exclusivamente información proporcionada por el comprador y el catálogo/sede publicados. No incluye costo de delivery ni pago confirmado. **No hay formulario ni botones** en este nuevo envío S2S. La capacidad de que el agente responda `aceptado` o `rechazado` en `PENDING` sigue siendo una dependencia separada de TU VERSO y debe certificarse antes de habilitar el paso al pago.
+El texto contiene exclusivamente información proporcionada por el comprador y el catálogo/sede publicados. No incluye costo de delivery ni pago confirmado. **Actualizado 22/11/2026:** el envío S2S del detalle ahora es `FORM` y TU VERSO incorpora los botones Aceptar/Rechazar. Este párrafo describe solamente la versión histórica de texto. La capacidad de que el agente responda `aceptado` o `rechazado` en `PENDING` sigue siendo una dependencia separada de TU VERSO y debe certificarse antes de habilitar el paso al pago.
 
 No se modificó TU VERSO, otras integraciones ni producción.
 
@@ -191,6 +191,17 @@ La aplicación móvil es propietaria del estado y la decisión: primero respeta 
 
 Los límites de lectura HTTP protegen del fallo de red y no deben ser usados como plazo máximo de atención. El Administrador no asigna expiraciones comerciales ni cierra conversaciones por un timeout de red; la expiración/cancelación proviene del contrato formal de TU VERSO o de la decisión explícita del comprador. El control del tiempo de respuesta del agente corresponde exclusivamente a la configuración real de TU VERSO. Es obligatorio actualizar el Administrador y Android juntos.
 
+
+### Contrato vigente: FORM MOBILE_APP (22/11/2026)
+
+Desde la rama `fix/b3-mobile-form-to-tuverso-20261122`, el Administrador **conserva**
+`POST /api/v1/mobile/interactions` y `POST /api/v1/mobile/interactions/{interactionId}/message`,
+pero el segundo construye un `FORM` solo con el catálogo, la sede y el contacto verificados.
+TU VERSO muestra los botones de Aceptar/Rechazar; nunca los proporciona Android.
+Las respuestas exactas `aceptar`/`rechazar` viajan como mensajes salientes por la ruta actual
+de seguimiento `GET /api/v1/mobile/interactions/{interactionId}/status`.
+La app debe reconocer ambos verbos exactos además de los términos legados.
+Ver [contrato actualizado de Android y FORM](TUVERSO_FORM_ANDROID_CONTRATO_20261122.md).
 
 ### Identidad estructurada hacia TU VERSO (22/11/2026)
 
