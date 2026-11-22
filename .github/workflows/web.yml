@@ -48,7 +48,7 @@ jobs:
       - name: Build frontend
         run: pnpm build
       - name: Focused mobile API and connector tests (mocked dependencies)
-        run: node --test server/mobile-order-availability.test.mjs server/tuverso-mobile-connector.test.mjs server/mobile-tuverso-routes.test.mjs
+        run: node --test server/mobile-order-availability.test.mjs server/tuverso-mobile-connector.test.mjs server/mobile-tuverso-routes.test.mjs server/mobile-checkout-followups.test.mjs
       - name: Install database schema (disposable CI database only)
         run: |
           node --input-type=module -e 'import pg from "pg";import {readFileSync} from "node:fs";const p=new pg.Pool({connectionString:process.env.DATABASE_URL});try{await p.query(readFileSync("server/schema.sql","utf8"))}finally{await p.end()}'
