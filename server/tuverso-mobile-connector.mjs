@@ -180,7 +180,7 @@ export async function sendMobileInteractionMessage(token,interactionId,{idempote
  }
  return perform(token,'message',`/api/v1/conversations/${interactionId}/messages`,{
   method:'POST',idempotencyKey,
-  requestBody:isForm?{type:'FORM',form}:{text},
+  requestBody:isForm?{type:'FORM',form}:type==='TEXT'?{type:'TEXT',text}:{text},
  })
 }
 export const mobileInteractionMode=()=>mode()?'LIVE':'DISABLED'
