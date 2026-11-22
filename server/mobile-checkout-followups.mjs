@@ -101,7 +101,7 @@ async function tokenFor(pool,row) {
 }
 export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,readMessages=readMobileInteractionMessages,readInteraction=readMobileInteraction,sendMessage=sendMobileInteractionMessage}={}) {
  // Claim each step only after successful delivery, and never send to a topic.
- const due=await pool.query('SELECT f.*,COALESCE(p.reminder_count,2) AS reminder_count FROM mobile_checkout_followups f LEFT JOIN mobile_checkout_policies p ON p.tenant_id=f.tenant_id WHERE f.state=\'PAYMENT_PENDING\' AND f.checkout_expires_at IS NOT NULL AND (f.checkout_expires_at<=now() OR f.reminder_sent_count<COALESCE(p.reminder_count,2)) ORDER BY f.created_at LIMIT '+MAX_BATCH)
+ const due=await pool.query('SELECT f.*,COALESCE(p.reminder_count,2) AS reminder_count FROM mobile_checkout_followups f LEFT JOIN mobile_checkout_policies p ON p.tenant_id=f.tenant_id WHERE f.state=\'PAYMENT_PENDING\' AND f.checkout_expires_at IS NOT NULL AND (f.checkout_expires_at<=now() OR (f.fcm_token IS NOT NULL AND f.reminder_sent_count<COALESCE(p.reminder_count,2) AND now()>=f.checkout_started_at+(f.checkout_expires_at-f.checkout_started_at)*((f.reminder_sent_count+1.0)/(COALESCE(p.reminder_count,2)+1)))) ORDER BY f.checkout_expires_at LIMIT '+MAX_BATCH)
  for(const row of due.rows){
   try{
    const expired=new Date(row.checkout_expires_at)<=new Date()
