@@ -148,14 +148,39 @@ export async function pollMobileInteractionEvents(token,{after=null,limit=50}={}
  url.searchParams.set('limit',String(limit))
  return perform(token,'events',url.pathname+url.search)
 }
-export async function sendMobileInteractionMessage(token,interactionId,{idempotencyKey,text}){
- // The published order summary is multi-line. Allow LF in message bodies while
- // forbidding other control characters; credentials and identifiers remain strict.
- if(!id(interactionId)||!id(idempotencyKey)||typeof text!=='string'||
-    !text.trim()||text.length>8000||/[\x00-\x09\x0b-\x1f]/.test(text))
+// Mirrors TU VERSO PRE-F2/07: a FORM has no extra free-text body or buttons.
+function validMobileForm(form){
+ if(!form||typeof form!=='object'||Array.isArray(form)||
+    Object.keys(form).some(k=>!['title','subtitle','fields'].includes(k)))return false
+ if(typeof form.title!=='string'||!form.title.trim()||form.title.trim().length>180||
+    form.subtitle!==undefined&&(typeof form.subtitle!=='string'||form.subtitle.trim().length>350)||
+    !Array.isArray(form.fields)||form.fields.length>5)return false
+ const labels=new Set()
+ for(const entry of form.fields){
+  if(!entry||typeof entry!=='object'||Array.isArray(entry)||
+     Object.keys(entry).some(k=>!['variable','value'].includes(k))||
+     typeof entry.variable!=='string'||!entry.variable.trim()||entry.variable.trim().length>80||
+     typeof entry.value!=='string'||!entry.value.trim()||entry.value.trim().length>500)return false
+  const key=entry.variable.trim().toLowerCase()
+  if(labels.has(key))return false
+  labels.add(key)
+ }
+ return true
+}
+export async function sendMobileInteractionMessage(token,interactionId,{idempotencyKey,text,type,form}){
+ if(!id(interactionId)||!id(idempotencyKey))throw Error('TUVERSO_MESSAGE_INVALID')
+ const isForm=type==='FORM'
+ if(isForm){
+  if(text!==undefined||!validMobileForm(form))throw Error('TUVERSO_FORM_INVALID')
+ }else if(type!==undefined&&type!=='TEXT'||form!==undefined||
+    typeof text!=='string'||!text.trim()||text.length>8000||
+    /[\\x00-\\x09\\x0b-\\x1f]/.test(text)){
+  // Preserve legacy free-text messages for cancellation and older clients.
   throw Error('TUVERSO_MESSAGE_INVALID')
+ }
  return perform(token,'message',`/api/v1/conversations/${interactionId}/messages`,{
-  method:'POST',idempotencyKey,requestBody:{text},
+  method:'POST',idempotencyKey,
+  requestBody:isForm?{type:'FORM',form}:{text},
  })
 }
 export const mobileInteractionMode=()=>mode()?'LIVE':'DISABLED'
