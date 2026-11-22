@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,upstream={}}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  const terminalSessions=new Map()
@@ -65,12 +65,13 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST',...(operationalConversationStatus?{operationalConversationStatus}:{})}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});if(historyFailure)return {ok:false,httpStatus:503,errorCode:'CONNECTION_FAILED'};return {ok:true,data:{interactionId:id,messages:[
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
-   ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
+   ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[]),
+   ...(legacyText?[{id:randomUUID(),direction:'INBOUND',text:legacyText,createdAt:new Date().toISOString()}]:[])
   ]}}},
   sendMessage:async(token,id,value)=>{
-   const operation=value.text.startsWith('POLLOS B3 - SOLICITUD')?'orderText':'cancel'
+   const operation=value.type==='FORM'?'orderForm':value.text?.startsWith('POLLOS B3 - SOLICITUD')?'orderText':'cancel'
    remote.push({operation,id,value})
-   return upstream.message?{ok:false,httpStatus:upstream.message}:messageFailure&&operation==='orderText'?{ok:false,httpStatus:503}:
+   return upstream.message?{ok:false,httpStatus:upstream.message}:messageFailure&&operation==='orderForm'?{ok:false,httpStatus:503}:
     {ok:true,data:{messageId:randomUUID(),created:true}}
   }
  })
@@ -163,7 +164,7 @@ test('new interaction creation accepts catalog revision before pricing',async()=
 })
 const customer={firstName:'Ana',lastName:'Quispe',phone:'912345678',
  address:'Av. Ejemplo 123',district:'Santa Anita',reference:'Porton lateral',mode:'delivery'}
-test('create returns interactionId before chat text, and text delivery runs independently',async()=>{
+test('create returns interactionId before FORM, and FORM delivery runs independently',async()=>{
  const h=harness(),key=randomUUID()
  const response=await h.call('POST','/api/v1/mobile/interactions',{
   headers:{'idempotency-key':key},payload:createBody({customer})})
@@ -182,17 +183,20 @@ test('create returns interactionId before chat text, and text delivery runs inde
  assert.equal(delivered.code,200)
  assert.equal(delivered.payload.delivered,true)
  assert.equal(delivered.payload.interactionId,id)
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
- const message=h.remote.find(x=>x.operation==='orderText').value.text
- for(const part of ['POLLOS B3','Sede consultada:','Ana Quispe','+51 912345678',
-  'Av. Ejemplo 123','Santa Anita','Porton lateral','2 x Pollo A',
-  'Subtotal productos: S/ 40.00','pendiente tras aceptacion']){
-  assert.ok(message.includes(part),part)
- }
- assert.ok(message.includes('\n'))
- assert.ok(message.length<=8000)
- assert.ok(!message.includes('deliveryFeePen'))
- assert.ok(!('phone' in response.payload))
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
+ const sentForm=h.remote.find(x=>x.operation==='orderForm').value
+ assert.equal(sentForm.type,'FORM')
+ assert.equal('text' in sentForm,false)
+ assert.equal(sentForm.form.title,'POLLOS B3 - SOLICITUD DE VALIDACION')
+ assert.equal(sentForm.form.fields.length,4)
+ const field=Object.fromEntries(sentForm.form.fields.map(x=>[x.variable,x.value]))
+ assert.equal(field.Sede,'Sede')
+ assert.match(field.Cliente,/Ana Quispe.*\+51 912345678/)
+ assert.match(field.Entrega,/Av\. Ejemplo 123.*Santa Anita.*Porton lateral/)
+ assert.equal(field.Productos,'2 x Pollo A')
+ assert.match(sentForm.form.subtitle,/Subtotal productos: S\/ 40\.00/)
+ assert.ok(!JSON.stringify(sentForm).includes('deliveryFeePen'))
+  assert.ok(!('phone' in response.payload))
 })
 test('optional email is forwarded in structured customer; unverified flags never claim verification',async()=>{
  const h=harness()
@@ -221,13 +225,13 @@ test('replaying both steps uses one conversation ID and one deterministic messag
   const sent=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
    headers:{'x-order-access-key':key},payload:createBody({customer})})
   assert.equal(sent.code,200)
-  const current=h.remote.filter(x=>x.operation==='orderText').at(-1).value.idempotencyKey
+  const current=h.remote.filter(x=>x.operation==='orderForm').at(-1).value.idempotencyKey
   if(i===0)messageKey=current
   assert.equal(current,messageKey)
   assert.notEqual(current,key)
  }
 })
-test('failed text delivery returns 503 without undoing a created interaction',async()=>{
+test('failed FORM delivery returns 503 without undoing a created interaction',async()=>{
  const h=harness({messageFailure:true}),key=randomUUID()
  const created=await h.call('POST','/api/v1/mobile/interactions',{
   headers:{'idempotency-key':key},payload:createBody({customer})})
@@ -236,8 +240,43 @@ test('failed text delivery returns 503 without undoing a created interaction',as
  const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(result.code,503)
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
 })
+
+test('already-delivered legacy TEXT is recovered without sending a duplicate FORM',async()=>{
+ const key=randomUUID()
+ const oldDetail=[
+  'POLLOS B3 - SOLICITUD DE VALIDACION',
+  'Sede consultada: Sede',
+  'Cliente (datos ingresados, no verificados): Ana Quispe',
+  'Celular: +51 912345678',
+  'Modalidad: Delivery',
+  'Direccion: Av. Ejemplo 123',
+  'Distrito: Santa Anita',
+  'Referencia: Porton lateral',
+  'PRODUCTOS: 2 x Pollo A',
+  'Subtotal productos: S/ 40.00',
+  'Costo delivery: pendiente tras aceptacion (no cobrar)',
+  'Estado: PENDIENTE DE VALIDACION',
+  'Verificar productos y responder SOLO: aceptado o rechazado.',
+ ].join('\\n')
+ const h=harness({legacyText:oldDetail,upstream:{message:409}})
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})})
+ h.setReference(created.payload.externalReference)
+ const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(result.code,200)
+ assert.equal(result.payload.delivered,true)
+ assert.ok(result.payload.messageId)
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm','messages'])
+ const conflict=harness({upstream:{message:409}})
+ conflict.setReference(created.payload.externalReference)
+ const rejected=await conflict.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key},payload:createBody({customer})})
+ assert.equal(rejected.code,409)
+})
+
 test('stale local message scopes never reject; forged order references remain forbidden',async()=>{
  const key=randomUUID()
  const denied=harness({scopes:['queue.availability.read','interactions.create','interactions.read']})
@@ -248,7 +287,7 @@ test('stale local message scopes never reject; forged order references remain fo
  const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(reply.code,200)
- assert.deepEqual(denied.remote.map(x=>x.operation),['interaction','read','orderText'])
+ assert.deepEqual(denied.remote.map(x=>x.operation),['interaction','read','orderForm'])
  const forged=harness()
  forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
  const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
@@ -440,7 +479,7 @@ test('effective TU VERSO authorizations pass through as 401/403, not misleading 
  }
 })
 
-test('upstream failure to send text is authoritative while local order isolation is unchanged',async()=>{
+test('upstream failure to send FORM is authoritative while local order isolation is unchanged',async()=>{
  const key=randomUUID()
  const h=harness({scopes:[],upstream:{message:403}})
  const created=await h.call('POST','/api/v1/mobile/interactions',{
@@ -450,7 +489,7 @@ test('upstream failure to send text is authoritative while local order isolation
  const reply=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(reply.code,403)
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
  const other=harness({scopes:[]})
  const unauthorized=await other.call('GET',endpoint(storeB,appA))
  assert.equal(unauthorized.code,409)
