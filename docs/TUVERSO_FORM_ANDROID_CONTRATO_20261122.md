@@ -2,10 +2,10 @@
 
 ## Alcance y estado
 Implementado en la rama `fix/b3-mobile-form-to-tuverso-20261122`. Cambia **solamente** el envío
-del detalle del pedido: Administrador Web ahora produce `type:"FORM"` en la API S2S ya existente.
+del detalle del pedido: Android indica `type: "TEXT"` o `type: "FORM"` en `/message` y el Administrador mantiene esa elección en la API S2S.
 El frontend administrativo, Android, PostgreSQL, la integración con WhatsApp y pagos no se modifican.
 
-Los endpoints públicos de Android y los datos obligatorios **no cambian**.
+Los endpoints públicos de Android **no cambian**. Se añade un discriminador `type` en el envío de mensajes; los clientes anteriores sin `type` conservan su comportamiento TEXT.
 La API de TU VERSO PRE-F2/07 está publicada; el Administrador no debe exponer el token TU VERSO al móvil.
 
 ## Flujo que utiliza Android
@@ -33,47 +33,80 @@ sigue siendo compatible en lugar de `catalogRevision`. El Administrador sigue va
 sede, tenant, productos, precios y disponibilidad. Devuelve `interactionId`, `status` y
 `externalReference`. Si la creación se reintenta, usar la **misma** clave UUID.
 
-### 2. Enviar FORM (sin que Android construya el formulario)
+### 2. Enviar un mensaje: elegir explícitamente TEXT o FORM
+
 `POST /api/v1/mobile/interactions/{interactionId}/message`
 
-Cabecera: `X-Order-Access-Key: <mismo UUID de creación>`. El cuerpo es **el mismo JSON
-de negocio** del paso 1 (`appId`, `storeId`, `catalogRevision`, `customerExternalId`,
-`items`, `customer`), sin `Idempotency-Key` adicional; la URL ya incluye el `interactionId`.
-
-Respuesta de éxito: `{"interactionId":"<UUID>","delivered":true,"messageId":"<UUID>"}`.
-
-El backend construye desde el catálogo un formulario seguro, nunca acepta `type`, `form`,
-`title`, botones, texto libre o importes enviados por Android. Envía privadamente:
-
+Cabecera común:
 ```http
-POST https://api.tuverso.integra-b2g.com/api/v1/conversations/{interactionId}/messages
-Authorization: Bearer <CREDENCIAL_SERVIDOR>
+X-Order-Access-Key: <mismo UUID usado al crear la interacción>
 Content-Type: application/json
-Idempotency-Key: <UUID estable derivado de la interacción>
 ```
+
+**Opción FORM** (el agente verá Aceptar/Rechazar). El cuerpo contiene `type:"FORM"`
+junto a los mismos datos de pedido que en el paso 1:
 
 ```json
 {
   "type":"FORM",
-  "form":{
-    "title":"POLLOS B3 - SOLICITUD DE VALIDACION",
-    "subtitle":"Subtotal productos: S/ 40.00. Delivery pendiente. No preparar ni cobrar antes de la confirmación.",
-    "fields":[
-      {"variable":"Sede","value":"Nogales"},
-      {"variable":"Cliente","value":"Ana Quispe · +51 912345678 (sin verificar)"},
-      {"variable":"Entrega","value":"Delivery · Av. Ejemplo 123 · Santa Anita · Ref.: Portón lateral"},
-      {"variable":"Productos","value":"2 x Pollo A"}
-    ]
-  }
+  "appId":"com.integrab2g.pollosb3",
+  "storeId":"<UUID de sede>",
+  "catalogRevision":18,
+  "customerExternalId":"cliente-123",
+  "items":[{"productId":"<UUID de producto>","quantity":1}],
+  "customer":{"firstName":"Ana","lastName":"Quispe","phone":"912345678",
+    "address":"Av. Ejemplo 123","district":"Santa Anita","mode":"delivery"}
 }
 ```
 
-TU VERSO presenta los botones **Aceptar/Rechazar** en el propio chat del agente.
-El integrador no envía los botones. Hay hasta 5 campos, cada valor de hasta 500 caracteres;
-el backend **rechaza sin truncar** pedidos demasiado extensos para ese contrato.
-Conserva la clave de idempotencia en reintentos. Ante un 409 de un texto emitido antes del
-corte a FORM, reconoce la copia idéntica del mensaje anterior en el historial autorizado
-y no lo duplica.
+El Administrador **calcula el formulario desde el catálogo publicado y el contacto validado**.
+Android no envía `form`, `title`, `fields`, `text`, botones ni precios.
+Se envía a TU VERSO con `{"type":"FORM","form":{...}}`. El backend conserva
+una única clave de idempotencia del pedido para los reintentos, y no duplica un
+TEXT histórico idéntico cuando la respuesta previa ya quedó registrada.
+
+**Opción TEXT de pedido estructurado** (sin botones): enviar los mismos campos
+del ejemplo anterior, cambiando a `"type":"TEXT"`. El Administrador construye
+el resumen de texto a partir del catálogo y lo remite a TU VERSO como
+`{"type":"TEXT","text":"..."}`.
+
+**Opción TEXT libre**, para un mensaje de la aplicación dentro de una interacción ya
+autorizada. Solo admite estos cuatro campos, y exige un UUID diferente para cada
+nuevo mensaje:
+
+```http
+Idempotency-Key: <UUID nuevo por cada mensaje; conservar en reintentos>
+X-Order-Access-Key: <UUID original de creación>
+Content-Type: application/json
+```
+
+```json
+{
+  "type":"TEXT",
+  "appId":"com.integrab2g.pollosb3",
+  "storeId":"<UUID de sede>",
+  "text":"El cliente necesita modificar un producto."
+}
+```
+
+El Administrador revalida propietario, tenant, integración, sede y estado
+de conversación antes de enviar el texto. Prohíbe que un TEXT contenga campos de
+pedido o `form` simultáneamente; un FORM con `text` también se rechaza.
+`Idempotency-Key` no puede reutilizar la clave de acceso original.
+El envío libre permite saltos de línea, pero rechaza caracteres de control.
+
+**Clientes anteriores:** si Android omite `type` pero entrega el cuerpo estructurado
+de pedido original, el Administrador lo considera **TEXT**. No lo transforma en FORM
+por adivinación. Para obtener botones debe enviar expresamente `type:"FORM"`.
+
+Respuesta `200` cuando TU VERSO confirmó el mensaje:
+
+```json
+{"interactionId":"<UUID>","delivered":true,"messageId":"<UUID>","type":"FORM"}
+```
+
+El campo `type` confirma cómo se envió realmente el mensaje. `delivered:true`
+no representa la decisión del agente. Ningún token de TU VERSO sale del servidor.
 
 ### 3. Consultar la respuesta del agente
 `GET /api/v1/mobile/interactions/{interactionId}/status?appId=<appId>&storeId=<storeId>`
@@ -107,8 +140,8 @@ Cuando todas las sedes rechacen, ofrecer cambio de método de entrega, no recrea
 
 ### 4. Cancelación
 El contrato `POST /api/v1/mobile/interactions/{interactionId}/cancel` y su
-`X-Order-Access-Key` permanecen intactos. El aviso de cancelación sigue siendo
-un TEXT normal y no un FORM.
+`X-Order-Access-Key` permanecen intactos. El aviso de cancelación sigue siendo un TEXT de sistema generado por el servidor,
+independientemente del tipo elegido en el envío del pedido.
 
 ## Ejecución local del Administrador Web (sin migraciones)
 Desde `C:\Integra-B2G\Administrador Negocios`:
