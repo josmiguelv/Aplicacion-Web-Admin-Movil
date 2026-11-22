@@ -255,24 +255,48 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const interactionId=messageMatch[1],access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
     const input=await body(req)
-    if(!plainObject(input)||Object.keys(input).some(k=>!['appId','storeId','quoteRevision','catalogRevision','customerExternalId','items','customer'].includes(k))||
+    const requestedType=input?.type
+    // Pre-existing Android clients sent an order body without type. They remain
+    // TEXT for backward compatibility; new clients must select TEXT or FORM.
+    const type=requestedType??'TEXT'
+    const freeText=type==='TEXT'&&input?.text!==undefined
+    const orderKeys=['appId','storeId','type','quoteRevision','catalogRevision','customerExternalId','items','customer']
+    const textKeys=['appId','storeId','type','text']
+    const rawMessageKey=req.headers['idempotency-key']
+    if(!plainObject(input)||!['TEXT','FORM'].includes(type)||
        !APP.test(input.appId)||!VALID_UUID.test(input.storeId)||
-       (input.quoteRevision!==undefined&&input.catalogRevision!==undefined)||
-       !Number.isSafeInteger(input.catalogRevision??input.quoteRevision)||
-       (input.catalogRevision??input.quoteRevision)<1||!validText(input.customerExternalId,180))
-      throw fail(400,'Datos de solicitud de formulario inválidos')
-    // The Administrator derives the FORM from trusted published catalog and supplied contact.
+       Object.keys(input).some(k=>!(freeText?textKeys:orderKeys).includes(k))||
+       (freeText?(
+         requestedType!=='TEXT'||typeof input.text!=='string'||!input.text.trim()||
+         input.text.length>8000||/[\\x00-\\x09\\x0b-\\x1f]/.test(input.text)||
+         !VALID_UUID.test(rawMessageKey||'')||rawMessageKey===access
+       ):(
+         input.quoteRevision!==undefined&&input.catalogRevision!==undefined||
+         !Number.isSafeInteger(input.catalogRevision??input.quoteRevision)||
+         (input.catalogRevision??input.quoteRevision)<1||
+         !validText(input.customerExternalId,180)
+       )))
+      throw fail(400,'Mensaje MOBILE_APP inválido para el tipo solicitado')
+    // Never allow free-form Android text to impersonate an order FORM.
+    // Order fields are always rebuilt from the tenant's published catalog.
     const ctx=await context(input.appId,input.storeId,false)
     const session=await checkoutSessionState(pool,{interactionId,tenantId:ctx.tenantId,
      appId:input.appId,storeId:input.storeId,accessKey:access})
     if(['CANCELLED','EXPIRED','FINISHED'].includes(session))
      throw fail(409,'La solicitud ya está cerrada; no se enviarán más mensajes')
-    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))
-      throw fail(409,'El catálogo cambió: no se puede enviar un detalle de otra revisión')
-    const cart=calculateOrderCart(ctx.payload.products,input.items)
-    const customer=normalizeCustomer(input.customer)
-    if(!customer)throw fail(400,'Faltan datos del cliente para enviar el pedido')
-    const form=orderForm(cart,ctx.store,customer)
+    let text,form,legacyText
+    if(freeText){
+     text=input.text
+    }else{
+     if(ctx.revision!==(input.catalogRevision??input.quoteRevision))
+       throw fail(409,'El catálogo cambió: no se puede enviar un detalle de otra revisión')
+     const cart=calculateOrderCart(ctx.payload.products,input.items)
+     const customer=normalizeCustomer(input.customer)
+     if(!customer)throw fail(400,'Faltan datos del cliente para enviar el pedido')
+     legacyText=orderSummaryText(cart,ctx.store,customer)
+     if(type==='FORM')form=orderForm(cart,ctx.store,customer)
+     else text=legacyText
+    }
     const integration=await binding(ctx.tenantId,input.appId,input.storeId)
     const remote=await readInteraction(integration.token,interactionId)
     if(!remote.ok)throw fail(remote.httpStatus===404?404:remoteAuthStatus(remote),'No se pudo verificar la interacción')
@@ -283,21 +307,26 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
       throw fail(403,'Interacción no autorizada para esta aplicación y sede')
     if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED')
       throw fail(409,'La solicitud ya no permite enviar mensajes')
-    const delivered=await sendMessage(integration.token,interactionId,{
-     idempotencyKey:orderMessageIdempotency(access,interactionId),type:'FORM',form
-    })
-    // An already-delivered TEXT from before the cutover must not be resent
-    // as a second FORM on retry. Recognize ONLY its exact authorized history.
-    if(!delivered.ok&&delivered.httpStatus===409){
+    const delivered=await sendMessage(integration.token,interactionId,
+     type==='FORM'?{
+      idempotencyKey:orderMessageIdempotency(access,interactionId),type:'FORM',form
+     }:{
+      idempotencyKey:freeText?rawMessageKey:orderMessageIdempotency(access,interactionId),
+      type:'TEXT',text
+     })
+    // An already-delivered order TEXT from before the FORM cutover may hold
+    // the same deterministic idempotency key. Never insert a duplicate FORM.
+    // Never reinterpret an explicit TEXT request as an existing FORM.
+    if(type==='FORM'&&!delivered.ok&&delivered.httpStatus===409){
      const history=await readMessages(integration.token,interactionId)
      const prior=history.ok&&history.data?.interactionId===interactionId&&
       history.data.messages.find(item=>item.direction==='INBOUND'&&
-       item.text===orderSummaryText(cart,ctx.store,customer)&&VALID_UUID.test(item.id))
-     if(prior)return json(res,200,{interactionId,delivered:true,messageId:prior.id})
+       item.text===legacyText&&VALID_UUID.test(item.id))
+     if(prior)return json(res,200,{interactionId,delivered:true,messageId:prior.id,type:'TEXT'})
     }
     if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||''))
-      throw fail(delivered.httpStatus===409?409:remoteAuthStatus(delivered),'TU VERSO no confirmó el formulario del pedido')
-    return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId})
+      throw fail(delivered.httpStatus===409?409:remoteAuthStatus(delivered),'TU VERSO no confirmó el mensaje '+type)
+    return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId,type})
    }
    if(req.method!=='POST')throw fail(405,'Método no permitido')
    if(interactionMode()!=='LIVE'||checkMode()==='DISABLED')throw fail(503,'Interacciones TU VERSO no habilitadas')
