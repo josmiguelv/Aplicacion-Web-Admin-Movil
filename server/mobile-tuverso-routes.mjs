@@ -3,7 +3,7 @@ import {decryptCredential} from './integration-crypto.mjs'
 import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
-import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment} from './mobile-checkout-followups.mjs'
+import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const APP=/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,149}$/
@@ -28,16 +28,21 @@ const equals=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.lengt
 // Text-only mobile order briefing. Never trust product names, prices or store names from Android.
 function normalizeCustomer(input){
  if(input===undefined)return null // Backward compatibility for already-issued clients.
- if(!plainObject(input)||Object.keys(input).some(k=>!['firstName','lastName','phone','address','district','reference','mode'].includes(k))||
+ if(!plainObject(input)||Object.keys(input).some(k=>!['firstName','lastName','phone','email','phoneVerified','emailVerified','address','district','reference','mode'].includes(k))||
     input.mode!=='delivery'||!validText(input.firstName,60)||input.firstName.trim().length<2||
     !validText(input.lastName,60)||input.lastName.trim().length<2||
     typeof input.phone!=='string'||!/^9[0-9]{8}$/.test(input.phone)||
     !validText(input.address,180)||input.address.trim().length<6||
     !validText(input.district,80)||input.district.trim().length<2||
     (input.reference!==undefined&&(typeof input.reference!=='string'||input.reference.length>180||
-      /[\x00-\x1f]/.test(input.reference))))throw fail(400,'Datos de contacto o dirección inválidos')
+      /[\x00-\x1f]/.test(input.reference)))||
+    (input.email!==undefined&&(typeof input.email!=='string'||input.email.length>254||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)))||
+    (input.phoneVerified!==undefined&&input.phoneVerified!==false)||
+    (input.emailVerified!==undefined&&input.emailVerified!==false))throw fail(400,'Datos de contacto o dirección inválidos')
  return {firstName:input.firstName.trim(),lastName:input.lastName.trim(),
-  phone:input.phone,address:input.address.trim(),district:input.district.trim(),
+  phone:input.phone,email:input.email?.trim().toLowerCase(),
+  phoneVerified:false,emailVerified:false,address:input.address.trim(),district:input.district.trim(),
   reference:(input.reference||'').trim()}
 }
 function orderSummaryText(cart,store,customer){
@@ -149,6 +154,17 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
     const ctx=await context(input.appId,input.storeId,false)
+    const owner={interactionId,tenantId:ctx.tenantId,appId:input.appId,storeId:input.storeId,accessKey:access}
+    // A cancelled B3 order stays locally closed without polling upstream or
+    // delivering new messages, independently of TU VERSO availability.
+    const closed=await checkoutSessionState(pool,owner)
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(closed)){
+     if(operation==='status')return json(res,200,{interactionId,storeId:input.storeId,
+      status:closed,agentMessages:[],messagesAvailable:false})
+     if(operation==='cancel'&&closed==='CANCELLED')return json(res,200,{interactionId,status:'CANCELLED'})
+     if(operation==='payment'&&req.method==='GET')return json(res,200,{status:closed,expiresAt:null})
+     throw fail(409,'La solicitud ya se cerró y no admite más operaciones')
+    }
     if(interactionMode()!=='LIVE')throw fail(503,'Seguimiento de TU VERSO no disponible')
     const integration=await binding(ctx.tenantId,input.appId,input.storeId)
     const expected=reference(ctx.tenantId,input.appId,input.storeId,access)
@@ -157,11 +173,17 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
-    const owner={interactionId,tenantId:ctx.tenantId,appId:input.appId,storeId:input.storeId,accessKey:access}
     if(operation==='device')return json(res,200,await bindPersonalDevice(pool,owner,input.fcmToken))
     if(operation==='payment'){
      const data=req.method==='GET'?await readCheckoutPayment(pool,owner):await beginCheckoutPayment(pool,owner)
      return json(res,200,data)
+    }
+    // A canonical MOBILE_APP conversation may be closed before the customer
+    // presses Cancel. Do not attempt to send a message into an already closed chat.
+    const operationalConversationStatus=remote.data?.operationalConversationStatus
+    if(operation==='cancel'&&['CLOSED','RESOLVED'].includes(operationalConversationStatus)){
+     await closeCheckoutPayment(pool,owner)
+     return json(res,200,{interactionId,status:'CANCELLED'})
     }
     const history=await readMessages(integration.token,interactionId)
     // Interaction status and conversation history are independent requests.
@@ -180,12 +202,19 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
+    if(cancelled){
+     await closeCheckoutPayment(pool,owner)
+     return json(res,200,{interactionId,storeId:input.storeId,
+      status:'CANCELLED',agentMessages:[],messagesAvailable:false})
+    }
     // Relay verified conversation facts only. Android owns decision parsing, store
     // fallback and delivery-quote progression; the Administrator never decides.
     const agentMessages=messages.filter(message=>message.direction==='OUTBOUND')
      .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
-     status:cancelled?'CANCELLED':remote.data.status,agentMessages,messagesAvailable})
+     status:remote.data.status,agentMessages,messagesAvailable,
+     ...(['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
+      {operationalConversationStatus}:{})})
    }
    if(messageMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
@@ -201,6 +230,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
       throw fail(400,'Datos de solicitud de texto inválidos')
     // The Administrator derives text from trusted published catalog and supplied contact.
     const ctx=await context(input.appId,input.storeId,false)
+    const session=await checkoutSessionState(pool,{interactionId,tenantId:ctx.tenantId,
+     appId:input.appId,storeId:input.storeId,accessKey:access})
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(session))
+     throw fail(409,'La solicitud ya está cerrada; no se enviarán más mensajes')
     if(ctx.revision!==(input.catalogRevision??input.quoteRevision))
       throw fail(409,'El catálogo cambió: no se puede enviar un detalle de otra revisión')
     const cart=calculateOrderCart(ctx.payload.products,input.items)
@@ -251,7 +284,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    // Stable upstream reference for retries. The public caller cannot set location, queue, price or summary.
    const externalReference=reference(ctx.tenantId,input.appId,input.storeId,idempotencyKey)
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
-    customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey
+    customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey,
+     ...(customer?{customer:{firstName:customer.firstName,lastName:customer.lastName,
+      phone:'+51'+customer.phone,...(customer.email?{email:customer.email}:{}),
+      phoneVerified:false,emailVerified:false}}:{})
    })
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:remoteAuthStatus(result),'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||

@@ -16,9 +16,10 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',cancelled=false,messageFailure=false,historyFailure=false,upstream={}}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
+ const terminalSessions=new Map()
  let referenceForTest=''
  const pool={async query(sql,args){
   queries.push({sql,args})
@@ -33,8 +34,16 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   if(sql.includes('FROM integration_bindings b')){
    return {rowCount:count,rows:count?[{integration_id:integration,encrypted_credential:'ciphertext',expires_at:null,suspended:false,scopes,channel_type:'MOBILE_APP',binding_id:bindingId,external_location_id:args[2]===storeA?'location-a':'location-b',purpose:'ORDER_REQUEST'}]:[]}
   }
+  if(sql.startsWith('SELECT state FROM mobile_checkout_followups')){
+   const state=terminalSessions.get(args.join('|'))
+   return {rowCount:state?1:0,rows:state?[{state}]:[]}
+  }
   if(sql.startsWith('SELECT payment_wait_minutes'))return {rowCount:0,rows:[]}
   if(sql.startsWith('INSERT INTO mobile_checkout_followups')){
+   if(sql.includes('state,agent_notice_sent,expiry_notice_sent')){
+    terminalSessions.set(args.join('|'),'CANCELLED')
+    return {rowCount:1,rows:[{state:'CANCELLED'}]}
+   }
    if(sql.includes('fcm_token)'))return {rowCount:1,rows:[{interaction_id:args[0]}]}
    return {rowCount:1,rows:[{state:'PAYMENT_PENDING',checkout_expires_at:'2099-01-01T00:00:00Z'}]}
   }
@@ -53,7 +62,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    if(!createdIds.has(input.idempotencyKey))createdIds.set(input.idempotencyKey,randomUUID())
    return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
   },
-  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST'}}},
+  readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST',...(operationalConversationStatus?{operationalConversationStatus}:{})}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});if(historyFailure)return {ok:false,httpStatus:503,errorCode:'CONNECTION_FAILED'};return {ok:true,data:{interactionId:id,messages:[
    ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[])
@@ -165,6 +174,8 @@ test('create returns interactionId before chat text, and text delivery runs inde
  const sent=h.remote.find(x=>x.operation==='interaction')
  assert.ok(sent.input.summary.includes('2 x Pollo A'))
  assert.ok(!sent.input.summary.includes('+51'))
+ assert.deepEqual(sent.input.customer,{firstName:'Ana',lastName:'Quispe',
+  phone:'+51912345678',phoneVerified:false,emailVerified:false})
  h.setReference(response.payload.externalReference)
  const delivered=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
@@ -182,6 +193,20 @@ test('create returns interactionId before chat text, and text delivery runs inde
  assert.ok(message.length<=8000)
  assert.ok(!message.includes('deliveryFeePen'))
  assert.ok(!('phone' in response.payload))
+})
+test('optional email is forwarded in structured customer; unverified flags never claim verification',async()=>{
+ const h=harness()
+ const enriched={...customer,email:'ANA@Example.com',phoneVerified:false,emailVerified:false}
+ const created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:createBody({customer:enriched})})
+ assert.equal(created.code,201)
+ assert.deepEqual(h.remote[0].input.customer,{firstName:'Ana',lastName:'Quispe',
+  phone:'+51912345678',email:'ana@example.com',phoneVerified:false,emailVerified:false})
+ const legacy=harness()
+ const old=await legacy.call('POST','/api/v1/mobile/interactions',{
+  headers:headers(),payload:createBody()})
+ assert.equal(old.code,201)
+ assert.equal('customer' in legacy.remote[0].input,false)
 })
 test('replaying both steps uses one conversation ID and one deterministic message key',async()=>{
  const h=harness(),key=randomUUID()
@@ -238,7 +263,10 @@ test('contact injection, invalid cellphone and client price fields are rejected 
   {...customer,address:''},
   {...customer,mode:'pickup'},
   {...customer,reference:'A'.repeat(181)},
-  {...customer,subtotal:0}
+  {...customer,subtotal:0},
+  {...customer,email:'invalid-email'},
+  {...customer,phoneVerified:true},
+  {...customer,emailVerified:true}
  ]
  for(const bad of invalid){
   const h=harness()
@@ -284,7 +312,7 @@ test('cancellation status remains authoritative; inbound client text is not rela
   headers:{'x-order-access-key':key}})
  assert.equal(r.code,200)
  assert.equal(r.payload.status,'CANCELLED')
- assert.deepEqual(r.payload.agentMessages.map(m=>m.text),['Acepto'])
+ assert.deepEqual(r.payload.agentMessages,[])
  assert.equal('decision' in r.payload,false)
 })
 test('temporary history outage keeps accepted interaction pending for Android without inventing a reply',async()=>{
@@ -343,6 +371,46 @@ test('client cannot read decision with wrong key or other tenant',async()=>{
  const other=await h.call('GET','/api/v1/mobile/interactions/'+id+'/status?appId='+appB+'&storeId='+storeB,{headers:{'x-order-access-key':key}})
  assert.equal(other.code,403)
 })
+test('customer cancellation sends one notice then permanently blocks mobile messages and late replies',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({decisionMessage:'aceptado'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const path='/api/v1/mobile/interactions/'+id
+ const credentials={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ const cancel=await h.call('POST',path+'/cancel',credentials)
+ assert.equal(cancel.code,200)
+ assert.equal(cancel.payload.status,'CANCELLED')
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1)
+ assert.match(h.remote.find(x=>x.operation==='cancel').value.text,/El cliente canceló su compra/)
+ const callsBefore=h.remote.length
+ const replay=await h.call('POST',path+'/cancel',credentials)
+ assert.equal(replay.code,200)
+ assert.equal(h.remote.length,callsBefore,'a second cancellation must not post another message')
+ const status=await h.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(status.code,200)
+ assert.equal(status.payload.status,'CANCELLED')
+ assert.deepEqual(status.payload.agentMessages,[])
+ assert.equal(status.payload.messagesAvailable,false)
+ const payment=await h.call('GET',path+'/payment?appId='+appA+'&storeId='+storeA,{
+  headers:{'x-order-access-key':key}})
+ assert.equal(payment.code,200)
+ assert.equal(payment.payload.status,'CANCELLED')
+ const originalOrder=createBody({customer:{firstName:'Ana',lastName:'Flores',phone:'999999999',
+  mode:'delivery',address:'Av. Los Nogales 123',district:'Santa Anita'}})
+ const message=await h.call('POST',path+'/message',{
+  headers:{'x-order-access-key':key},payload:originalOrder})
+ assert.equal(message.code,409)
+ assert.equal(h.remote.length,callsBefore,'closed backend must never read or send to remote')
+})
+test('cancellation without prior notification registration persists a local closed state',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness()
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const cancelled=await h.call('POST','/api/v1/mobile/interactions/'+id+'/cancel',{
+  headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'MODIFY'}})
+ assert.equal(cancelled.code,200)
+ const inserts=h.queries.filter(x=>x.sql.startsWith('INSERT INTO mobile_checkout_followups')&&x.sql.includes('state,agent_notice_sent'))
+ assert.equal(inserts.length,1,'cancellation tombstone must be created even without a device token')
+})
 test('cart modification sends cancellation notice without marking a paid order',async()=>{
  const id=randomUUID(),key=randomUUID(),h=harness({decisionMessage:'aceptado'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
@@ -388,3 +456,34 @@ test('upstream failure to send text is authoritative while local order isolation
  assert.equal(unauthorized.code,409)
  assert.equal(other.remote.length,0)
 })
+
+test('closed MOBILE_APP agent conversation is visible and customer cancel is idempotent without message',async()=>{
+ const id=randomUUID(),key=randomUUID();
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48);
+ const path='/api/v1/mobile/interactions/'+id;
+ const owner={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}};
+ const closed=harness({remoteStatus:'ACCEPTED',operationalConversationStatus:'CLOSED',upstream:{message:409}});
+ closed.setReference(ref);
+ const status=await closed.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:owner.headers});
+ assert.equal(status.code,200);
+ assert.equal(status.payload.operationalConversationStatus,'CLOSED');
+ assert.equal(status.payload.messagesAvailable,true);
+ const cancelled=await closed.call('POST',path+'/cancel',owner);
+ assert.equal(cancelled.code,200);
+ assert.equal(cancelled.payload.status,'CANCELLED');
+ assert.equal(closed.remote.filter(x=>x.operation==='cancel').length,0);
+ const repeat=await closed.call('POST',path+'/cancel',owner);
+ assert.equal(repeat.code,200);
+ assert.equal(closed.remote.filter(x=>x.operation==='cancel').length,0);
+ const noHistory=harness({remoteStatus:'ACCEPTED',operationalConversationStatus:'RESOLVED',historyFailure:true});
+ noHistory.setReference(ref);
+ const read=await noHistory.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:owner.headers});
+ assert.equal(read.code,200);
+ assert.equal(read.payload.messagesAvailable,false);
+ assert.equal(read.payload.operationalConversationStatus,'RESOLVED',
+  'Verified closure is independent of message-history availability');
+ assert.equal((await noHistory.call('POST',path+'/cancel',owner)).code,200);
+ const unverified=harness({remoteStatus:'ACCEPTED',upstream:{message:409}});
+ unverified.setReference(ref);
+ assert.equal((await unverified.call('POST',path+'/cancel',owner)).code,409);
+});

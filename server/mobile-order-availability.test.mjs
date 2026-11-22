@@ -1,5 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+import {runInNewContext} from 'node:vm'
 import {createMobileOrderAvailabilityRoutes,calculateOrderCart} from './mobile-order-availability.mjs'
 
 const tenantA='11111111-1111-4111-8111-111111111111'
@@ -129,3 +131,46 @@ test('pending asesor rejection advances once to the next eligible tenant store',
  assert.equal(response.value.store.id,secondStore);assert.equal(response.value.deliveryFee,3);assert.deepEqual(response.value.paymentMethods,['card'])
  assert.equal(creates,1);assert.equal(availabilityChecks,1)
 })
+
+test('regression: published B3 delivery quote with GPS never crashes and preserves configured prices',async()=>{
+ // Execute the real quote function with isolated deterministic dependencies.
+ // Previously a reference to undefined hasAddress produced HTTP 500 for all
+ // valid GPS-based requests before any fee could be returned.
+ const source=readFileSync(new URL('./index.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('async function deliveryQuotes(')
+ const end=source.indexOf('\nasync function loadOrderContext(',start)
+ assert.ok(start>=0&&end>start)
+ const scope={
+  withLiveHours:store=>({...store,hoursConfigured:true,isOpen:true}),
+  checkLatLng:(lat,lng)=>Number.isFinite(lat)&&Number.isFinite(lng)&&
+   lat>=-90&&lat<=90&&lng>=-180&&lng<=180,
+  kmDistance:(a,b,c,d)=>Math.hypot(a-c,b-d)*111,
+  bad:(code,message)=>Object.assign(new Error(message),{code})
+ }
+ runInNewContext(source.slice(start,end),scope)
+ const first={id:'11111111-1111-4111-8111-111111111111',name:'Sede 1',
+  active:true,delivery_enabled:true,latitude:-12.050,longitude:-77.125,
+  radiusKm:7,deliveryPricingMode:'FIXED',deliveryFeePen:5,
+  paymentMethods:{delivery:['yape','cash']}}
+ const second={id:'22222222-2222-4222-8222-222222222222',name:'Sede 2',
+  active:true,delivery_enabled:true,latitude:-12.059,longitude:-77.139,
+  radiusKm:7,deliveryPricingMode:'PER_KM',deliveryRatePerKmPen:4,
+  paymentMethods:{delivery:['card']}}
+ const catalog={stores:[second,first],timeZone:'America/Lima'}
+ const target={latitude:-12.051,longitude:-77.124,useGps:true,storeId:first.id}
+ const actual=await scope.deliveryQuotes(catalog,target,24)
+ assert.equal(actual.length,1)
+ assert.equal(actual[0].storeId,first.id)
+ assert.equal(actual[0].deliveryFee,5)
+ assert.ok(Number.isFinite(actual[0].routeDistanceKm))
+ assert.equal(actual[0].routeDistanceKm,0.16)
+ assert.deepEqual(Array.from(actual[0].paymentMethods),['yape','cash'])
+ const rate=await scope.deliveryQuotes(catalog,{...target,storeId:second.id},24)
+ assert.equal(rate.length,1)
+ assert.equal(rate[0].storeId,second.id)
+ assert.equal(rate[0].deliveryFee,Number((Math.round(rate[0].routeDistanceKm*4*100)/100).toFixed(2)))
+ await assert.rejects(
+  ()=>scope.deliveryQuotes(catalog,{...target,useGps:false},24),
+  error=>error.code===422
+ )
+});
