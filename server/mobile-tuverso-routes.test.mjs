@@ -282,6 +282,7 @@ test('reject type confusion, cross-content fields, and unsafe TEXT before contac
  const invalid=[
   {body:{...createBody({customer}),type:'FORM',text:'aceptar'}},
   {body:{...createBody({customer}),type:'X'}},
+  {body:{...createBody({customer}),type:null}},
   {body:{...createBody({customer}),type:'TEXT',form:{title:'Fake',fields:[]}}},
   {body:{appId:appA,storeId:storeA,type:'FORM',text:'texto'}},
   {body:{appId:appA,storeId:storeA,type:'TEXT',text:'Hola',form:{title:'Mock',fields:[]}}},
