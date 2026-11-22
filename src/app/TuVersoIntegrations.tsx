@@ -5,17 +5,6 @@ type App = { app_id: string }
 type Binding = { id: string; appId: string | null; storeId: string; storeName: string; storeCode: string; externalLocationId: string; purpose: string; queueReference: string | null }
 type Check = { httpStatus: number | null; result: string | null; errorCode: string | null; message: string; checkedAt: string; simulation: boolean; bindingId: string }
 type Integration = { id: string; name: string; scopes: string[]; hasCredential: boolean; credentialHint: string | null; expiresAt: string | null; status: string; suspended: boolean; connectionMode: string; lastCheck: Check | null; bindings?: Binding[] }
-const scopeChoices = [
- { id: 'queue.availability.read', label: 'Consultar capacidad de atención', required: true },
- { id: 'interactions.create', label: 'Crear solicitudes de pedido' },
- { id: 'interactions.read', label: 'Consultar estado de la solicitud' },
- { id: 'conversations.read', label: 'Leer respuestas del asesor' },
- { id: 'conversations.messages.write', label: 'Enviar el pedido como mensaje de texto' },
- { id: 'interactions.events.read', label: 'Consultar eventos (opcional)' },
-] as const
-const textOrderScopes = ['queue.availability.read','interactions.create','interactions.read',
- 'conversations.read','conversations.messages.write']
-
 const statuses: Record<string, string> = {
  UNCONFIGURED: 'Sin clave registrada',
  CONFIGURED: 'Pendiente de comprobar',
@@ -54,15 +43,13 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
  const [loadingDetail, setLoadingDetail] = useState(false)
  const [error, setError] = useState('')
  const [notice, setNotice] = useState('')
- const [noticeAt, setNoticeAt] = useState<'connection' | 'overview' | 'key' | 'check' | 'locations' | 'toggle' | 'credential' | 'scopes'>('overview')
+ const [noticeAt, setNoticeAt] = useState<'connection' | 'overview' | 'key' | 'check' | 'locations' | 'toggle' | 'credential'>('overview')
  const [mode, setMode] = useState('DISABLED')
  const [binding, setBinding] = useState({ appId: '', storeId: '', purpose: '', externalLocationId: '', authorizationConfirmed: false })
  const [customPurpose, setCustomPurpose] = useState(false)
  const [addingBinding, setAddingBinding] = useState(false)
  const [removingBindingId, setRemovingBindingId] = useState('')
  const [bindingId, setBindingId] = useState('')
- const [localScopes, setLocalScopes] = useState<string[]>([])
- const [confirmScopeUpdate, setConfirmScopeUpdate] = useState(false)
  const [authorizeCheck, setAuthorizeCheck] = useState(false)
  const [editingKey, setEditingKey] = useState(false)
  const [confirmDelete, setConfirmDelete] = useState(false)
@@ -73,8 +60,6 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
  const bindings = detail?.bindings ?? []
  const selectedBinding = bindings.find(value => value.id === bindingId)
  const setup = creating || items.length === 0 || Boolean(detail && !detail.hasCredential)
- const localScopesChanged = Boolean(detail && JSON.stringify([...localScopes].sort()) !== JSON.stringify([...(detail.scopes || [])].sort()))
- const textOrderReady = textOrderScopes.every(value => (detail?.scopes || []).includes(value))
 
  useEffect(() => {
   const controller = new AbortController()
@@ -118,10 +103,6 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
  }, [root, selectedId])
 
  useEffect(() => {
-  setLocalScopes(Array.isArray(detail?.scopes)?detail.scopes:[])
-  setConfirmScopeUpdate(false)
- }, [detail])
- useEffect(() => {
   const ids = detail?.bindings?.map(value => value.id) ?? []
   setBindingId(previous => ids.includes(previous) ? previous : ids.length === 1 ? ids[0] : '')
   setAuthorizeCheck(false)
@@ -133,10 +114,10 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
   setMode(list.connectionMode)
   if (id) setDetail(await api<Integration>(root + '/' + id))
  }
- const notify = (message: string, area: 'connection' | 'overview' | 'key' | 'check' | 'locations' | 'toggle' | 'credential' | 'scopes') => {
+ const notify = (message: string, area: 'connection' | 'overview' | 'key' | 'check' | 'locations' | 'toggle' | 'credential') => {
   setNoticeAt(area); setNotice(message)
  }
- const inlineNotice = (area: 'connection' | 'overview' | 'key' | 'check' | 'locations' | 'toggle' | 'credential' | 'scopes') =>
+ const inlineNotice = (area: 'connection' | 'overview' | 'key' | 'check' | 'locations' | 'toggle' | 'credential') =>
   notice && noticeAt === area ? <p className="portal-notice integration-inline-notice" role="status">{notice}</p> : null
  const run = async (work: () => Promise<void>) => {
   setBusy(true); setError(''); setNotice('')
@@ -215,7 +196,7 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
 
  return <section aria-label="Integración TU VERSO" className="integration-page">
   <div className="portal-title"><div><h1>Integraciones → TU VERSO</h1>
-   <p className="portal-muted">Empresa: <strong>{tenantName}</strong> · Permisos locales de disponibilidad y atención de pedidos. TU VERSO conserva el control de autorizaciones reales.</p>
+   <p className="portal-muted">Empresa: <strong>{tenantName}</strong> · TU VERSO autoriza la credencial; este administrador valida empresa, sede y pedido.</p>
   </div></div>
   {error && <p className="portal-error" role="alert">{error}</p>}
  
@@ -275,42 +256,10 @@ export default function TuVersoIntegrations({ tenantId, tenantName }: { tenantId
      <button className="portal-outline" type="button" disabled={busy} onClick={() => setEditingKey(false)}>Cancelar cambio de clave</button>
     </section>}
 
-    <section className="portal-panel integration-scope-panel" aria-label="Permisos locales de integración">
-     <h2>Permisos locales de integración</h2>
-     <p className="portal-muted">Si aparece el HTTP 409 «La integración no está habilitada para esta operación», revisa los permisos configurados aquí. Solo se cambia el Administrador Web: TU VERSO y la credencial emitida no se modifican.</p>
-     <p className="integration-feedback">{textOrderReady ?
-       'Permisos locales para pedidos por texto: completos. La autorización efectiva depende de TU VERSO.' :
-       'Permisos locales para pedidos por texto: incompletos. Comprueba cuáles están autorizados en tu credencial antes de guardarlos.'}</p>
-     <form className="portal-form" onSubmit={e => {e.preventDefault();void run(async()=>{
-       if (!confirmScopeUpdate || !localScopes.includes('queue.availability.read')) return
-       await api(root + '/' + selectedId, 'PUT', {scopes: localScopes})
-       await refresh()
-       setConfirmScopeUpdate(false)
-       notify('Permisos locales guardados. TU VERSO no fue modificado.', 'scopes')
-     })}}>
-      <div className="integration-fields">
-       {scopeChoices.map(scope => <label className="integration-check" key={scope.id}>
-        <input type="checkbox" aria-label={scope.label}
-         checked={localScopes.includes(scope.id)} disabled={busy || ('required' in scope && scope.required)}
-         onChange={e => {setConfirmScopeUpdate(false);setLocalScopes(current =>
-          e.target.checked ? [...current,scope.id] : current.filter(x=>x!==scope.id))}}/>
-        {scope.label}{'required' in scope && scope.required ? ' (obligatorio)' : ''}
-       </label>)}
-      </div>
-      <button type="button" className="portal-outline" disabled={busy} onClick={()=>{
-       setLocalScopes(current => [...new Set([...current,...textOrderScopes])]);setConfirmScopeUpdate(false)
-      }}>Seleccionar permisos de pedidos por texto</button>
-      {localScopesChanged && <label className="integration-check">
-       <input type="checkbox" checked={confirmScopeUpdate} disabled={busy}
-        onChange={e=>setConfirmScopeUpdate(e.target.checked)}/>
-       Confirmo que la credencial de TU VERSO ya tiene autorizados los permisos seleccionados.
-      </label>}
-      <button type="submit" className="portal-primary"
-       disabled={busy || !localScopesChanged || !confirmScopeUpdate ||
-        !localScopes.includes('queue.availability.read')}>Guardar permisos locales</button>
-      {inlineNotice('scopes')}
-      <p className="portal-muted">Para el flujo completo de pedidos se requiere consulta de capacidad, creación y lectura de interacciones, lectura y escritura de mensajes. Si TU VERSO no concedió alguno a la credencial, la solicitud seguirá siendo rechazada. No se modifica TU VERSO.</p>
-     </form>
+    <section className="portal-panel integration-scope-panel" aria-label="Autorización de TU VERSO">
+     <h2>Autorización de TU VERSO</h2>
+     <p className="portal-muted">Los permisos de disponibilidad, solicitudes y mensajes se gestionan en TU VERSO. Aquí solo configuramos la conexión y su sede, sin copiar ni autorizar scopes.</p>
+     <p className="portal-muted">Cada operación usa la credencial real. TU VERSO acepta o rechaza el acceso según los permisos vigentes.</p>
     </section>
 
     <form className="portal-panel portal-form integration-check-panel"
