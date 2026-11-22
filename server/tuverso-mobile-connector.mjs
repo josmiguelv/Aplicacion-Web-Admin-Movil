@@ -29,11 +29,20 @@ const normalizeBinding=b=>{
  if(!field(location,180)||!purpose(b?.purpose))throw Error('TUVERSO_BINDING_INVALID')
  return {externalLocationId:location,purpose:b.purpose}
 }
+function validCustomer(c){
+ return c&&typeof c==='object'&&!Array.isArray(c)&&
+  Object.keys(c).every(k=>['firstName','lastName','phone','email','phoneVerified','emailVerified'].includes(k))&&
+  field(c.firstName,60)&&field(c.lastName,60)&&/^\+519\d{8}$/.test(c.phone)&&
+  (c.email===undefined||(typeof c.email==='string'&&c.email.length<=254&&
+   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)))&&
+  c.phoneVerified===false&&c.emailVerified===false
+}
 function validRequest(input){
  if(!input||typeof input!=='object'||Array.isArray(input)||
-    Object.keys(input).some(k=>!['customerExternalId','externalReference','summary','idempotencyKey'].includes(k))||
+    Object.keys(input).some(k=>!['customerExternalId','externalReference','summary','idempotencyKey','customer'].includes(k))||
     !field(input.customerExternalId,180)||!field(input.externalReference,180)||
-    !field(input.summary,1200)||!id(input.idempotencyKey))throw Error('TUVERSO_REQUEST_INVALID')
+    !field(input.summary,1200)||!id(input.idempotencyKey)||
+    (input.customer!==undefined&&!validCustomer(input.customer)))throw Error('TUVERSO_REQUEST_INVALID')
  return input
 }
 async function readBoundedJson(response){
@@ -118,7 +127,8 @@ export async function createMobileInteraction(token,binding,input){
  const b=validRequest(input)
  return perform(token,'create','/api/v1/interactions',{method:'POST',idempotencyKey:b.idempotencyKey,
   requestBody:{externalLocationId,purpose:kind,customerExternalId:b.customerExternalId,
-   externalReference:b.externalReference,summary:b.summary}})
+   externalReference:b.externalReference,summary:b.summary,
+    ...(b.customer?{customer:b.customer}:{})}})
 }
 export async function readMobileInteraction(token,interactionId){
  if(!id(interactionId))throw Error('TUVERSO_INTERACTION_INVALID')
