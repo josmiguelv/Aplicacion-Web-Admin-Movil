@@ -47,8 +47,25 @@ export async function readCheckoutPayment(pool,params) {
  const row=r.rows[0],expired=row.state==='PAYMENT_PENDING'&&row.checkout_expires_at&&new Date(row.checkout_expires_at)<=new Date()
  return {status:expired?'EXPIRED':row.state,expiresAt:row.checkout_expires_at}
 }
+// A canceled order remains a durable authorization-scoped tombstone even when
+// the customer never granted notification permission / never registered FCM.
+export async function checkoutSessionState(pool,params) {
+ const result=await pool.query('SELECT state FROM mobile_checkout_followups WHERE '+ownership(),keys(params))
+ return result.rowCount===1?result.rows[0].state:null
+}
 export async function closeCheckoutPayment(pool,params) {
- await pool.query('UPDATE mobile_checkout_followups SET state=\'CANCELLED\',fcm_token=NULL,updated_at=now() WHERE '+ownership()+' AND state IN (\'WAITING\',\'PAYMENT_PENDING\')',keys(params))
+ const result=await pool.query(
+  "INSERT INTO mobile_checkout_followups(interaction_id,tenant_id,app_id,store_id,access_hash,state,agent_notice_sent,expiry_notice_sent) "+
+  "VALUES($1,$2,$3,$4,$5,'CANCELLED',true,true) "+
+  "ON CONFLICT(interaction_id) DO UPDATE SET state='CANCELLED',fcm_token=NULL,agent_notice_sent=true,expiry_notice_sent=true,updated_at=now() "+
+  "WHERE mobile_checkout_followups.tenant_id=excluded.tenant_id "+
+  "AND mobile_checkout_followups.app_id=excluded.app_id "+
+  "AND mobile_checkout_followups.store_id=excluded.store_id "+
+  "AND mobile_checkout_followups.access_hash=excluded.access_hash "+
+  "AND mobile_checkout_followups.state IN ('WAITING','PAYMENT_PENDING','CANCELLED') RETURNING state",
+  keys(params))
+ if(result.rowCount!==1)throw FAIL(409,'La compra ya terminó o esta solicitud no pertenece al cliente')
+ return {status:'CANCELLED'}
 }
 const uuidFrom=(value)=>{
  const bytes=Buffer.from(hash(value).slice(0,32),'hex')
