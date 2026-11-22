@@ -25,7 +25,7 @@ const orderMessageIdempotency=(key,interactionId)=>{
 }
 const equals=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&
  timingSafeEqual(Buffer.from(a),Buffer.from(b))
-// Text-only mobile order briefing. Never trust product names, prices or store names from Android.
+// Retained only to recognize in-flight TEXT messages sent before the FORM cutover.
 function normalizeCustomer(input){
  if(input===undefined)return null // Backward compatibility for already-issued clients.
  if(!plainObject(input)||Object.keys(input).some(k=>!['firstName','lastName','phone','email','phoneVerified','emailVerified','address','district','reference','mode'].includes(k))||
@@ -65,6 +65,39 @@ function orderSummaryText(cart,store,customer){
  // TU VERSO supports 8000 characters per conversation message. Never truncate silently.
  if(message.length>8000)throw fail(422,'El detalle del pedido supera el limite de texto permitido. Reduce los productos o la longitud de los datos.')
  return message
+}
+// The Android payload contains IDs and quantities, never a trusted FORM.
+// Build the 1–5 structured fields exclusively from the published catalog and
+// the normalized, unverified customer profile. Never truncate order details.
+function orderForm(cart,store,customer){
+ const prefix='Solicitud de validación de pedido: '
+ const suffix='. Subtotal '+cart.subtotal.toFixed(2)+'.'
+ if(!cart.summary.startsWith(prefix)||!cart.summary.endsWith(suffix))
+  throw fail(422,'No se pudo reconstruir el detalle del catálogo')
+ let remaining=cart.summary.slice(prefix.length,-suffix.length)
+ const products=[]
+ while(remaining.length>500&&products.length<2){
+  const delimiter=remaining.lastIndexOf(', ',500)
+  const split=delimiter>=100?delimiter:500
+  products.push(remaining.slice(0,split).trim())
+  remaining=remaining.slice(split+(split===delimiter?2:0)).trim()
+ }
+ products.push(remaining.trim())
+ if(products.length>2||products.some(part=>!part||part.length>500))
+  throw fail(422,'El pedido supera el límite de información del formulario. Reduce los productos.')
+ const form={
+  title:'POLLOS B3 - SOLICITUD DE VALIDACION',
+  subtitle:'Subtotal productos: S/ '+cart.subtotal.toFixed(2)+'. Delivery pendiente. No preparar ni cobrar antes de la confirmación.',
+  fields:[
+   {variable:'Sede',value:String(store.name||'Sede').trim()},
+   {variable:'Cliente',value:customer.firstName+' '+customer.lastName+' · +51 '+customer.phone+' (sin verificar)'},
+   {variable:'Entrega',value:'Delivery · '+customer.address+' · '+customer.district+(customer.reference?' · Ref.: '+customer.reference:'')},
+   ...products.map((value,index)=>({variable:products.length===1?'Productos':'Productos ('+(index+1)+'/2)',value})),
+  ],
+ }
+ if(form.fields.some(item=>!item.value.trim()||item.value.trim().length>500))
+  throw fail(422,'La información de la solicitud supera el tamaño permitido del formulario')
+ return form
 }
 function throttled(req){
  const key=req.socket?.remoteAddress||'unknown',now=Date.now()
@@ -227,8 +260,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        (input.quoteRevision!==undefined&&input.catalogRevision!==undefined)||
        !Number.isSafeInteger(input.catalogRevision??input.quoteRevision)||
        (input.catalogRevision??input.quoteRevision)<1||!validText(input.customerExternalId,180))
-      throw fail(400,'Datos de solicitud de texto inválidos')
-    // The Administrator derives text from trusted published catalog and supplied contact.
+      throw fail(400,'Datos de solicitud de formulario inválidos')
+    // The Administrator derives the FORM from trusted published catalog and supplied contact.
     const ctx=await context(input.appId,input.storeId,false)
     const session=await checkoutSessionState(pool,{interactionId,tenantId:ctx.tenantId,
      appId:input.appId,storeId:input.storeId,accessKey:access})
@@ -239,7 +272,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const cart=calculateOrderCart(ctx.payload.products,input.items)
     const customer=normalizeCustomer(input.customer)
     if(!customer)throw fail(400,'Faltan datos del cliente para enviar el pedido')
-    const text=orderSummaryText(cart,ctx.store,customer)
+    const form=orderForm(cart,ctx.store,customer)
     const integration=await binding(ctx.tenantId,input.appId,input.storeId)
     const remote=await readInteraction(integration.token,interactionId)
     if(!remote.ok)throw fail(remote.httpStatus===404?404:remoteAuthStatus(remote),'No se pudo verificar la interacción')
@@ -251,10 +284,19 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED')
       throw fail(409,'La solicitud ya no permite enviar mensajes')
     const delivered=await sendMessage(integration.token,interactionId,{
-     idempotencyKey:orderMessageIdempotency(access,interactionId),text
+     idempotencyKey:orderMessageIdempotency(access,interactionId),type:'FORM',form
     })
+    // An already-delivered TEXT from before the cutover must not be resent
+    // as a second FORM on retry. Recognize ONLY its exact authorized history.
+    if(!delivered.ok&&delivered.httpStatus===409){
+     const history=await readMessages(integration.token,interactionId)
+     const prior=history.ok&&history.data?.interactionId===interactionId&&
+      history.data.messages.find(item=>item.direction==='INBOUND'&&
+       item.text===orderSummaryText(cart,ctx.store,customer)&&VALID_UUID.test(item.id))
+     if(prior)return json(res,200,{interactionId,delivered:true,messageId:prior.id})
+    }
     if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||''))
-      throw fail(delivered.httpStatus===409?409:remoteAuthStatus(delivered),'TU VERSO no confirmó el texto del pedido')
+      throw fail(delivered.httpStatus===409?409:remoteAuthStatus(delivered),'TU VERSO no confirmó el formulario del pedido')
     return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId})
    }
    if(req.method!=='POST')throw fail(405,'Método no permitido')
