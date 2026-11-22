@@ -3,7 +3,7 @@ import {decryptCredential} from './integration-crypto.mjs'
 import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
-import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment} from './mobile-checkout-followups.mjs'
+import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const APP=/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,149}$/
@@ -150,6 +150,17 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
     const ctx=await context(input.appId,input.storeId,false)
+    const owner={interactionId,tenantId:ctx.tenantId,appId:input.appId,storeId:input.storeId,accessKey:access}
+    // Local terminal-state tombstones take precedence over remote history, even
+    // when TU VERSO is temporarily unreachable. Never relay late agent replies.
+    const closed=await checkoutSessionState(pool,owner)
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(closed)){
+     if(operation==='status')return json(res,200,{interactionId,storeId:input.storeId,
+      status:closed,agentMessages:[],messagesAvailable:false})
+     if(operation==='cancel'&&closed==='CANCELLED')return json(res,200,{interactionId,status:'CANCELLED'})
+     if(operation==='payment'&&req.method==='GET')return json(res,200,{status:closed,expiresAt:null})
+     throw fail(409,'La solicitud ya se cerró y no admite más operaciones')
+    }
     if(interactionMode()!=='LIVE')throw fail(503,'Seguimiento de TU VERSO no disponible')
     const integration=await binding(ctx.tenantId,input.appId,input.storeId,operation==='cancel'?'cancel':'status')
     const expected=reference(ctx.tenantId,input.appId,input.storeId,access)
@@ -158,7 +169,6 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
-    const owner={interactionId,tenantId:ctx.tenantId,appId:input.appId,storeId:input.storeId,accessKey:access}
     if(operation==='device')return json(res,200,await bindPersonalDevice(pool,owner,input.fcmToken))
     if(operation==='payment'){
      const data=req.method==='GET'?await readCheckoutPayment(pool,owner):await beginCheckoutPayment(pool,owner)
@@ -181,12 +191,17 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
+    if(cancelled){
+     await closeCheckoutPayment(pool,owner)
+     return json(res,200,{interactionId,storeId:input.storeId,
+      status:'CANCELLED',agentMessages:[],messagesAvailable:false})
+    }
     // Relay verified conversation facts only. Android owns decision parsing, store
     // fallback and delivery-quote progression; the Administrator never decides.
     const agentMessages=messages.filter(message=>message.direction==='OUTBOUND')
      .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
-     status:cancelled?'CANCELLED':remote.data.status,agentMessages,messagesAvailable})
+     status:remote.data.status,agentMessages,messagesAvailable})
    }
    if(messageMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
@@ -202,6 +217,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
       throw fail(400,'Datos de solicitud de texto inválidos')
     // The Administrator derives text from trusted published catalog and supplied contact.
     const ctx=await context(input.appId,input.storeId,false)
+    const session=await checkoutSessionState(pool,{interactionId,tenantId:ctx.tenantId,
+     appId:input.appId,storeId:input.storeId,accessKey:access})
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(session))
+     throw fail(409,'La solicitud ya está cerrada; no se enviarán más mensajes')
     if(ctx.revision!==(input.catalogRevision??input.quoteRevision))
       throw fail(409,'El catálogo cambió: no se puede enviar un detalle de otra revisión')
     const cart=calculateOrderCart(ctx.payload.products,input.items)
