@@ -139,7 +139,9 @@ async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
   (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
  if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
  if(candidates.length>12)throw bad(503,'Demasiadas sedes para cotizar en una sola operación');
- if(hasCoordinates&&!hasAddress)candidates.sort((a,b2)=>kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
+ // The supplied GPS/geocoded coordinates are the only distance input here.
+ // Do not reference an address flag: the candidates are sorted by the measured
+ // straight-line distance below (after coverage checks).
  const available=[];
  for(const store of candidates){
   const km=Math.round(kmDistance(store.latitude,store.longitude,destination.latitude,destination.longitude)*100)/100;
