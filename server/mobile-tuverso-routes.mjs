@@ -90,7 +90,7 @@ function orderForm(cart,store,customer){
   subtitle:'Subtotal productos: S/ '+cart.subtotal.toFixed(2)+'. Delivery pendiente. No preparar ni cobrar antes de la confirmación.',
   fields:[
    {variable:'Sede',value:String(store.name||'Sede').trim()},
-   {variable:'Cliente',value:customer.firstName+' '+customer.lastName+' · +51 '+customer.phone+' (sin verificar)'},
+   {variable:'Cliente',value:customer.firstName+' '+customer.lastName+' · +51 '+customer.phone+' (sin verificar)'+(customer.email?' · '+customer.email:'')},
    {variable:'Entrega',value:'Delivery · '+customer.address+' · '+customer.district+(customer.reference?' · Ref.: '+customer.reference:'')},
    ...products.map((value,index)=>({variable:products.length===1?'Productos':'Productos ('+(index+1)+'/2)',value})),
   ],
