@@ -43,8 +43,48 @@ X-Order-Access-Key: <mismo UUID usado al crear la interacción>
 Content-Type: application/json
 ```
 
-**Opción FORM** (el agente verá Aceptar/Rechazar). El cuerpo contiene `type:"FORM"`
-junto a los mismos datos de pedido que en el paso 1:
+**Opción FORM personalizado desde Android** (el agente verá Aceptar/Rechazar).
+En este formato Android define el título, subtítulo y entre una y cinco filas de
+`variable` + `value` sin necesidad de incluir los productos del catálogo.
+Cada formulario es un mensaje independiente, por lo que requiere las cabeceras:
+
+```http
+Idempotency-Key: <UUID nuevo por formulario, constante en sus reintentos>
+X-Order-Access-Key: <UUID original de la interacción>
+Content-Type: application/json
+```
+
+```json
+{
+  "type": "FORM",
+  "appId": "com.integrab2g.pollosb3",
+  "storeId": "<UUID de sede>",
+  "form": {
+    "title": "VALIDACIÓN DE PEDIDO",
+    "subtitle": "Confirmar disponibilidad para delivery",
+    "fields": [
+      {"variable":"Cliente","value":"Ana Quispe"},
+      {"variable":"Teléfono","value":"912345678"},
+      {"variable":"Productos","value":"2 pollos a la brasa"},
+      {"variable":"Subtotal","value":"S/ 90.00"},
+      {"variable":"Dirección","value":"Av. Principal 123, Santa Anita"}
+    ]
+  }
+}
+```
+
+Cada elemento de `fields` se muestra como una fila por separado en el chat de TU VERSO.
+Restricciones: título 1–180 caracteres, subtítulo opcional hasta 350, de 1 a 5
+filas, etiqueta de 1–80 y valor de 1–500 caracteres. No se permiten nombres de
+variable duplicados, propiedades desconocidas ni caracteres de control en esos campos.
+El Administrador verifica que la interacción pertenece a esa aplicación, sede,
+tenant y credencial, y transmite los valores como información, **nunca** como
+prueba de pago, precio autorizado ni aprobación automática del pedido. Android no
+envía los botones: TU VERSO los crea.
+
+**Opción FORM de pedido estructurado** (compatibilidad con el flujo Pollos B3).
+Android puede omitir `form` e incluir `type:"FORM"` junto a los mismos datos de
+pedido que en el paso 1:
 
 ```json
 {
@@ -59,11 +99,12 @@ junto a los mismos datos de pedido que en el paso 1:
 }
 ```
 
-El Administrador **calcula el formulario desde el catálogo publicado y el contacto validado**.
-Android no envía `form`, `title`, `fields`, `text`, botones ni precios.
-Se envía a TU VERSO con `{"type":"FORM","form":{...}}`. El backend conserva
-una única clave de idempotencia del pedido para los reintentos, y no duplica un
-TEXT histórico idéntico cuando la respuesta previa ya quedó registrada.
+En **esta alternativa de pedido estructurado**, el Administrador calcula el
+formulario desde el catálogo publicado y el contacto validado. Android no envía
+`form` junto a `items` ni envía texto libre en ese mensaje. Se envía a TU VERSO
+con `{"type":"FORM","form":{...}}`. El backend conserva la clave de idempotencia
+del pedido y no duplica un TEXT histórico idéntico. Los dos formatos FORM son
+excluyentes: **o `form` con sus filas, o datos de pedido estructurados**.
 
 **Opción TEXT de pedido estructurado** (sin botones): enviar los mismos campos
 del ejemplo anterior, cambiando a `"type":"TEXT"`. El Administrador construye
@@ -90,8 +131,8 @@ Content-Type: application/json
 ```
 
 El Administrador revalida propietario, tenant, integración, sede y estado
-de conversación antes de enviar el texto. Prohíbe que un TEXT contenga campos de
-pedido o `form` simultáneamente; un FORM con `text` también se rechaza.
+de conversación antes de enviar cada mensaje. Prohíbe que un TEXT libre contenga
+campos de pedido o `form` simultáneamente; un FORM con `text` también se rechaza.
 `Idempotency-Key` no puede reutilizar la clave de acceso original.
 El envío libre permite saltos de línea, pero rechaza caracteres de control.
 
