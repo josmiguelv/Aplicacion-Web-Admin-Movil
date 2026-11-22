@@ -190,3 +190,14 @@ La aplicación móvil es propietaria del estado y la decisión: primero respeta 
 `POST /api/v1/mobile/interactions/{interactionId}/message` es una segunda operación autenticada con `X-Order-Access-Key` (la clave original de creación), el mismo cuerpo de pedido firmado por la sesión Android y validación del tenant/sede/referencia externa. El Administrador recalcula el texto con datos del catálogo publicado y del cliente, nunca toma texto arbitrario o precios del teléfono. Verifica la interacción remotamente y envía el texto con `orderMessageIdempotency` estable; si falla, devuelve error **solo para el mensaje**, sin anular la interacción ya creada. No se permite uso transversal de credenciales o sedes.
 
 Los límites de lectura HTTP protegen del fallo de red y no deben ser usados como plazo máximo de atención. El Administrador no asigna expiraciones comerciales ni cierra conversaciones por un timeout de red; la expiración/cancelación proviene del contrato formal de TU VERSO o de la decisión explícita del comprador. El control del tiempo de respuesta del agente corresponde exclusivamente a la configuración real de TU VERSO. Es obligatorio actualizar el Administrador y Android juntos.
+
+
+### Identidad estructurada hacia TU VERSO (22/11/2026)
+
+El Administrador recibe customer opcional en POST /api/v1/mobile/interactions. Si existe, exige los campos ya utilizados en delivery (firstName, lastName, phone peruano de 9 dígitos, address, district y mode=delivery). Acepta email opcional, phoneVerified=false y emailVerified=false; rechaza indicadores true sin evidencia de verificación del servidor.
+
+En la llamada privada POST /api/v1/interactions hacia TU VERSO, incorpora customer con firstName, lastName, phone normalizado a +51 y email si se recibió, junto a phoneVerified=false y emailVerified=false. La dirección se conserva solamente para el mensaje del pedido. Las solicitudes previas sin customer siguen funcionando sin el nuevo objeto. No cambia el flujo de aprobación, pagos, sede, idempotencia o mensajes.
+
+Ejemplo de customer enviado: {"firstName":"Ana","lastName":"Quispe","phone":"+51912345678","email":"ana@example.com","phoneVerified":false,"emailVerified":false}.
+
+Estado: cambios en rama de desarrollo; no certificados en producción. La prueba de integración real con TU VERSO debe verificar que el contrato remoto acepta el nuevo objeto.
