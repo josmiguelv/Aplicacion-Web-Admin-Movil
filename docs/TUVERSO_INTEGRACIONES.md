@@ -300,3 +300,17 @@ Estas pruebas acreditan el comportamiento del administrador ante simulaciones.
 una cuenta/instancia, cola y Flow autorizados, credencial legítima, licencia/scopes
 vigentes y autorización explícita de consulta. Fase 1B permanece deshabilitada;
 no se implementan interacciones, conversaciones, mensajes, pedidos ni cobros.
+
+
+## PRE-F2/08 — Autorización efectiva en TU VERSO (21/11/2026)
+
+**Base del ajuste:** commit `d36df6c4397aa8496503e51baa4ffa84c1669fb5` de la rama `feat/b3-checkout-personal-followup-20261121`. Se conservan las funciones de checkout, notificaciones personales y respuesta del agente añadidas hasta ese commit.
+
+**Corrección exclusivamente del Administrador Web:**
+- El servidor `server/mobile-tuverso-routes.mjs` deja de usar la columna histórica `tenant_integrations.scopes` para **denegar** consultas, creaciones, seguimiento, cancelaciones o mensajes. **Sigue exigiendo** catálogo publicado, empresa/APP/sede activas, vinculación `ORDER_REQUEST` expresamente autorizada, credencial cifrada presente, estado local no suspendido, vigencia declarada, tipo MOBILE_APP, clave personal de seguimiento, equivalencia de `externalReference`, sede, propósito e idempotencia.
+- `server/integrations.mjs` ya no bloquea el envío directo por un supuesto `interactions.create` ausente del reflejo local. Respeta sesión SUPER_ADMIN, vínculo exacto, credencial y respuesta real de TU VERSO.
+- `src/app/TuVersoIntegrations.tsx` deja de ofrecer edición de permisos locales. Explica que **TU VERSO es la fuente de autorización**. Por compatibilidad de datos el campo de scopes histórico existente permanece en la tabla y las respuestas administrativas, pero **no define permisos efectivos** ni requiere migración o limpieza destructiva.
+- Un rechazo **401/403 desde TU VERSO** se transmite como tal en los endpoints móviles; otros errores no se redefinen arbitrariamente como fallas de permisos. No se muestran tokens ni mensajes internos del upstream al cliente.
+- TU VERSO conserva verificación de bearer, scopes efectivos, licencias, entitlements, tenant/cuenta/instancia y sede. No se modifica su repositorio, no se activan ni revocan credenciales y **no se relajan** autorizaciones por empresa ni identidad del pedido.
+
+**Alcance de pruebas:** `node --test server/mobile-tuverso-routes.test.mjs server/tuverso-permission-authority.test.mjs`, sintaxis de archivos tocados y typecheck de `TuVersoIntegrations.tsx`. Sin base de datos productiva, sin restauración de backups ni suite general. La publicación requiere revisión, conciliación de cambios con la rama activa y autorización de despliegue.
