@@ -378,7 +378,7 @@ test('direct FORM retains tenant and reference authorization and surfaces upstre
  const conflict=await conflicts.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},
   payload:{appId:appA,storeId:storeA,type:'FORM',form}})
  assert.equal(conflict.code,409)
- assert.deepEqual(conflicts.remote.map(x=>x.operation),['read','messages','orderForm'],
+ assert.deepEqual(conflicts.remote.map(x=>x.operation),['read','orderForm'],
   'custom FORM must never invoke historical TEXT recovery')
 })
 
