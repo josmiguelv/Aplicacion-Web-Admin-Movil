@@ -193,7 +193,7 @@ test('create delivers one FORM atomically and old follow-up adds no duplicate',a
  const sentForm=h.remote.find(x=>x.operation==='interaction').input
  assert.equal(sentForm.type,'FORM')
  assert.equal('text' in sentForm,false)
- assert.equal(sentForm.form.title,'POLLOS B3 - SOLICITUD DE VALIDACION')
+ assert.equal(sentForm.form.title,'VALIDACIÓN DE PEDIDO')
  assert.equal(sentForm.form.fields.length,4)
  const field=Object.fromEntries(sentForm.form.fields.map(x=>[x.variable,x.value]))
  assert.equal(field.Sede,'Sede')
