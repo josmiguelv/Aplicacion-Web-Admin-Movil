@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS stores (
   pickup_enabled BOOLEAN NOT NULL DEFAULT false,
   dine_in_enabled BOOLEAN NOT NULL DEFAULT false,
   opening_hours JSONB,
+  service_hours JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (id,tenant_id)
 );
