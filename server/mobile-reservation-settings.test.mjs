@@ -6,7 +6,7 @@ import {DEFAULT_RESERVATION_SETTINGS,normalizeReservationSettings,mapReservation
  publishedReservationSettings,readStoreReservationSettings,saveStoreReservationSettings} from './mobile-reservation-settings.mjs';
 
 const valid={enabled:true,minAdvanceMinutes:45,maxAdvanceDays:7,firstTime:'12:00',
- lastTime:'22:30',slotMinutes:30,maxOrdersPerSlot:8,preparationMinutes:40};
+ lastTime:'22:30',preparationMinutes:40};
 
 test('reservation settings remain OFF by default; never mark future slots bookable',()=>{
  assert.deepEqual(mapReservationSettings(null),DEFAULT_RESERVATION_SETTINGS);
@@ -15,10 +15,10 @@ test('reservation settings remain OFF by default; never mark future slots bookab
 });
 test('validate complete enabled configuration and limit values',()=>{
  assert.deepEqual(normalizeReservationSettings(valid),valid);
- for(const patch of [{slotMinutes:10},{maxOrdersPerSlot:0},{preparationMinutes:0},
+ for(const patch of [{preparationMinutes:0},
   {minAdvanceMinutes:10080},{maxAdvanceDays:0},{firstTime:'25:00'},
   {lastTime:'11:00'},{minAdvanceMinutes:10080,maxAdvanceDays:7},
-  {maxOrdersPerSlot:'8'},{unexpected:true}]){
+  {slotMinutes:30},{maxOrdersPerSlot:8},{unexpected:true}]){
   assert.throws(()=>normalizeReservationSettings({...valid,...patch}),{code:400});
  }
  assert.throws(()=>normalizeReservationSettings({enabled:true}),{code:400});
@@ -29,7 +29,7 @@ test('disabled policies may be incomplete but never become a reservation',()=>{
  const config=normalizeReservationSettings({enabled:false,preparationMinutes:40});
  assert.equal(config.enabled,false);
  assert.equal(config.preparationMinutes,40);
- assert.equal(config.maxOrdersPerSlot,null);
+ assert.equal(config.maxAdvanceDays,null);
 });
 
 // Runs exclusively on the disposable GitHub Actions PostgreSQL database.
