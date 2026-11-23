@@ -665,3 +665,40 @@ test('closed MOBILE_APP agent conversation is visible and customer cancel is ide
  unverified.setReference(ref);
  assert.equal((await unverified.call('POST',path+'/cancel',owner)).code,409);
 });
+
+
+test('existing Android validation FORM is acknowledged without inserting a second order message',async()=>{
+ const h=harness(),key=randomUUID(),created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})
+ })
+ assert.equal(created.code,201)
+ assert.equal(created.payload.formIncluded,true)
+ h.setReference(created.payload.externalReference)
+ const r=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key,'idempotency-key':randomUUID()},
+  payload:{appId:appA,storeId:storeA,type:'FORM',form:{
+   title:'VALIDACIÓN DE PEDIDO',subtitle:'Confirmar disponibilidad para delivery',
+   fields:[{variable:'Productos',value:'2 x Pollo A'}],
+  }}
+ })
+ assert.equal(r.code,200)
+ assert.equal(r.payload.type,'FORM')
+ assert.equal(r.payload.delivered,true)
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','messages'])
+})
+
+test('a genuinely different independent FORM remains sendable to existing interaction',async()=>{
+ const h=harness(),key=randomUUID(),created=await h.call('POST','/api/v1/mobile/interactions',{
+  headers:{'idempotency-key':key},payload:createBody({customer})
+ })
+ h.setReference(created.payload.externalReference)
+ const r=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
+  headers:{'x-order-access-key':key,'idempotency-key':randomUUID()},
+  payload:{appId:appA,storeId:storeA,type:'FORM',form:{
+   title:'Información adicional',fields:[{variable:'Nota',value:'Sin cebolla'}],
+  }}
+ })
+ assert.equal(r.code,200)
+ assert.equal(r.payload.delivered,true)
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
+})
