@@ -401,7 +401,7 @@ test('already-delivered legacy TEXT is recovered without sending a duplicate FOR
  ].join('\n')
  const h=harness({legacyText:oldDetail,upstream:{message:409}})
  const created=await h.call('POST','/api/v1/mobile/interactions',{
-  headers:{'idempotency-key':key},payload:createBody({customer})})
+  headers:{'idempotency-key':key},payload:createBody()})
  h.setReference(created.payload.externalReference)
  const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
@@ -622,7 +622,7 @@ test('upstream failure to send FORM is authoritative while local order isolation
  const key=randomUUID()
  const h=harness({scopes:[],upstream:{message:403}})
  const created=await h.call('POST','/api/v1/mobile/interactions',{
-  headers:{'idempotency-key':key},payload:createBody({customer})})
+  headers:{'idempotency-key':key},payload:createBody()})
  assert.equal(created.code,201)
  h.setReference(created.payload.externalReference)
  const reply=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
