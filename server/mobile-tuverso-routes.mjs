@@ -86,7 +86,7 @@ function orderForm(cart,store,customer){
  if(products.length>2||products.some(part=>!part||part.length>500))
   throw fail(422,'El pedido supera el límite de información del formulario. Reduce los productos.')
  const form={
-  title:'POLLOS B3 - SOLICITUD DE VALIDACION',
+  title:'VALIDACIÓN DE PEDIDO',
   subtitle:'Subtotal productos: S/ '+cart.subtotal.toFixed(2)+'. Delivery pendiente. No preparar ni cobrar antes de la confirmación.',
   fields:[
    {variable:'Sede',value:String(store.name||'Sede').trim()},
