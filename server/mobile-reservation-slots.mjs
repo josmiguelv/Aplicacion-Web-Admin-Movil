@@ -17,7 +17,7 @@ function timeParts(date,timeZone){
   hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date);
  return Object.fromEntries(p.filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
 }
-function localDateTimeEpoch(date,time,timeZone){
+export function localDateTimeEpoch(date,time,timeZone){
  // Determine the UTC instant represented by a timezone's local date+time,
  // then verify the roundtrip (DST gaps are rejected, never silently shifted).
  const [y,m,d]=date.split('-').map(Number),[h,min]=time.split(':').map(Number);
