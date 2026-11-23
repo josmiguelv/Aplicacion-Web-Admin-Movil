@@ -132,7 +132,7 @@ test('create uses validated published catalog, exact scoped binding, stable upst
  assert.equal(first.payload.storeId,storeA)
  assert.equal(h.remote.length,2)
  assert.equal(h.remote[0].operation,'interaction')
- assert.equal(h.remote[0].input.summary.includes('2 x Pollo A'),true)
+ assert.equal(h.remote[0].input.summary,'Pedido nuevo !! Aplicación móvil')
  assert.equal(h.remote[0].input.idempotencyKey,id)
  assert.equal(h.remote[0].input.externalReference,h.remote[1].input.externalReference)
  assert.equal(h.remote[0].binding.external_location_id,'location-a')
@@ -179,7 +179,7 @@ test('create delivers one FORM atomically and old follow-up adds no duplicate',a
  assert.deepEqual(h.remote.map(x=>x.operation),['interaction'])
  const id=response.payload.interactionId
  const sent=h.remote.find(x=>x.operation==='interaction')
- assert.ok(sent.input.summary.includes('2 x Pollo A'))
+ assert.equal(sent.input.summary,'Pedido nuevo !! Aplicación móvil')
  assert.ok(!sent.input.summary.includes('+51'))
  assert.deepEqual(sent.input.customer,{firstName:'Ana',lastName:'Quispe',
   phone:'+51912345678',phoneVerified:false,emailVerified:false})
