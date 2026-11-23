@@ -242,7 +242,8 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    if(req.method!=='POST')throw bad(405,'Método no permitido');
    return json(res,200,await saveStoreReservationSettings(pool,tenantId,storeId,user.id,await body(req)));
   }
-  if(await adminReservationsRoutes({req,res,url,user}))return
+  if(/^\/api\/admin\/tenants\/[0-9a-f-]{36}\/reservations(?:\/[0-9a-f-]{36}\/(?:verify-payment|cancel))?$/i.test(url.pathname))
+   return await adminReservationsRoutes({req,res,url,user})
   if(await adminApiKeyRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(await integrationRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
@@ -350,8 +351,11 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
  if(await mobileTuVersoRoutes({req,res,url}))return
  if(await mobileOrderAvailabilityRoutes({req,res,url}))return
-  if(await mobileReservationSlotsRoute({req,res,url}))return
-  if(await mobileReservationsRoutes({req,res,url}))return
+  if(/^\/api\/v1\/mobile\/stores\/[0-9a-f-]{36}\/reservation-slots$/i.test(url.pathname))
+   return await mobileReservationSlotsRoute({req,res,url})
+  if(url.pathname==='/api/v1/mobile/reservations'||url.pathname==='/api/v1/mobile/reservations/quote'||
+     /^\/api\/v1\/mobile\/reservations\/[0-9a-f-]{36}(?:\/(?:payment|cancel))?$/i.test(url.pathname))
+   return await mobileReservationsRoutes({req,res,url})
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
