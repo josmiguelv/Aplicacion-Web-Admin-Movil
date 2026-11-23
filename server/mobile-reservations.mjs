@@ -308,6 +308,19 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
    }
    return json(res,201,response(await findMine(value.appId,saved.id,access)),true);
   }
+  const recovery=url.pathname.match(/^\/api\/v1\/mobile\/reservations\/by-key\/([0-9a-f-]{36})$/i);
+  if(recovery){
+   if(req.method!=='GET')throw fail(405,'Método no permitido');
+   const appId=url.searchParams.get('appId'),access=req.headers['x-order-access-key'];
+   if(!APP.test(appId||'')||!UUID.test(access||''))throw fail(400,'Datos de recuperación inválidos');
+   const ctx=await catalog(appId);
+   const q=await pool.query(`SELECT o.*,s.name AS store_name FROM mobile_scheduled_orders o
+    JOIN stores s ON s.id=o.store_id AND s.tenant_id=o.tenant_id
+    WHERE o.tenant_id=$1 AND o.app_id=$2 AND o.idempotency_key=$3 AND o.access_hash=$4`,
+    [ctx.tenantId,appId,recovery[1],ownerHash(access)]);
+   if(!q.rowCount)throw fail(404,'No se encontró la solicitud');
+   return json(res,200,response(await expire(q.rows[0])),true);
+  }
   const found=url.pathname.match(/^\/api\/v1\/mobile\/reservations\/([0-9a-f-]{36})(?:\/(payment|cancel))?$/i);
   if(!found)return false;
   const id=found[1],action=found[2]||'status';
