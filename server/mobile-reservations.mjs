@@ -50,7 +50,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
  async function storeLive(ctx,storeId,client=pool){
   const result=await client.query(`SELECT s.id,s.name,s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,
    t.time_zone,r.enabled,r.min_advance_minutes,r.max_advance_days,r.first_time,r.last_time,
-   r.slot_minutes,r.max_orders_per_slot,r.preparation_minutes
+   r.preparation_minutes
    FROM stores s JOIN tenants t ON t.id=s.tenant_id
    LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id
    WHERE s.id=$1 AND s.tenant_id=$2 AND t.active=true`,[storeId,ctx.tenantId]);
@@ -105,11 +105,6 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
     }});
    const slot=scheduled.slots.find(x=>x.time===q.time);
    if(!slot)continue;
-   const total=await pool.query(`SELECT count(*)::int AS n FROM mobile_scheduled_orders
-    WHERE tenant_id=$1 AND store_id=$2 AND scheduled_at=$3
-     AND status=ANY($4::text[]) AND (status='CONFIRMED' OR hold_until>now())`,
-    [ctx.tenantId,candidate.storeId,slot.scheduledAt,activeStates]);
-   if(total.rows[0].n>=settings.maxOrdersPerSlot)continue;
    if(checkOnline){
     const a=await agent(ctx,candidate.storeId);
     if(!a.online)continue;
@@ -119,10 +114,9 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
     deliveryFeePen:q.mode==='delivery'?Number(candidate.deliveryFee):0,
     routeDistanceKm:candidate.routeDistanceKm,
     preparationMinutes:settings.preparationMinutes,
-    maxOrdersPerSlot:settings.maxOrdersPerSlot,
     paymentMethods:old.paymentMethods?.reservation||[]};
   }
-  throw fail(409,'No hay sedes con agente disponible, cupos y horario habilitados para esta solicitud');
+  throw fail(409,'No hay sedes con agente disponible y horario habilitado para esta solicitud');
  }
  async function findMine(appId,id,key){
   if(!UUID.test(id)||!APP.test(appId)||!UUID.test(key))throw fail(400,'Datos de seguimiento inválidos');
@@ -285,19 +279,12 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
     const lock=await client.query('SELECT id FROM stores WHERE id=$1 AND tenant_id=$2 FOR UPDATE',
      [sel.storeId,ctx.tenantId]);
     if(lock.rowCount!==1)throw fail(409,'Sede deshabilitada');
-    // Recheck live capacity while holding a per-store row lock. Other creates
-    // for this store serialize here, preventing oversubscription.
-    const current=await client.query(`SELECT r.max_orders_per_slot,r.enabled
+    // Recheck store reservations enabled under a row lock. Agent decides acceptance.
+    const current=await client.query(`SELECT r.enabled
       FROM store_reservation_settings r WHERE r.tenant_id=$1 AND r.store_id=$2`,
       [ctx.tenantId,sel.storeId]);
     if(current.rowCount!==1||current.rows[0].enabled!==true)
      throw fail(409,'La sede dejó de aceptar reservas');
-    const count=await client.query(`SELECT count(*)::int AS n FROM mobile_scheduled_orders
-      WHERE tenant_id=$1 AND store_id=$2 AND scheduled_at=$3 AND
-      status=ANY($4::text[]) AND (status='CONFIRMED' OR hold_until>now())`,
-      [ctx.tenantId,sel.storeId,sel.scheduledAt,activeStates]);
-    if(count.rows[0].n>=current.rows[0].max_orders_per_slot)
-     throw fail(409,'Ya no quedan cupos en este horario');
     const customer={...value.customer,customerExternalId:value.customerExternalId};
     const dest=value.mode==='delivery'?
      {address:value.address.trim(),district:value.district.trim(),reference:value.reference||'',
