@@ -239,6 +239,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))throw fail(409,'El catálogo cambió: actualiza tu pedido')
    const cart=calculateOrderCart(ctx.payload.products,input.items)
    const customer=normalizeCustomer(input.customer)
+   // Preserve the prior refusal of oversized anonymous legacy orders.
+   if(cart.summary.length>1200&&!customer)
+    throw fail(422,'El resumen del pedido supera el limite permitido')
    // The CREATE summary is the one-line opening TEXT visible to the agent.
    // Product, subtotal and address details belong in the separate approval message.
    // Keep this literal identical for every new MOBILE_APP order.
