@@ -120,7 +120,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
     routeDistanceKm:candidate.routeDistanceKm,
     preparationMinutes:settings.preparationMinutes,
     maxOrdersPerSlot:settings.maxOrdersPerSlot,
-    paymentMethods:old.paymentMethods?.[q.mode]||[]};
+    paymentMethods:old.paymentMethods?.reservation||[]};
   }
   throw fail(409,'No hay sedes con agente disponible, cupos y horario habilitados para esta solicitud');
  }
@@ -373,7 +373,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
    if(ctx.tenantId!==row.tenant_id)throw fail(403,'Reserva de otra empresa');
    const pay=await pool.query(`SELECT 1 FROM payment_methods
     WHERE tenant_id=$1 AND store_id=$2 AND mode=$3 AND method=$4 AND enabled=true`,
-    [row.tenant_id,row.store_id,row.mode,input.method]);
+    [row.tenant_id,row.store_id,'reservation',input.method]);
    if(pay.rowCount!==1)throw fail(409,'Método de pago no habilitado por la sede');
    const client=await pool.connect();
    try{
