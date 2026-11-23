@@ -10,7 +10,7 @@ export function createAdminReservationRoutes({pool,body,json,tenantOf}){
   await tenantOf(user,tenantId);
   if(list){
    if(req.method!=='GET')throw fail(405,'Método no permitido');
-   const result=await pool.query(\`SELECT o.id,o.store_id,s.name AS store_name,o.app_id,o.mode,
+   const result=await pool.query(`SELECT o.id,o.store_id,s.name AS store_name,o.app_id,o.mode,
     o.service_date,o.service_time,o.scheduled_at,o.status,o.payment_method,o.payment_status,
     o.subtotal_pen,o.delivery_fee_pen,o.total_pen,o.preparation_minutes,o.interaction_id,
     o.customer->>'firstName' AS first_name,o.customer->>'lastName' AS last_name,
@@ -18,7 +18,7 @@ export function createAdminReservationRoutes({pool,body,json,tenantOf}){
     o.destination->>'address' AS delivery_address,o.destination->>'district' AS delivery_district,
     o.created_at,o.confirmed_at,o.payment_expires_at,o.form_sent
     FROM mobile_scheduled_orders o JOIN stores s ON s.id=o.store_id AND s.tenant_id=o.tenant_id
-    WHERE o.tenant_id=$1 ORDER BY o.created_at DESC LIMIT 100\`,[tenantId]);
+    WHERE o.tenant_id=$1 ORDER BY o.created_at DESC LIMIT 100`,[tenantId]);
    return json(res,200,{items:result.rows});
   }
   if(req.method!=='POST')throw fail(405,'Método no permitido');
@@ -28,8 +28,8 @@ export function createAdminReservationRoutes({pool,body,json,tenantOf}){
   const client=await pool.connect();
   try{
    await client.query('BEGIN');
-   const q=await client.query(\`SELECT * FROM mobile_scheduled_orders
-    WHERE tenant_id=$1 AND id=$2 FOR UPDATE\`,[tenantId,id]);
+   const q=await client.query(`SELECT * FROM mobile_scheduled_orders
+    WHERE tenant_id=$1 AND id=$2 FOR UPDATE`,[tenantId,id]);
    if(q.rowCount!==1)throw fail(404,'Reserva no encontrada');
    const row=q.rows[0];
    if(kind==='cancel'){
@@ -38,10 +38,10 @@ export function createAdminReservationRoutes({pool,body,json,tenantOf}){
      throw fail(400,'Indica motivo administrativo de cancelación');
     if(row.status==='CONFIRMED')throw fail(409,'No cancelar un pedido confirmado sin gestión de devolución');
     if(!['REJECTED','CANCELLED','EXPIRED'].includes(row.status)){
-     await client.query(\`UPDATE mobile_scheduled_orders SET status='CANCELLED',updated_at=now()
-      WHERE id=$1\`,[id]);
-     await client.query(\`INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id)
-      VALUES($1,$2,$3,$4)\`,[tenantId,user.id,'RESERVATION_CANCELLED',id]);
+     await client.query(`UPDATE mobile_scheduled_orders SET status='CANCELLED',updated_at=now()
+      WHERE id=$1`,[id]);
+     await client.query(`INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id)
+      VALUES($1,$2,$3,$4)`,[tenantId,user.id,'RESERVATION_CANCELLED',id]);
     }
    }else{
     if(Object.keys(input).some(k=>!['providerReference','amountPen','verified'].includes(k))||
@@ -58,11 +58,11 @@ export function createAdminReservationRoutes({pool,body,json,tenantOf}){
       !['yape','plin','card'].includes(row.payment_method)||
       !row.payment_expires_at||new Date(row.payment_expires_at)<=new Date())
      throw fail(409,'La reserva no admite esta verificación de pago');
-    await client.query(\`UPDATE mobile_scheduled_orders SET
+    await client.query(`UPDATE mobile_scheduled_orders SET
      status='CONFIRMED',payment_status='VERIFIED',payment_reference=$2,
-     confirmed_at=now(),updated_at=now() WHERE id=$1\`,[id,input.providerReference.trim()]);
-    await client.query(\`INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id)
-     VALUES($1,$2,$3,$4)\`,[tenantId,user.id,'RESERVATION_PAYMENT_MANUALLY_VERIFIED',id]);
+     confirmed_at=now(),updated_at=now() WHERE id=$1`,[id,input.providerReference.trim()]);
+    await client.query(`INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id)
+     VALUES($1,$2,$3,$4)`,[tenantId,user.id,'RESERVATION_PAYMENT_MANUALLY_VERIFIED',id]);
    }
    await client.query('COMMIT');
    return json(res,200,{id,status:kind==='cancel'?'CANCELLED':'CONFIRMED',
