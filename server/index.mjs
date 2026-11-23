@@ -152,7 +152,8 @@ async function roadDistanceKm(store,destination,revision){
 }
 
 async function deliveryQuotes(config,b,revision,legacyLimaFallback=false,at=new Date()){
- const eligible=config.stores.filter(s=>s.active&&s.delivery_enabled===true&&(()=>{const h=serviceHoursAt(s,'delivery','orders',at,config.timeZone);return h.hoursConfigured===true&&h.isOpen===true})());
+ const quoteKind=b.date&&b.time?'fulfillment':'orders';
+ const eligible=config.stores.filter(s=>s.active&&s.delivery_enabled===true&&(()=>{const h=serviceHoursAt(s,'delivery',quoteKind,at,config.timeZone);return h.hoursConfigured===true&&h.isOpen===true})());
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para Delivery');
  const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
  if(!hasCoordinates)throw bad(422,'Necesitamos coordenadas verificadas del destino para estimar el delivery sin Google Routes.');
