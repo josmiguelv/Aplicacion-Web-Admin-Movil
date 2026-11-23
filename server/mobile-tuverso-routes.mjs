@@ -242,8 +242,11 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // For a read-only poll, a transient history failure must not make a
     // successfully identified interaction look lost or rejected to Android.
     const messagesAvailable=history.ok===true&&history.data?.interactionId===interactionId
-    if(!messagesAvailable&&operation==='cancel')
-      throw fail(503,'No se pudo verificar la conversación antes de cancelar')
+    // The verified interaction reference and access key authorize cancellation.
+    // A transient history outage is not a reason to block the cancellation.
+    // Use the same idempotency key on retries and persist CANCELLED only after
+    // TU VERSO acknowledges the notification (or its canonical closure).
+    // The history is still used when available to recognize earlier notices.
     const messages=messagesAvailable?history.data.messages:[]
     const cancelled=messages.some(m=>m.direction==='INBOUND'&&(m.text===CANCEL_NOTICE||m.text===CANCEL_PURCHASE_NOTICE))
     if(operation==='cancel'){
