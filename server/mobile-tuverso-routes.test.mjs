@@ -33,6 +33,13 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   if(sql.includes('FROM integration_bindings b')){
    return {rowCount:count,rows:count?[{integration_id:integration,encrypted_credential:'ciphertext',expires_at:null,suspended:false,scopes,channel_type:'MOBILE_APP',binding_id:bindingId,external_location_id:args[2]===storeA?'location-a':'location-b',purpose:'ORDER_REQUEST'}]:[]}
   }
+  if(sql.startsWith('SELECT payment_wait_minutes'))return {rowCount:0,rows:[]}
+  if(sql.startsWith('INSERT INTO mobile_checkout_followups')){
+   if(sql.includes('fcm_token)'))return {rowCount:1,rows:[{interaction_id:args[0]}]}
+   return {rowCount:1,rows:[{state:'PAYMENT_PENDING',checkout_expires_at:'2099-01-01T00:00:00Z'}]}
+  }
+  if(sql.startsWith('SELECT state,checkout_expires_at'))return {rowCount:1,rows:[{state:'PAYMENT_PENDING',checkout_expires_at:'2099-01-01T00:00:00Z'}]}
+  if(sql.includes('UPDATE mobile_checkout_followups'))return {rowCount:1,rows:[]}
   throw Error('Unexpected SQL: '+sql)
  }}
  const route=createMobileTuVersoRoutes({pool,body:async req=>req.body,
@@ -108,12 +115,31 @@ test('create uses validated published catalog, exact scoped binding, stable upst
  assert.equal(first.payload.storeId,storeA)
  assert.equal(h.remote.length,2)
  assert.equal(h.remote[0].operation,'interaction')
- assert.equal(h.remote[0].input.summary.includes('2 x Pollo A'),true)
+ assert.equal(h.remote[0].input.summary,'Pedido nuevo !! Aplicación móvil')
  assert.equal(h.remote[0].input.idempotencyKey,id)
  assert.equal(h.remote[0].input.externalReference,h.remote[1].input.externalReference)
  assert.equal(h.remote[0].binding.external_location_id,'location-a')
  assert.equal('token' in first.payload,false)
 })
+test('all MOBILE_APP create requests use the same greeting regardless of product, contact or store',async()=>{
+ const samples=[
+  createBody(),
+  createBody({items:[{productId:product,quantity:1}],customer:{
+   firstName:'Persona',lastName:'Prueba',phone:'987654321',
+   address:'Av. Ejemplo 123',district:'Santa Anita',mode:'delivery'}}),
+  {appId:appB,storeId:storeB,quoteRevision:9,customerExternalId:'other-123',
+   items:[{productId:product,quantity:2}]}
+ ]
+ for(const payload of samples){
+  const h=harness(),r=await h.call('POST','/api/v1/mobile/interactions',{
+   headers:headers(),payload})
+  assert.equal(r.code,201)
+  assert.deepEqual(h.remote.map(x=>x.operation),['interaction'])
+  assert.equal(h.remote[0].input.summary,'Pedido nuevo !! Aplicación móvil')
+  assert.equal('text' in h.remote[0].input,false)
+ }
+})
+
 test('invalid store, injected tenant, outdated catalog and missing idempotency fail before remote',async()=>{
  const h=harness()
  const cross=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody({storeId:storeB})})
@@ -155,7 +181,7 @@ test('create returns interactionId before chat text, and text delivery runs inde
  assert.deepEqual(h.remote.map(x=>x.operation),['interaction'])
  const id=response.payload.interactionId
  const sent=h.remote.find(x=>x.operation==='interaction')
- assert.ok(sent.input.summary.includes('2 x Pollo A'))
+ assert.equal(sent.input.summary,'Pedido nuevo !! Aplicación móvil')
  assert.ok(!sent.input.summary.includes('+51'))
  h.setReference(response.payload.externalReference)
  const delivered=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
@@ -299,6 +325,33 @@ test('cancellation refuses to proceed when prior conversation cannot be checked'
   headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA}})
  assert.equal(r.code,503)
  assert.equal(h.remote.filter(x=>x.operation==='cancel').length,0)
+})
+test('personal FCM device is registered only after authorized conversation read, without broadcasting',async()=>{
+ const id=randomUUID(),key=randomUUID(),token='f'.repeat(160)
+ const h=harness()
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const uri='/api/v1/mobile/interactions/'+id+'/device'
+ const r=await h.call('POST',uri,{headers:{'x-order-access-key':key},
+  payload:{appId:appA,storeId:storeA,fcmToken:token}})
+ assert.equal(r.code,200)
+ assert.deepEqual(r.payload,{registered:true})
+ assert.deepEqual(h.remote.map(x=>x.operation),['read'])
+ const forged=await h.call('POST',uri,{headers:{'x-order-access-key':randomUUID()},
+  payload:{appId:appA,storeId:storeA,fcmToken:token}})
+ assert.equal(forged.code,403)
+})
+test('payment deadline belongs to one authorized interaction and does not restart on GET',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness()
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const uri='/api/v1/mobile/interactions/'+id+'/payment'
+ const input={appId:appA,storeId:storeA}
+ const opened=await h.call('POST',uri,{headers:{'x-order-access-key':key},payload:input})
+ assert.equal(opened.code,200);assert.equal(opened.payload.status,'PAYMENT_PENDING')
+ assert.ok(opened.payload.expiresAt)
+ const follow=await h.call('GET',uri+'?appId='+appA+'&storeId='+storeA,{headers:{'x-order-access-key':key}})
+ assert.equal(follow.code,200);assert.equal(follow.payload.status,'PAYMENT_PENDING')
+ assert.equal(follow.payload.expiresAt,opened.payload.expiresAt)
+ assert.equal(h.remote.filter(x=>x.operation==='interaction').length,0)
 })
 test('client cannot read decision with wrong key or other tenant',async()=>{
  const id=randomUUID(),key=randomUUID()

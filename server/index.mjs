@@ -2,6 +2,7 @@ import {integrationRoutes} from './integrations.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
+import {checkoutPolicy,updateCheckoutPolicy,runCheckoutNotifications} from './mobile-checkout-followups.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -130,10 +131,10 @@ async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
  const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone)).filter(s=>s.active&&s.delivery_enabled===true&&s.hoursConfigured===true&&s.isOpen===true);
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para Delivery');
  const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
- const hasAddress=word(b.address,250)&&word(b.district,90);
- if(!hasCoordinates&&!hasAddress)throw bad(422,'Confirma una dirección completa o elige usar tu ubicación GPS');
- const region=word(b.city,100)&&word(b.country,100)?[b.city.trim(),b.country.trim()]:legacyLimaFallback?['Lima','Perú']:[];
- const destination=hasAddress?[b.address.trim(),b.district.trim(),...region].join(', '):{latitude:b.latitude,longitude:b.longitude};
+ if(!hasCoordinates)throw bad(422,'Necesitamos coordenadas verificadas del destino para estimar el delivery sin Google Routes.');
+ // MVP: approximate straight-line distance from device-geocoded/GPS coordinates.
+ // Never describe this as drivable route distance or a Google Maps quotation.
+ const destination={latitude:b.latitude,longitude:b.longitude};
  const candidates=eligible.filter(s=>(!b.storeId||s.id===b.storeId)&&checkLatLng(s.latitude,s.longitude)&&
   (s.deliveryPricingMode==='FIXED'?Number.isFinite(s.deliveryFeePen)&&s.deliveryFeePen>=0:Number.isFinite(s.deliveryRatePerKmPen)&&s.deliveryRatePerKmPen>=0));
  if(!candidates.length)throw bad(409,'Ninguna sede tiene una tarifa de Delivery y coordenadas configuradas');
@@ -141,7 +142,7 @@ async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
  if(hasCoordinates&&!hasAddress)candidates.sort((a,b2)=>kmDistance(b.latitude,b.longitude,a.latitude,a.longitude)-kmDistance(b.latitude,b.longitude,b2.latitude,b2.longitude)||a.id.localeCompare(b2.id));
  const available=[];
  for(const store of candidates){
-  const km=await roadDistanceKm(store,destination,revision);
+  const km=Math.round(kmDistance(store.latitude,store.longitude,destination.latitude,destination.longitude)*100)/100;
   if(km===null||store.radiusKm!==null&&store.radiusKm!==undefined&&km>store.radiusKm+1e-8)continue;
   const deliveryFee=store.deliveryPricingMode==='FIXED'?store.deliveryFeePen:Math.round((km*store.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
   available.push({storeId:store.id,storeName:store.name,deliveryFee,routeDistanceKm:km,
@@ -203,12 +204,23 @@ async function quote(req,res){
   mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],deliveryFeePen,routeDistanceKm:roadKm,
   deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,
   ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
-  distanceSource:b.mode==='delivery'?'GOOGLE_ROUTES':null,provisional:true,
-  notice:'Importes sujetos a confirmación al realizar el pedido.'},true)
+  distanceSource:b.mode==='delivery'?'STRAIGHT_LINE':null,provisional:true,
+  notice:'Tarifa provisional calculada en línea recta, no distancia por carretera. Importes sujetos a confirmación.'},true)
 }
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
  if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok)throw bad(401,'Credenciales inválidas');const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
  const user=await session(req);if(req.method!=='GET'&&!sameOrigin(req))throw bad(403,'Origen no autorizado');
+ const checkoutSettings=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/checkout-settings$/i)
+ if(checkoutSettings){
+  const tenantId=checkoutSettings[1];await tenantOf(user,tenantId)
+  if(req.method==='GET')return json(res,200,await checkoutPolicy(pool,tenantId))
+  if(req.method!=='POST')throw bad(405,'Método no permitido')
+  const input=await body(req)
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['paymentWaitMinutes','reminderCount'].includes(k)))throw bad(400,'Configuración de seguimiento inválida')
+  const saved=await updateCheckoutPolicy(pool,tenantId,input)
+  await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'CHECKOUT_POLICY_UPDATED',tenantId])
+  return json(res,200,saved)
+ }
  if(await adminApiKeyRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(await integrationRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
@@ -295,6 +307,14 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
 }
 async function serve(res,path){const base=join(process.cwd(),'dist');const target=normalize(join(base,path==='/'?'index.html':path));if(!target.startsWith(base+'/')&&target!==base)throw bad(403,'Ruta inválida');let content;try{content=await readFile(target)}catch{content=await readFile(join(base,'index.html'))}const type=({'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[extname(target)]||'application/octet-stream';res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(content)}
+// Payment timers are server-owned; no mobile foreground timer is authoritative.
+// Enable only after applying migration 007 to the isolated Administrator database.
+if(process.env.B3_CHECKOUT_WORKER_ENABLED==='true'){
+ let running=false
+ const tick=async()=>{if(running)return;running=true;try{await runCheckoutNotifications(pool)}catch(e){console.error('Pollos B3 checkout worker:',e.message)}finally{running=false}}
+ const worker=setInterval(()=>{void tick()},30000)
+ worker.unref?.();void tick()
+}
 createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);try{
  if(url.pathname==='/health/live'&&req.method==='GET')return json(res,200,{status:'ok'});
  if(url.pathname==='/health/ready'&&req.method==='GET'){

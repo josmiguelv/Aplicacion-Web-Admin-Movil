@@ -42,6 +42,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false),[promoStarts,setPromoStarts]=useState(''),[promoEnds,setPromoEnds]=useState('')
  const [appId,setAppId]=useState('')
  const [timeZone,setTimeZone]=useState('America/Lima')
+ const [paymentWaitMinutes,setPaymentWaitMinutes]=useState(10)
+ const [reminderCount,setReminderCount]=useState(2)
  const [complaintsBookUrl,setComplaintsBookUrl]=useState('')
  const [loading,setLoading]=useState(false)
  const [savedArea,setSavedArea]=useState<string>('')
@@ -55,7 +57,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const act=async(fn:()=>Promise<void>)=>{setLoading(true);setError('');setMessage('');try{await fn()}catch(e){setError(e instanceof Error?e.message:'Error inesperado')}finally{setLoading(false)}}
  useEffect(()=>{if(embeddedSession){setSession(embeddedSession);setTenantId(scopedTenantId??embeddedSession.tenantId??'');return}void api<Session>('/api/admin/me').then(s=>{setSession(s);setTenantId(s.tenantId||'')}).catch(()=>{})},[embeddedSession,scopedTenantId])
  useEffect(()=>{if(!session)return;if(session.role==='SUPER_ADMIN'&&!embeddedSession)void api<{tenants:Tenant[]}>('/api/admin/tenants').then(r=>setTenants(r.tenants)).catch(e=>setError(e.message))},[session])
- const refresh=async(id=tenantId)=>{if(!id)return;const [st,pr,jobs,apps,settings]=await Promise.all([api<{items:StoreRow[]}>(`/api/admin/tenants/${id}/stores`),api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`),api<{timeZone:string}>(`/api/admin/tenants/${id}/settings`)]);setStores(st.items);setProducts(pr.items);setVacancies(jobs.items);setTimeZone(settings.timeZone||'America/Lima');const current=apps.items.find(x=>x.app_id===appId)??(appId===''&&apps.items.length===1?apps.items[0]:undefined);if(current&&appId==='')setAppId(current.app_id);setComplaintsBookUrl(current?.complaints_book_url||'')}
+ const refresh=async(id=tenantId)=>{if(!id)return;const [st,pr,jobs,apps,settings,checkout]=await Promise.all([api<{items:StoreRow[]}>(`/api/admin/tenants/${id}/stores`),api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`),api<{timeZone:string}>(`/api/admin/tenants/${id}/settings`),api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${id}/checkout-settings`)]);setPaymentWaitMinutes(checkout.paymentWaitMinutes);setReminderCount(checkout.reminderCount);setStores(st.items);setProducts(pr.items);setVacancies(jobs.items);setTimeZone(settings.timeZone||'America/Lima');const current=apps.items.find(x=>x.app_id===appId)??(appId===''&&apps.items.length===1?apps.items[0]:undefined);if(current&&appId==='')setAppId(current.app_id);setComplaintsBookUrl(current?.complaints_book_url||'')}
  useEffect(()=>{if(session&&tenantId)void refresh(tenantId).catch(e=>setError(e.message))},[tenantId,session])
  const [copiedStoreCode,setCopiedStoreCode]=useState('')
  const copyStoreCode=async(code:string)=>{
@@ -104,6 +106,22 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   <label>Dirección HTTPS del Libro de Reclamaciones<input type="url" value={complaintsBookUrl} placeholder="https://..." onChange={e=>setComplaintsBookUrl(e.target.value)} /></label>
   <button className="button button-secondary" disabled={loading||!tenantId} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/complaints`,'POST',{appId,url:complaintsBookUrl.trim()});setSavedArea('settings')})}>Guardar enlace</button>{savedNext('settings')}
   <p className="ops-hint">Debe corresponder al Libro auténtico del proveedor y permitir obtener constancia del reclamo. Si está vacío, la aplicación informará que el acceso digital aún no está configurado; no simulará registros.</p>
+  <div className="ops-divider" style={{margin:'24px 0',borderTop:'1px solid #e5e7eb'}}/>
+  <h2>Seguimiento de pago · Notificaciones personales</h2>
+  <p className="ops-hint">El plazo inicia cuando el pedido fue aceptado por la sede y la app presenta el total. Los avisos son individuales por dispositivo y solicitud; nunca se envían a un tema de promociones. La espera de respuesta del agente no tiene este plazo.</p>
+  <div className="ops-grid">
+   <label>Tiempo para continuar con el pago (minutos)
+    <input type="number" min="5" max="30" step="1" value={paymentWaitMinutes} onChange={e=>setPaymentWaitMinutes(Number(e.target.value))}/>
+   </label>
+   <label>Recordatorios al cliente
+    <select value={reminderCount} onChange={e=>setReminderCount(Number(e.target.value))}>
+     <option value={0}>Sin recordatorios</option><option value={1}>1 recordatorio</option><option value={2}>2 recordatorios</option>
+    </select>
+   </label>
+  </div>
+  <p className="ops-hint">Ejemplo: a 10 minutos y 2 avisos, se programa un recordatorio aproximadamente a los minutos 3:20 y 6:40. Al vencimiento el pedido deja de ser pagable y se avisa a la sede. No se inicia otra conversación.</p>
+  <button className="button button-primary" disabled={loading||!tenantId||!Number.isInteger(paymentWaitMinutes)||paymentWaitMinutes<5||paymentWaitMinutes>30}
+   onClick={()=>void act(async()=>{const r=await api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',{paymentWaitMinutes,reminderCount});setPaymentWaitMinutes(r.paymentWaitMinutes);setReminderCount(r.reminderCount);setMessage('Configuración de seguimiento de pago guardada para esta empresa.')})}>Guardar tiempo y recordatorios</button>
  </section>)}
  {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div><p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
   </>}
