@@ -207,8 +207,9 @@ async function isOrderCandidateLive(tenantId,candidate){
 }
 const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
 const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:(store,zone)=>{const hours=serviceHoursAt(store,'delivery','orders',new Date(),zone||DEFAULT_TENANT_TZ);return hours.hoursConfigured===true&&hours.isOpen===true}});
-const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours});
-const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours,deliveryQuotes});
+const reservationFulfillmentHours=(store,at,zone)=>serviceHoursAt(store,store.serviceMode||'pickup','fulfillment',at,zone);
+const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours:reservationFulfillmentHours});
+const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours:reservationFulfillmentHours,deliveryQuotes});
 const adminReservationsRoutes=createAdminReservationRoutes({pool,body,json,tenantOf});
 async function quote(req,res){
  const b=await body(req);
