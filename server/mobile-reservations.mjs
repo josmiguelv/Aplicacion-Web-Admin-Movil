@@ -137,6 +137,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
  }
  const response=row=>({...publicReservation(row),storeName:row.store_name||null,
   statusLabel:humanStatus(row.status),paymentVerified:row.payment_status==='VERIFIED',
+  cancellationNoticePending:row.status==='CANCELLED'&&!!row.interaction_id&&row.cancel_notice_sent!==true,
   preparationStartsAt:row.status==='CONFIRMED'?
    new Date(new Date(row.scheduled_at).getTime()-row.preparation_minutes*60000).toISOString():null});
  async function expire(row){
@@ -192,6 +193,23 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
     WHERE id=$1 AND status='AWAITING_AGENT'`,[row.id]);
    return {...row,status:'REJECTED'};
   }
+  return row;
+ }
+ async function notifyCancelled(row){
+  if(row.status!=='CANCELLED'||!row.interaction_id||row.cancel_notice_sent===true)return row;
+  try{
+   const b=await binding({tenantId:row.tenant_id,appId:row.app_id},row.store_id);
+   const sent=await sendMessage(b.token,row.interaction_id,{
+    idempotencyKey:row.cancel_notice_key,
+    type:'TEXT',
+    text:'[Pollos B3 · Sistema] El cliente canceló esta solicitud de reserva antes de confirmarla. No preparar ni cobrar. El asesor puede cerrar la atención.'
+   });
+   if(sent.ok&&UUID.test(sent.data?.messageId)){
+    const q=await pool.query(`UPDATE mobile_scheduled_orders SET cancel_notice_sent=true,updated_at=now()
+     WHERE id=$1 AND status='CANCELLED' RETURNING *`,[row.id]);
+    if(q.rowCount)return {...row,...q.rows[0]};
+   }
+  }catch(_){/* Keep the local cancellation and flag unconfirmed advisor notice. */}
   return row;
  }
  async function createRemote(row){
@@ -331,6 +349,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
   const access=req.headers['x-order-access-key'];
   let row=await findMine(input.appId,id,access);
   row=await expire(row);
+  if(row.status==='CANCELLED')row=await notifyCancelled(row);
   if(action==='status'){
    if(row.status==='AWAITING_AGENT')row=await advanceAgent({...row,_accessKey:access});
    row=await expire(row);
@@ -343,6 +362,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
       WHERE id=$1 AND status NOT IN ('CONFIRMED','REJECTED','CANCELLED','EXPIRED') RETURNING *`,[row.id]);
     if(result.rowCount)row={...row,...result.rows[0]};
    }
+   row=await notifyCancelled(row);
    return json(res,200,response(row),true);
   }
   if(action==='payment'){
