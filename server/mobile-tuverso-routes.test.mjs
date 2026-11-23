@@ -691,6 +691,7 @@ test('closed MOBILE_APP agent conversation is visible and customer cancel is ide
  const status=await closed.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:owner.headers});
  assert.equal(status.code,200);
  assert.equal(status.payload.operationalConversationStatus,'CLOSED');
+ assert.equal(status.payload.conversationState,'CLOSED');
  assert.equal(status.payload.messagesAvailable,true);
  const cancelled=await closed.call('POST',path+'/cancel',owner);
  assert.equal(cancelled.code,200);
@@ -704,6 +705,7 @@ test('closed MOBILE_APP agent conversation is visible and customer cancel is ide
  const read=await noHistory.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:owner.headers});
  assert.equal(read.code,200);
  assert.equal(read.payload.messagesAvailable,false);
+ assert.equal(read.payload.conversationState,'CLOSED');
  assert.equal(read.payload.operationalConversationStatus,'RESOLVED',
   'Verified closure is independent of message-history availability');
  assert.equal((await noHistory.call('POST',path+'/cancel',owner)).code,200);
@@ -711,3 +713,23 @@ test('closed MOBILE_APP agent conversation is visible and customer cancel is ide
  unverified.setReference(ref);
  assert.equal((await unverified.call('POST',path+'/cancel',owner)).code,409);
 });
+
+test('TU VERSO explicit OPEN is recognized while absence remains UNKNOWN',async()=>{
+ const id=randomUUID(),key=randomUUID()
+ const ref='mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ const path='/api/v1/mobile/interactions/'+id+'/status?appId='+appA+'&storeId='+storeA
+ const headers={'x-order-access-key':key}
+ const opened=harness({remoteStatus:'ACCEPTED',operationalConversationStatus:'OPEN'})
+ opened.setReference(ref)
+ const active=await opened.call('GET',path,{headers})
+ assert.equal(active.code,200)
+ assert.equal(active.payload.conversationState,'OPEN')
+ assert.equal(active.payload.operationalConversationStatus,'OPEN')
+ const unknown=harness({remoteStatus:'ACCEPTED',historyFailure:true})
+ unknown.setReference(ref)
+ const missing=await unknown.call('GET',path,{headers})
+ assert.equal(missing.code,200)
+ assert.equal(missing.payload.conversationState,'UNKNOWN')
+ assert.equal(Object.hasOwn(missing.payload,'operationalConversationStatus'),false)
+ assert.equal(missing.payload.messagesAvailable,false)
+})
