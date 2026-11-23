@@ -122,7 +122,122 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   catch{setMessage('');setError('No se pudo copiar. Selecciona el código y usa Ctrl+C.')}
  }
  const login=async(e:FormEvent)=>{e.preventDefault();await act(async()=>{const r=await api<{role:Session['role'];tenantId:string|null}>('/api/admin/login','POST',{email,password});setSession(r);setTenantId(r.tenantId||'');setPassword('')})}
- const renderStoreEditor=()=> <div className="ops-sede-editor" id={store.id?`sede-editor-${store.id}`:"sede-editor-new"}>{storeEditorOpen&&<div className="ops-inline"><h3>{store.id?'Editar sede':'Nueva sede'}</h3><button type="button" className="button button-secondary" onClick={()=>{if(hasUnsavedStoreChanges&&!window.confirm('Hay cambios sin guardar. ¿Quieres cerrar el formulario?'))return;setStore(emptyStore());setStoreBaseline(JSON.stringify(emptyStore()));setStoreEditorOpen(false);setStoreSavedNotice(false);setError('');setMessage('')}}>Cerrar formulario</button></div>}{hasUnsavedStoreChanges&&<p className="ops-unsaved" role="status">Tienes cambios sin guardar en esta sede. Guarda antes de cambiar a otra sede.</p>}<p className="ops-hint">Guardar conserva los datos de esta sede. Para que los cambios aparezcan en la aplicación, usa «Publicar cambios» al finalizar.</p><h3 id="ops-store-details">Datos generales</h3><div className="ops-grid"><div className="ops-store-code"><label>ID de la sede<input aria-label="ID de la sede" value={store.code} readOnly={!!store.id} maxLength={80} placeholder="Ej. b3-nogales" onChange={e=>setStore({...store,code:e.target.value})}/><small>{store.id?'ID permanente: no se puede editar.':'Se define al crear y no podrá cambiarse. Usa minúsculas, números y guiones.'}</small></label><button type="button" className="button button-secondary" disabled={!store.code} onClick={()=>void copyStoreCode(store.code)}><Copy size={15}/> Copiar código</button></div><label>Local<input value={store.name} onChange={e=>setStore({...store,name:e.target.value})}/></label><label>Dirección verificada<input value={store.address} onChange={e=>setStore({...store,address:e.target.value})}/></label></div><h3 id="ops-store-delivery">Ubicación y delivery</h3><p className="ops-hint">Las coordenadas GPS y las tarifas se configuran por sede. Deja la cobertura vacía para no establecer un límite de kilómetros.</p><div className="ops-grid"><label>Latitud GPS<input inputMode="decimal" value={store.latitude} onChange={e=>setStore({...store,latitude:e.target.value})}/></label><label>Longitud GPS<input inputMode="decimal" value={store.longitude} onChange={e=>setStore({...store,longitude:e.target.value})}/></label><label>Cobertura máxima (km, vacío = sin límite)<input type="number" min="0.1" max="500" step="0.1" placeholder="Sin límite" value={store.radiusKm} onChange={e=>setStore({...store,radiusKm:e.target.value})}/></label><label>Modalidad de tarifa de Delivery<select value={store.deliveryPricingMode} onChange={e=>setStore({...store,deliveryPricingMode:e.target.value as 'PER_KM'|'FIXED'})}><option value="PER_KM">Por kilómetro</option><option value="FIXED">Costo fijo de Delivery</option></select></label>{store.deliveryPricingMode==='FIXED'?<label>Costo fijo de Delivery (S/)<input type="number" min="0" step="0.01" placeholder="Ej. 10.00" value={store.deliveryFeePen} onChange={e=>setStore({...store,deliveryFeePen:e.target.value})}/></label>:<label>Tarifa por km de Delivery (S/)<input type="number" min="0" step="0.01" placeholder="Ej. 2.50" value={store.deliveryRatePerKmPen} onChange={e=>setStore({...store,deliveryRatePerKmPen:e.target.value})}/></label>}</div><h3 id="ops-store-pickup">Modalidades de atención</h3><div className="ops-switches">{(['active','delivery_enabled','pickup_enabled','dine_in_enabled'] as const).map(k=><label key={k}><input type="checkbox" checked={store[k]} onChange={e=>setStore({...store,[k]:e.target.checked})}/>{({active:'Local activo',delivery_enabled:'Delivery',pickup_enabled:'Recojo',dine_in_enabled:'Comer en tienda'})[k]}</label>)}</div><h3>Validación del pedido</h3><label className="ops-check"><input type="checkbox" checked={store.consultOrderAvailability} onChange={e=>setStore({...store,consultOrderAvailability:e.target.checked})}/>Consultar disponibilidad del pedido con TU VERSO para esta sede</label><p className="ops-hint">Si se activa, la aplicación esperará la respuesta de un asesor antes de mostrar el costo final. La configuración se guarda solo para la empresa seleccionada.</p><div className="ops-panel"><h3 id="ops-store-hours">Horarios de atención (opcional)</h3><p>Solo los días que completes se mostrarán en la aplicación. Los campos vacíos no se publican. Marca «Cerrado» cuando el local no atienda ese día.</p><div className="ops-grid">{weekdays.map(day=>{const h=store.openingHours[day.id];const closed=!!h&&'closed' in h;const setHours=(next:DayHours|undefined)=>setStore(prev=>{const hours={...prev.openingHours};if(next)hours[day.id]=next;else delete hours[day.id];return {...prev,openingHours:hours}});return <div key={day.id} className="ops-row"><strong>{day.label}</strong><label className="ops-check"><input type="checkbox" checked={closed} onChange={e=>setHours(e.target.checked?{closed:true}:undefined)}/>Cerrado</label><label>Apertura<input type="time" disabled={closed} value={h&&!closed&&'open' in h?h.open:''} onChange={e=>{const v=e.target.value;if(!v){setHours(undefined);return}setHours({open:v,close:h&&!closed&&'close' in h?h.close:''})}}/></label><label>Cierre<input type="time" disabled={closed} value={h&&!closed&&'close' in h?h.close:''} onChange={e=>{const v=e.target.value;if(!v){setHours(undefined);return}setHours({open:h&&!closed&&'open' in h?h.open:'',close:v})}}/></label></div>})}</div></div><button className="button button-primary" disabled={loading||!hasUnsavedStoreChanges} onClick={()=>void act(async()=>{if(!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(store.code)||store.code.length<2||store.code.length>80)throw new Error('Completa el ID de la sede con minúsculas, números y guiones (2 a 80 caracteres)');const saved=await api<StoreRow>(`/api/admin/tenants/${tenantId}/stores`,'POST',{...store,openingHours:Object.keys(store.openingHours).length?store.openingHours:null,latitude:store.latitude?Number(store.latitude):null,longitude:store.longitude?Number(store.longitude):null,radiusKm:store.radiusKm===''?null:Number(store.radiusKm),deliveryRatePerKmPen:store.deliveryPricingMode==='PER_KM'&&store.deliveryRatePerKmPen!==''?Number(store.deliveryRatePerKmPen):null,deliveryFeePen:store.deliveryPricingMode==='FIXED'&&store.deliveryFeePen!==''?Number(store.deliveryFeePen):null});const next={...store,id:saved.id,code:saved.code};setStore(next);setStoreBaseline(JSON.stringify(next));await refresh();setStoreSavedNotice(true)})}>Guardar local</button>{storeSavedNotice&&!hasUnsavedStoreChanges&&<div className="ops-save-next" role="status"><div className="ops-save-next-heading"><Check size={18}/><strong>Sede guardada correctamente</strong></div><p>Los cambios están guardados, pero todavía no se han publicado en la aplicación. ¿Qué deseas hacer?</p><div className="ops-save-next-actions"><button type="button" className="button button-secondary" onClick={()=>setStoreSavedNotice(false)}>Seguir editando</button><button type="button" className="button button-primary" onClick={()=>chooseArea('publish')}><Send size={15}/> Ir a publicar</button></div></div>}</div>
+
+ const updateServiceSchedule=(service:'delivery'|'pickup',kind:'orders'|'fulfillment',next:OpeningHours)=>{
+  setStore(prev=>({...prev,serviceHours:{...prev.serviceHours,[service]:{
+   ...prev.serviceHours[service],[kind]:next
+  }}}))
+ }
+ const weeklySchedule=(value:OpeningHours,apply:(next:OpeningHours)=>void,description:string)=><div className="ops-schedule-block">
+  <p className="ops-hint">{description}</p>
+  <div className="ops-grid">{weekdays.map(day=>{
+   const h=value[day.id];const closed=!!h&&'closed' in h
+   const setDay=(next:DayHours|undefined)=>{const updated={...value};if(next)updated[day.id]=next;else delete updated[day.id];apply(updated)}
+   return <div key={day.id} className="ops-row">
+    <strong>{day.label}</strong>
+    <label className="ops-check"><input type="checkbox" checked={closed} onChange={e=>setDay(e.target.checked?{closed:true}:undefined)}/>Cerrado</label>
+    <label>Desde<input type="time" disabled={closed} value={h&&!closed&&'open' in h?h.open:''}
+     onChange={e=>{const v=e.target.value;setDay(v?{open:v,close:h&&!closed&&'close' in h?h.close:''}:undefined)}}/></label>
+    <label>Hasta<input type="time" disabled={closed} value={h&&!closed&&'close' in h?h.close:''}
+     onChange={e=>{const v=e.target.value;setDay(v?{open:h&&!closed&&'open' in h?h.open:'',close:v}:undefined)}}/></label>
+   </div>
+  })}</div>
+ </div>
+ const saveStore=()=>void act(async()=>{
+  if(!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(store.code)||store.code.length<2||store.code.length>80)
+   throw new Error('Completa el ID de la sede con minúsculas, números y guiones (2 a 80 caracteres)')
+  const saved=await api<StoreRow>(`/api/admin/tenants/${tenantId}/stores`,'POST',{
+   ...store,
+   openingHours:Object.keys(store.openingHours).length?store.openingHours:null,
+   serviceHours:store.serviceHours,
+   latitude:store.latitude?Number(store.latitude):null,
+   longitude:store.longitude?Number(store.longitude):null,
+   radiusKm:store.radiusKm===''?null:Number(store.radiusKm),
+   deliveryRatePerKmPen:store.deliveryPricingMode==='PER_KM'&&store.deliveryRatePerKmPen!==''?Number(store.deliveryRatePerKmPen):null,
+   deliveryFeePen:store.deliveryPricingMode==='FIXED'&&store.deliveryFeePen!==''?Number(store.deliveryFeePen):null
+  })
+  const next={...store,id:saved.id,code:saved.code}
+  setStore(next);setStoreBaseline(JSON.stringify(next))
+  await refresh();setStoreSavedNotice(true)
+ })
+ const renderStoreEditor=()=>storeEditorOpen&&<div className="ops-sede-editor" id={store.id?`sede-editor-${store.id}`:'sede-editor-new'}>
+  <div className="ops-inline"><h3>{store.id?(
+   {details:'Datos y ubicación',hours:'Horario del local',delivery:'Delivery',pickup:'Recojo en tienda'}[storeFocus]
+  ):'Nueva sede'}</h3>
+   <button type="button" className="button button-secondary" onClick={()=>{
+    if(hasUnsavedStoreChanges&&!window.confirm('Hay cambios sin guardar. ¿Quieres cerrar el formulario?'))return
+    setStore(emptyStore());setStoreBaseline(JSON.stringify(emptyStore()));setStoreEditorOpen(false);setStoreSavedNotice(false)
+   }}>Cerrar</button>
+  </div>
+  {hasUnsavedStoreChanges&&<p className="ops-unsaved" role="status">Tienes cambios sin guardar en esta sede.</p>}
+  {storeFocus==='details'&&<section id="ops-store-details">
+   <div className="ops-grid">
+    <div className="ops-store-code"><label>ID de sede<input value={store.code} readOnly={!!store.id}
+     maxLength={80} onChange={e=>setStore({...store,code:e.target.value})}/></label>
+     <button type="button" className="button button-secondary" disabled={!store.code} onClick={()=>void copyStoreCode(store.code)}><Copy size={15}/> Copiar ID</button>
+    </div>
+    <label>Nombre del local<input value={store.name} onChange={e=>setStore({...store,name:e.target.value})}/></label>
+    <label>Dirección<input value={store.address} onChange={e=>setStore({...store,address:e.target.value})}/></label>
+    <label>Latitud GPS<input inputMode="decimal" value={store.latitude} onChange={e=>setStore({...store,latitude:e.target.value})}/></label>
+    <label>Longitud GPS<input inputMode="decimal" value={store.longitude} onChange={e=>setStore({...store,longitude:e.target.value})}/></label>
+   </div>
+   <div className="ops-switches">
+    <label><input type="checkbox" checked={store.active} onChange={e=>setStore({...store,active:e.target.checked})}/> Local activo</label>
+    <label><input type="checkbox" checked={store.dine_in_enabled} onChange={e=>setStore({...store,dine_in_enabled:e.target.checked})}/> Comer en tienda</label>
+   </div>
+   <p className="ops-hint">Este bloque define la identidad y la apertura física del local. Los horarios de recepción de pedidos se configuran por servicio.</p>
+  </section>}
+  {storeFocus==='hours'&&<section id="ops-store-hours">
+   <h3>Horario de apertura al público</h3>
+   {weeklySchedule(store.openingHours,next=>setStore(prev=>({...prev,openingHours:next})),
+    'Estos horarios describen la apertura física. No limitan automáticamente cuándo Delivery o Recojo pueden recibir pedidos.')}
+  </section>}
+  {storeFocus==='delivery'&&<section id="ops-store-delivery">
+   <label className="ops-check"><input type="checkbox" checked={store.delivery_enabled}
+    onChange={e=>setStore({...store,delivery_enabled:e.target.checked})}/> Habilitar Delivery en este local</label>
+   <div className="ops-grid">
+    <label>Cobertura máxima (km; vacío = sin límite)<input type="number" min="0.1" max="500" step="0.1"
+     value={store.radiusKm} onChange={e=>setStore({...store,radiusKm:e.target.value})}/></label>
+    <label>Cálculo de tarifa<select value={store.deliveryPricingMode}
+     onChange={e=>setStore({...store,deliveryPricingMode:e.target.value as 'PER_KM'|'FIXED'})}>
+     <option value="PER_KM">Por kilómetro</option><option value="FIXED">Costo fijo</option></select></label>
+    {store.deliveryPricingMode==='FIXED'?<label>Costo fijo (S/)<input type="number" min="0" step="0.01" value={store.deliveryFeePen}
+      onChange={e=>setStore({...store,deliveryFeePen:e.target.value})}/></label>:
+     <label>Tarifa por km (S/)<input type="number" min="0" step="0.01" value={store.deliveryRatePerKmPen}
+      onChange={e=>setStore({...store,deliveryRatePerKmPen:e.target.value})}/></label>}
+   </div>
+   <label className="ops-check"><input type="checkbox" checked={store.consultOrderAvailability}
+    onChange={e=>setStore({...store,consultOrderAvailability:e.target.checked})}/>
+    Consultar disponibilidad del pedido con TU VERSO para esta sede</label>
+   <h3>Horario para recibir pedidos Delivery</h3>
+   {weeklySchedule(store.serviceHours.delivery?.orders||{},next=>updateServiceSchedule('delivery','orders',next),
+     'El cliente puede solicitar el pedido en este horario, aunque el local todavía no esté abierto al público. Si no se configura, se conserva el horario general anterior.')}
+   <h3>Horario de entregas Delivery</h3>
+   {weeklySchedule(store.serviceHours.delivery?.fulfillment||{},next=>updateServiceSchedule('delivery','fulfillment',next),
+     'Indica cuándo se pueden entregar pedidos. Es independiente del horario de recepción y del horario físico.')}
+  </section>}
+  {storeFocus==='pickup'&&<section id="ops-store-pickup">
+   <label className="ops-check"><input type="checkbox" checked={store.pickup_enabled}
+    onChange={e=>setStore({...store,pickup_enabled:e.target.checked})}/> Habilitar Recojo en tienda</label>
+   <h3>Horario para recibir pedidos de Recojo</h3>
+   {weeklySchedule(store.serviceHours.pickup?.orders||{},next=>updateServiceSchedule('pickup','orders',next),
+     'El cliente puede solicitar su pedido en este horario, antes de que empiece el horario de recojo. Si no se configura, se conserva el horario general anterior.')}
+   <h3>Horario disponible para recoger</h3>
+   {weeklySchedule(store.serviceHours.pickup?.fulfillment||{},next=>updateServiceSchedule('pickup','fulfillment',next),
+     'Define desde cuándo pueden entregarse los pedidos de recojo, independientemente de la hora de recepción.')}
+  </section>}
+  <button className="button button-primary" disabled={loading||!hasUnsavedStoreChanges} onClick={saveStore}>
+   Guardar {store.id?'configuración':'nuevo local'}
+  </button>
+  {storeSavedNotice&&!hasUnsavedStoreChanges&&<div className="ops-save-next" role="status">
+   <div className="ops-save-next-heading"><Check size={18}/><strong>Cambios guardados</strong></div>
+   <p>Para que la aplicación reciba la nueva configuración debes publicar los cambios.</p>
+   <div className="ops-save-next-actions"><button type="button" className="button button-secondary"
+    onClick={()=>setStoreSavedNotice(false)}>Seguir editando</button>
+    <button type="button" className="button button-primary" onClick={()=>chooseArea('publish')}>Ir a publicar</button>
+   </div>
+  </div>}
+ </div>
  if(!session)return <main className="ops-wrapper"><h1>Administración comercial</h1><p>Inicia sesión con una cuenta verificada en el servidor. El selector de rol de la maqueta no concede permisos.</p><form className="ops-panel ops-form" onSubmit={login}><label>Correo<input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Contraseña<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><button className="button button-primary" disabled={loading}>Iniciar sesión</button>{error&&<p role="alert" className="ops-error">{error}</p>}</form></main>
  return <div className="ops-wrapper">
   <div className="ops-top"><div><p className="eyebrow">ADMINISTRACIÓN DE EMPRESAS Y SEDES</p><h1>{session.role==='SUPER_ADMIN'?tenants.find(t=>t.id===tenantId)?.name||'Administrador de empresas':'Administrador de tu empresa'}</h1><p>Selecciona un local para identificar rápidamente qué configuración estás editando.</p></div>{!embeddedSession&&<button className="button button-secondary" onClick={()=>void act(async()=>{await api('/api/admin/logout','POST');setSession(null);setTenantId('');setTenants([])})}>Cerrar sesión</button>}</div>
