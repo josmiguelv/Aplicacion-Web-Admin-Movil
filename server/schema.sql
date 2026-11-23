@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS promotions (
 CREATE TABLE IF NOT EXISTS payment_methods (
   tenant_id UUID NOT NULL REFERENCES tenants(id),
   store_id UUID NOT NULL,
-  mode TEXT NOT NULL CHECK(mode IN ('delivery','pickup','dine_in')),
+  mode TEXT NOT NULL CHECK(mode IN ('delivery','pickup','dine_in','reservation')),
   method TEXT NOT NULL CHECK(method IN ('yape','plin','card','cash')),
   enabled BOOLEAN NOT NULL DEFAULT false,
   PRIMARY KEY (tenant_id,store_id,mode,method),
