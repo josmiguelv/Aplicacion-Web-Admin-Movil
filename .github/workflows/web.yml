@@ -43,6 +43,7 @@ jobs:
       - name: Validate API syntax
         run: |
           node --check server/index.mjs
+          node --check server/mobile-reservation-settings.mjs
           node --check server/bootstrap-admin.mjs
           node --check server/smoke.mjs
       - name: Build frontend
@@ -52,6 +53,8 @@ jobs:
       - name: Install database schema (disposable CI database only)
         run: |
           node --input-type=module -e 'import pg from "pg";import {readFileSync} from "node:fs";const p=new pg.Pool({connectionString:process.env.DATABASE_URL});try{await p.query(readFileSync("server/schema.sql","utf8"))}finally{await p.end()}'
+      - name: Test reservation policies and PostgreSQL tenant isolation
+        run: node --test server/mobile-reservation-settings.test.mjs
       - name: Bootstrap CI superadmin
         run: node server/bootstrap-admin.mjs
       - name: Start isolated API
