@@ -4,6 +4,7 @@ import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.m
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
 import {createMobileReservationSlotsRoute} from './mobile-reservation-slots.mjs'
 import {createMobileReservationsRoutes} from './mobile-reservations.mjs'
+import {createAdminReservationRoutes} from './admin-reservations.mjs'
 import {readStoreReservationSettings,saveStoreReservationSettings,publishedReservationSettings} from './mobile-reservation-settings.mjs'
 import {checkoutPolicy,updateCheckoutPolicy,runCheckoutNotifications} from './mobile-checkout-followups.mjs'
 import {createServer} from 'node:http'
@@ -192,6 +193,7 @@ const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,bo
 const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:(store,zone)=>{const hours=storeHours(store,new Date(),zone||DEFAULT_TENANT_TZ);return hours.hoursConfigured===true&&hours.isOpen===true}});
 const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours});
 const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours,deliveryQuotes});
+const adminReservationsRoutes=createAdminReservationRoutes({pool,body,json,tenantOf});
 async function quote(req,res){
  const b=await body(req);
  if(!word(b.appId,150)||!mode(b.mode))throw bad(400,'Modalidad y aplicación obligatorias');
@@ -240,6 +242,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    if(req.method!=='POST')throw bad(405,'Método no permitido');
    return json(res,200,await saveStoreReservationSettings(pool,tenantId,storeId,user.id,await body(req)));
   }
+  if(await adminReservationsRoutes({req,res,url,user}))return
   if(await adminApiKeyRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(await integrationRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
