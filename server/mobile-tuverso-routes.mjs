@@ -86,7 +86,7 @@ function orderForm(cart,store,customer){
  if(products.length>2||products.some(part=>!part||part.length>500))
   throw fail(422,'El pedido supera el límite de información del formulario. Reduce los productos.')
  const form={
-  title:'POLLOS B3 - SOLICITUD DE VALIDACION',
+  title:'VALIDACIÓN DE PEDIDO',
   subtitle:'Subtotal productos: S/ '+cart.subtotal.toFixed(2)+'. Delivery pendiente. No preparar ni cobrar antes de la confirmación.',
   fields:[
    {variable:'Sede',value:String(store.name||'Sede').trim()},
@@ -339,6 +339,23 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
       throw fail(403,'Interacción no autorizada para esta aplicación y sede')
     if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED')
       throw fail(409,'La solicitud ya no permite enviar mensajes')
+    const initialOrderFollowup=!independentMessage||
+      type==='FORM'&&directForm&&/^validaci[oó]n de pedido$/i.test(form?.title||'')
+    if(initialOrderFollowup){
+      // Legacy order TEXT and the known initial validation FORM are two
+      // representations of the same initial order, never two messages.
+      // Other independently authored forms remain deliverable unchanged. When the first
+      // message already is a FORM, return that receipt instead of sending a
+      // duplicate. Read is scoped by the validated interaction + binding.
+      // A failed lookup must never fall back to blind re-send.
+      const existing=await readMessages(integration.token,interactionId)
+      if(!existing.ok||existing.data?.interactionId!==interactionId)
+        throw fail(503,'No se pudo comprobar el formulario existente')
+      const initial=existing.data.messages?.find(row=>
+        row.direction==='INBOUND'&&row.type==='FORM'&&VALID_UUID.test(row.id))
+      if(initial)return json(res,200,{interactionId,delivered:true,
+        messageId:initial.id,type:'FORM'})
+    }
     const delivered=await sendMessage(integration.token,interactionId,
      type==='FORM'?{
       idempotencyKey:directForm?rawMessageKey:orderMessageIdempotency(access,interactionId),type:'FORM',form
@@ -374,8 +391,12 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))throw fail(409,'El catálogo cambió: actualiza tu pedido')
    const cart=calculateOrderCart(ctx.payload.products,input.items)
    const customer=normalizeCustomer(input.customer)
-   // The CREATE summary is the one-line opening TEXT visible to the agent.
-   // Product, subtotal and address details are delivered separately as FORM.
+   // A mobile checkout with customer details starts with ONE canonical FORM.
+   // TU VERSO supports FORM atomically at POST /api/v1/interactions.
+   // The old Android follow-up POST is retained for legacy requests only.
+   const initialForm=customer?orderForm(cart,ctx.store,customer):undefined
+   // The CREATE summary is the metadata for the opening FORM (not a separate TEXT).
+   // Product, subtotal and address details are delivered atomically in FORM.
    // Keep this literal identical for every new MOBILE_APP order.
    const listSummary='Pedido nuevo !! Aplicación móvil'
    const integration=await binding(ctx.tenantId,input.appId,input.storeId)
@@ -390,12 +411,14 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey,
      ...(customer?{customer:{firstName:customer.firstName,lastName:customer.lastName,
       phone:'+51'+customer.phone,...(customer.email?{email:customer.email}:{}),
-      phoneVerified:false,emailVerified:false}}:{})
+      phoneVerified:false,emailVerified:false}}:{}),
+     ...(initialForm?{type:'FORM',form:initialForm}:{})
    })
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:remoteAuthStatus(result),'TU VERSO no pudo iniciar la solicitud')
    if(result.data?.externalReference!==externalReference||result.data?.externalLocationId!==integration.external_location_id||
       result.data?.purpose!=='ORDER_REQUEST')throw fail(503,'Respuesta de TU VERSO no corresponde a la sede autorizada')
-   return json(res,result.httpStatus===201?201:200,{interactionId:result.data.interactionId,status:result.data.status,storeId:input.storeId,externalReference:result.data.externalReference})
+   return json(res,result.httpStatus===201?201:200,{interactionId:result.data.interactionId,status:result.data.status,storeId:input.storeId,externalReference:result.data.externalReference,
+     ...(initialForm?{formIncluded:true}:{})})
   }catch(error){
    const status=safeError(error)
    return json(res,status,{error:status===503?'Operación temporalmente no disponible':error.message})
