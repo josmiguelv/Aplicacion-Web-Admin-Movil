@@ -141,7 +141,8 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
    new Date(new Date(row.scheduled_at).getTime()-row.preparation_minutes*60000).toISOString():null});
  async function expire(row){
   if((row.status==='AWAITING_PAYMENT'&&row.payment_expires_at&&new Date(row.payment_expires_at)<=now())||
-    (activeStates.includes(row.status)&&new Date(row.scheduled_at)<=now())){
+    (['CREATING','FORM_UNCERTAIN','AWAITING_AGENT','AWAITING_PAYMENT'].includes(row.status)&&
+      (new Date(row.hold_until)<=now()||new Date(row.scheduled_at)<=now()))){
    const q=await pool.query(`UPDATE mobile_scheduled_orders SET status='EXPIRED',updated_at=now()
     WHERE id=$1 AND status IN ('CREATING','FORM_UNCERTAIN','AWAITING_AGENT','AWAITING_PAYMENT')
       AND (hold_until<=now() OR scheduled_at<=now()) RETURNING *`,[row.id]);
@@ -180,7 +181,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
     status='AWAITING_PAYMENT',agent_decision_message_id=$2,approved_at=now(),
     payment_expires_at=now()+($3*interval '1 minute'),
     hold_until=now()+($3*interval '1 minute'),updated_at=now()
-    WHERE id=$1 AND status='AWAITING_AGENT' AND scheduled_at>now()
+    WHERE id=$1 AND status='AWAITING_AGENT' AND scheduled_at>now() AND hold_until>now()
     RETURNING *`,[row.id,decision.id,policy.paymentWaitMinutes]);
    return q.rows[0]?{...row,...q.rows[0]}:expire(await findMine(row.app_id,row.id,row._accessKey));
   }
@@ -287,7 +288,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
      (tenant_id,app_id,store_id,idempotency_key,access_hash,request_hash,mode,scheduled_at,
       service_date,service_time,hold_until,catalog_revision,products,customer,destination,
       subtotal_pen,delivery_fee_pen,total_pen,preparation_minutes,form_key)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$8,$11,$12::jsonb,$13::jsonb,
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()+interval '15 minutes',$11,$12::jsonb,$13::jsonb,
       $14::jsonb,$15,$16,$17,$18,$19)
      RETURNING *`,
      [ctx.tenantId,value.appId,sel.storeId,key,ownerHash(access),requestHash,
