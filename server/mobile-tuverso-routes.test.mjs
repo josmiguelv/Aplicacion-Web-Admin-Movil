@@ -126,12 +126,32 @@ test('create uses validated published catalog, exact scoped binding, stable upst
  assert.equal(first.payload.storeId,storeA)
  assert.equal(h.remote.length,2)
  assert.equal(h.remote[0].operation,'interaction')
- assert.equal(h.remote[0].input.summary.includes('2 x Pollo A'),true)
+ assert.equal(h.remote[0].input.summary,'Pedido nuevo !! Aplicación móvil')
  assert.equal(h.remote[0].input.idempotencyKey,id)
  assert.equal(h.remote[0].input.externalReference,h.remote[1].input.externalReference)
  assert.equal(h.remote[0].binding.external_location_id,'location-a')
  assert.equal('token' in first.payload,false)
 })
+test('opening message is always identical across different products, customers and stores',async()=>{
+ const cases=[
+  {body:createBody(),expected:storeA},
+  {body:createBody({items:[{productId:product,quantity:1}],customer:{
+   firstName:'Persona',lastName:'Prueba',phone:'987654321',
+   address:'Av. Ejemplo 123',district:'Santa Anita',mode:'delivery'}}),expected:storeA},
+  {body:{appId:appB,storeId:storeB,quoteRevision:9,customerExternalId:'other-123',
+   items:[{productId:product,quantity:2}]},expected:storeB}
+ ]
+ for(const {body,expected} of cases){
+  const h=harness(),r=await h.call('POST','/api/v1/mobile/interactions',{
+   headers:headers(),payload:body})
+  assert.equal(r.code,201)
+  assert.equal(r.payload.storeId,expected)
+  assert.deepEqual(h.remote.map(x=>x.operation),['interaction'])
+  assert.equal(h.remote[0].input.summary,'Pedido nuevo !! Aplicación móvil')
+  assert.equal('text' in h.remote[0].input,false)
+ }
+})
+
 test('invalid store, injected tenant, outdated catalog and missing idempotency fail before remote',async()=>{
  const h=harness()
  const cross=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),payload:createBody({storeId:storeB})})
@@ -173,7 +193,7 @@ test('create returns interactionId before FORM, and FORM delivery runs independe
  assert.deepEqual(h.remote.map(x=>x.operation),['interaction'])
  const id=response.payload.interactionId
  const sent=h.remote.find(x=>x.operation==='interaction')
- assert.ok(sent.input.summary.includes('2 x Pollo A'))
+ assert.equal(sent.input.summary,'Pedido nuevo !! Aplicación móvil')
  assert.ok(!sent.input.summary.includes('+51'))
  assert.deepEqual(sent.input.customer,{firstName:'Ana',lastName:'Quispe',
   phone:'+51912345678',phoneVerified:false,emailVerified:false})
