@@ -142,7 +142,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      {title:'Delivery',subtitle:selectedStore.delivery_enabled?'Servicio habilitado · Cobertura y tarifas':'Servicio deshabilitado',icon:Bike,focus:'delivery',action:'stores',on:selectedStore.delivery_enabled},
      {title:'Recojo en tienda',subtitle:selectedStore.pickup_enabled?'Servicio habilitado':'Servicio deshabilitado',icon:ShoppingBag,focus:'pickup',action:'stores',on:selectedStore.pickup_enabled},
      {title:'Reservas',focus:'details',subtitle:reservationFlags[selectedStore.id]===true?'Configuradas y habilitadas':reservationFlags[selectedStore.id]===null?'No se pudo consultar':'Pendiente de habilitar',icon:CalendarDays,action:'reservations',on:reservationFlags[selectedStore.id]===true},
-     {title:'Formas de pago',focus:'details',subtitle:'Delivery, Recojo y Reserva habilitada',icon:CreditCard,action:'payments',on:true}
+     {title:'Formas de pago',focus:'details',subtitle:'Delivery, Recojo y Reserva si está habilitada',icon:CreditCard,action:'payments',on:true}
     ] as const).map(item=><button type="button" className="ops-module-card" key={item.title} onClick={()=>enterLocalModule(item.action,item.focus)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={item.on}>{item.on?'Configurar':'Revisar configuración'}</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}{([
       {area:'products',title:'Productos',subtitle:'Catálogo maestro de la empresa · compartido',icon:Package},
       {area:'promotions',title:'Promociones',subtitle:'Promociones generales · compartidas',icon:Tag},
