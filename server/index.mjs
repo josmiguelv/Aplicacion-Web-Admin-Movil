@@ -56,6 +56,22 @@ function validateOpeningHours(value){
    /^([01]\d|2[0-3]):[0-5]\d$/.test(v.open)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v.close)&&v.open!==v.close)
  ));
 }
+function validateServiceHours(value){
+ if(value===null||value===undefined)return true;
+ if(!value||typeof value!=='object'||Array.isArray(value)||
+    Object.keys(value).some(k=>!['delivery','pickup'].includes(k)))return false;
+ return Object.values(value).every(service=>service&&typeof service==='object'&&!Array.isArray(service)&&
+  Object.keys(service).every(k=>['orders','fulfillment'].includes(k))&&
+  Object.values(service).every(schedule=>validateOpeningHours(schedule)));
+}
+function serviceHoursAt(store,mode,kind='orders',date=new Date(),timeZone=DEFAULT_TENANT_TZ){
+ const schedule=store.serviceHours??store.service_hours??{};
+ const custom=schedule?.[mode]?.[kind];
+ // Existing stores keep their previously configured physical hours until
+ // a specific service schedule is defined; no false default hours are created.
+ const hours=custom&&Object.keys(custom).length?custom:store.openingHours??store.opening_hours;
+ return storeHours({openingHours:hours},date,timeZone);
+}
 function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
  const hours=store.openingHours??store.opening_hours;
  if(!hours||typeof hours!=='object')return {hoursConfigured:false};
@@ -74,14 +90,14 @@ function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
 function withLiveHours(store,timeZone,at=new Date()){return {...store,...storeHours(store,at,timeZone)}}
 
 async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,tenantSettings]=await Promise.all([
- tx.query('SELECT s.id,s.name,s.address,s.latitude,s.longitude,s.radius_km,s.delivery_fee_pen,s.delivery_rate_per_km_pen,s.delivery_pricing_mode,s.active,s.delivery_enabled,s.pickup_enabled,s.dine_in_enabled,s.opening_hours,s.consult_order_availability, r.enabled AS reservation_enabled, r.min_advance_minutes AS reservation_min_advance_minutes, r.max_advance_days AS reservation_max_advance_days, r.first_time AS reservation_first_time, r.last_time AS reservation_last_time, r.preparation_minutes AS reservation_preparation_minutes FROM stores s LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id WHERE s.tenant_id=$1 AND s.active=true ORDER BY s.name',[tenantId]),
+ tx.query('SELECT s.id,s.name,s.address,s.latitude,s.longitude,s.radius_km,s.delivery_fee_pen,s.delivery_rate_per_km_pen,s.delivery_pricing_mode,s.active,s.delivery_enabled,s.pickup_enabled,s.dine_in_enabled,s.opening_hours,s.consult_order_availability, r.enabled AS reservation_enabled, r.min_advance_minutes AS reservation_min_advance_minutes, r.max_advance_days AS reservation_max_advance_days, r.first_time AS reservation_first_time, r.last_time AS reservation_last_time, r.preparation_minutes AS reservation_preparation_minutes, s.service_hours FROM stores s LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id WHERE s.tenant_id=$1 AND s.active=true ORDER BY s.name',[tenantId]),
  tx.query('SELECT id,name,description,category,price_pen,image_url FROM products WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query('SELECT id,title,starts_at,ends_at FROM promotions WHERE tenant_id=$1 AND active=true AND (starts_at IS NULL OR starts_at<=now()) AND (ends_at IS NULL OR ends_at>=now())',[tenantId]),
  tx.query('SELECT store_id,mode,method FROM payment_methods WHERE tenant_id=$1 AND enabled=true',[tenantId]),
  tx.query('SELECT id,title,summary,description,requirements,schedule,employment_type AS "employmentType",location_label AS "locationLabel",image_url AS "imageUrl",whatsapp_phone AS "whatsappPhone" FROM job_vacancies WHERE tenant_id=$1 AND active=true ORDER BY updated_at DESC,id',[tenantId]),
  tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]),
  tx.query('SELECT time_zone FROM tenants WHERE id=$1 AND active=true',[tenantId])
- ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,consultOrderAvailability:s.consult_order_availability===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,min_advance_minutes:s.reservation_min_advance_minutes,max_advance_days:s.reservation_max_advance_days,first_time:s.reservation_first_time,last_time:s.reservation_last_time,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,serviceHours:s.service_hours??{},consultOrderAvailability:s.consult_order_availability===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,min_advance_minutes:s.reservation_min_advance_minutes,max_advance_days:s.reservation_max_advance_days,first_time:s.reservation_first_time,last_time:s.reservation_last_time,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(s=>({
  ...withLiveHours(s,q.rows[0].payload.timeZone),
@@ -136,7 +152,7 @@ async function roadDistanceKm(store,destination,revision){
 }
 
 async function deliveryQuotes(config,b,revision,legacyLimaFallback=false,at=new Date()){
- const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone,at)).filter(s=>s.active&&s.delivery_enabled===true&&s.hoursConfigured===true&&s.isOpen===true);
+ const eligible=config.stores.filter(s=>s.active&&s.delivery_enabled===true&&(()=>{const h=serviceHoursAt(s,'delivery','orders',at,config.timeZone);return h.hoursConfigured===true&&h.isOpen===true})());
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para Delivery');
  const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
  if(!hasCoordinates)throw bad(422,'Necesitamos coordenadas verificadas del destino para estimar el delivery sin Google Routes.');
@@ -182,15 +198,15 @@ function limitMobileOrderRequests(req){
  if(++current.count>max)throw bad(429,'Demasiadas solicitudes de pedido. Intenta de nuevo en un minuto');
 }
 async function isOrderCandidateLive(tenantId,candidate){
- const result=await sql(`SELECT s.active,s.delivery_enabled,s.opening_hours,t.time_zone
+ const result=await sql(`SELECT s.active,s.delivery_enabled,s.opening_hours,s.service_hours,t.time_zone
   FROM stores s JOIN tenants t ON t.id=s.tenant_id
   WHERE s.tenant_id=$1 AND s.id=$2 AND t.active=true`,[tenantId,candidate.storeId]);
  const store=result.rows[0];if(!store||!store.active||!store.delivery_enabled)return false;
- const hours=storeHours({opening_hours:store.opening_hours},new Date(),store.time_zone||DEFAULT_TENANT_TZ);
+ const hours=serviceHoursAt(store,'delivery','orders',new Date(),store.time_zone||DEFAULT_TENANT_TZ);
  return hours.hoursConfigured===true&&hours.isOpen===true
 }
 const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
-const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:(store,zone)=>{const hours=storeHours(store,new Date(),zone||DEFAULT_TENANT_TZ);return hours.hoursConfigured===true&&hours.isOpen===true}});
+const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:(store,zone)=>{const hours=serviceHoursAt(store,'delivery','orders',new Date(),zone||DEFAULT_TENANT_TZ);return hours.hoursConfigured===true&&hours.isOpen===true}});
 const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours});
 const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours,deliveryQuotes});
 const adminReservationsRoutes=createAdminReservationRoutes({pool,body,json,tenantOf});
@@ -200,7 +216,7 @@ async function quote(req,res){
  const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[b.appId]);
  if(!q.rowCount)throw bad(409,'Catálogo no publicado');
  const config=q.rows[0].payload;
- const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone)).filter(s=>s.active&&s[b.mode==='dine_in'?'dine_in_enabled':b.mode+'_enabled']===true&&(b.mode==='delivery'?(s.hoursConfigured===true&&s.isOpen===true):(s.hoursConfigured!==true||s.isOpen===true)));
+ const eligible=config.stores.filter(s=>{if(!s.active||s[b.mode==='dine_in'?'dine_in_enabled':b.mode+'_enabled']!==true)return false;const h=b.mode==='dine_in'?storeHours(s,new Date(),config.timeZone):serviceHoursAt(s,b.mode,'orders',new Date(),config.timeZone);return b.mode==='dine_in'?(h.hoursConfigured!==true||h.isOpen===true):(h.hoursConfigured===true&&h.isOpen===true)});
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para esta modalidad');
  let selected,roadKm=null,deliveryFeePen=0;
  if(b.mode==='delivery'){
@@ -286,9 +302,9 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   }
   const storeCode=b.code??('sede-'+randomUUID());
   const consultOrderAvailability=b.consultOrderAvailability===undefined?false:b.consultOrderAvailability;
-  if(!validateOpeningHours(b.openingHours??null)||!word(b.name,180)||!word(b.address,300)||![b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,consultOrderAvailability].every(bool)||!(b.latitude==null&&b.longitude==null)&&!checkLatLng(b.latitude,b.longitude)||b.radiusKm!=null&&(!safeNumber(b.radiusKm)||b.radiusKm<=0||b.radiusKm>500)||b.deliveryRatePerKmPen!=null&&(!safeNumber(b.deliveryRatePerKmPen)||b.deliveryRatePerKmPen<0||b.deliveryRatePerKmPen>1000)||b.deliveryFeePen!=null&&(!safeNumber(b.deliveryFeePen)||b.deliveryFeePen<0||b.deliveryFeePen>10000)||!['PER_KM','FIXED'].includes(b.deliveryPricingMode??'PER_KM'))throw bad(400,'Datos del local inválidos');
-  const args=[tenantId,b.name.trim(),b.address.trim(),b.latitude??null,b.longitude??null,b.radiusKm??null,b.deliveryRatePerKmPen??null,b.deliveryFeePen??null,b.deliveryPricingMode??'PER_KM',b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,b.openingHours??null,consultOrderAvailability];
-  result=b.id&&uuid(b.id)?await client.query(`UPDATE stores SET name=$2,address=$3,latitude=$4,longitude=$5,radius_km=$6,delivery_rate_per_km_pen=$7,delivery_fee_pen=$8,delivery_pricing_mode=$9,active=$10,delivery_enabled=$11,pickup_enabled=$12,dine_in_enabled=$13,opening_hours=$14,consult_order_availability=$15,updated_at=now() WHERE tenant_id=$1 AND id=$16 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO stores(tenant_id,name,address,latitude,longitude,radius_km,delivery_rate_per_km_pen,delivery_fee_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,consult_order_availability,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,[...args,storeCode])
+  if(!validateOpeningHours(b.openingHours??null)||!validateServiceHours(b.serviceHours??{})||!word(b.name,180)||!word(b.address,300)||![b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,consultOrderAvailability].every(bool)||!(b.latitude==null&&b.longitude==null)&&!checkLatLng(b.latitude,b.longitude)||b.radiusKm!=null&&(!safeNumber(b.radiusKm)||b.radiusKm<=0||b.radiusKm>500)||b.deliveryRatePerKmPen!=null&&(!safeNumber(b.deliveryRatePerKmPen)||b.deliveryRatePerKmPen<0||b.deliveryRatePerKmPen>1000)||b.deliveryFeePen!=null&&(!safeNumber(b.deliveryFeePen)||b.deliveryFeePen<0||b.deliveryFeePen>10000)||!['PER_KM','FIXED'].includes(b.deliveryPricingMode??'PER_KM'))throw bad(400,'Datos del local inválidos');
+  const args=[tenantId,b.name.trim(),b.address.trim(),b.latitude??null,b.longitude??null,b.radiusKm??null,b.deliveryRatePerKmPen??null,b.deliveryFeePen??null,b.deliveryPricingMode??'PER_KM',b.active,b.delivery_enabled,b.pickup_enabled,b.dine_in_enabled,b.openingHours??null,consultOrderAvailability,b.serviceHours??{}];
+  result=b.id&&uuid(b.id)?await client.query(`UPDATE stores SET name=$2,address=$3,latitude=$4,longitude=$5,radius_km=$6,delivery_rate_per_km_pen=$7,delivery_fee_pen=$8,delivery_pricing_mode=$9,active=$10,delivery_enabled=$11,pickup_enabled=$12,dine_in_enabled=$13,opening_hours=$14,consult_order_availability=$15,service_hours=$16,updated_at=now() WHERE tenant_id=$1 AND id=$17 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO stores(tenant_id,name,address,latitude,longitude,radius_km,delivery_rate_per_km_pen,delivery_fee_pen,delivery_pricing_mode,active,delivery_enabled,pickup_enabled,dine_in_enabled,opening_hours,consult_order_availability,service_hours,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,[...args,storeCode])
  }else if(resource==='vacancies'){
   const title=b.title?.trim(),phone=String(b.whatsappPhone||'').replace(/\D/g,'');
   const normalized=phone.length===9?'51'+phone:phone;
