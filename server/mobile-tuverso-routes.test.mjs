@@ -170,7 +170,7 @@ test('new interaction creation accepts catalog revision before pricing',async()=
 })
 const customer={firstName:'Ana',lastName:'Quispe',phone:'912345678',
  address:'Av. Ejemplo 123',district:'Santa Anita',reference:'Porton lateral',mode:'delivery'}
-test('create returns interactionId before FORM, and FORM delivery runs independently',async()=>{
+test('create delivers one FORM atomically and old follow-up adds no duplicate',async()=>{
  const h=harness(),key=randomUUID()
  const response=await h.call('POST','/api/v1/mobile/interactions',{
   headers:{'idempotency-key':key},payload:createBody({customer})})
@@ -189,8 +189,8 @@ test('create returns interactionId before FORM, and FORM delivery runs independe
  assert.equal(delivered.code,200)
  assert.equal(delivered.payload.delivered,true)
  assert.equal(delivered.payload.interactionId,id)
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
- const sentForm=h.remote.find(x=>x.operation==='orderForm').value
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','messages'])
+ const sentForm=h.remote.find(x=>x.operation==='interaction').input
  assert.equal(sentForm.type,'FORM')
  assert.equal('text' in sentForm,false)
  assert.equal(sentForm.form.title,'POLLOS B3 - SOLICITUD DE VALIDACION')
@@ -218,9 +218,9 @@ test('optional email is forwarded in structured customer; unverified flags never
  assert.equal(old.code,201)
  assert.equal('customer' in legacy.remote[0].input,false)
 })
-test('replaying both steps uses one conversation ID and one deterministic message key',async()=>{
+test('replaying creation and legacy follow-up reuses one FORM message receipt',async()=>{
  const h=harness(),key=randomUUID()
- let id=null,messageKey=null
+ let id=null,messageId=null
  for(let i=0;i<2;i++){
   const created=await h.call('POST','/api/v1/mobile/interactions',{
    headers:{'idempotency-key':key},payload:createBody({customer})})
@@ -231,14 +231,13 @@ test('replaying both steps uses one conversation ID and one deterministic messag
   const sent=await h.call('POST','/api/v1/mobile/interactions/'+id+'/message',{
    headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
   assert.equal(sent.code,200)
-  const current=h.remote.filter(x=>x.operation==='orderForm').at(-1).value.idempotencyKey
-  if(i===0)messageKey=current
-  assert.equal(current,messageKey)
-  assert.notEqual(current,key)
+  const current=sent.payload.messageId
+  if(i===0)messageId=current
+  assert.equal(current,messageId)
  }
 })
-test('failed FORM delivery returns 503 without undoing a created interaction',async()=>{
- const h=harness({messageFailure:true}),key=randomUUID()
+test('failed initial FORM lookup returns 503 instead of blindly resending',async()=>{
+ const h=harness({historyFailure:true}),key=randomUUID()
  const created=await h.call('POST','/api/v1/mobile/interactions',{
   headers:{'idempotency-key':key},payload:createBody({customer})})
  assert.equal(created.code,201)
@@ -246,10 +245,10 @@ test('failed FORM delivery returns 503 without undoing a created interaction',as
  const result=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(result.code,503)
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','messages'])
 })
 
-test('legacy Android without type remains TEXT; explicit FORM is never inferred',async()=>{
+test('legacy Android order follow-up is acknowledged without creating TEXT over initial FORM',async()=>{
  const h=harness(),key=randomUUID()
  const created=await h.call('POST','/api/v1/mobile/interactions',{
   headers:{'idempotency-key':key},payload:createBody({customer})})
@@ -257,10 +256,8 @@ test('legacy Android without type remains TEXT; explicit FORM is never inferred'
  const sent=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:createBody({customer})})
  assert.equal(sent.code,200)
- assert.equal(sent.payload.type,'TEXT')
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderText'])
- assert.equal(h.remote.at(-1).value.type,'TEXT')
- assert.match(h.remote.at(-1).value.text,/POLLOS B3 - SOLICITUD DE VALIDACION/)
+ assert.equal(sent.payload.type,'FORM')
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','messages'])
 })
 
 test('explicit TEXT sends exact authorized message with independent UUID, never FORM',async()=>{
@@ -328,7 +325,7 @@ test('Android sends title, subtitle and five independent FORM rows unchanged to 
   assert.equal(r.payload.delivered,true)
   assert.equal(r.payload.type,'FORM')
  }
- assert.deepEqual(h.remote.map(x=>x.operation),['read','orderForm','read','orderForm'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['read','messages','orderForm','read','messages','orderForm'])
  for(const send of h.remote.filter(x=>x.operation==='orderForm')){
   assert.equal(send.value.idempotencyKey,messageKey)
   assert.equal(send.value.type,'FORM')
@@ -381,7 +378,7 @@ test('direct FORM retains tenant and reference authorization and surfaces upstre
  const conflict=await conflicts.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},
   payload:{appId:appA,storeId:storeA,type:'FORM',form}})
  assert.equal(conflict.code,409)
- assert.deepEqual(conflicts.remote.map(x=>x.operation),['read','orderForm'],
+ assert.deepEqual(conflicts.remote.map(x=>x.operation),['read','messages','orderForm'],
   'custom FORM must never invoke historical TEXT recovery')
 })
 
@@ -411,7 +408,7 @@ test('already-delivered legacy TEXT is recovered without sending a duplicate FOR
  assert.equal(result.code,200)
  assert.equal(result.payload.delivered,true)
  assert.ok(result.payload.messageId)
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm','messages'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','messages','orderForm','messages'])
  const conflict=harness({upstream:{message:409}})
  conflict.setReference(created.payload.externalReference)
  const rejected=await conflict.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
@@ -429,7 +426,7 @@ test('stale local message scopes never reject; forged order references remain fo
  const reply=await denied.call('POST','/api/v1/mobile/interactions/'+opened.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(reply.code,200)
- assert.deepEqual(denied.remote.map(x=>x.operation),['interaction','read','orderForm'])
+ assert.deepEqual(denied.remote.map(x=>x.operation),['interaction','read','messages'])
  const forged=harness()
  forged.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
  const other=await forged.call('POST','/api/v1/mobile/interactions/'+randomUUID()+'/message',{
@@ -631,7 +628,7 @@ test('upstream failure to send FORM is authoritative while local order isolation
  const reply=await h.call('POST','/api/v1/mobile/interactions/'+created.payload.interactionId+'/message',{
   headers:{'x-order-access-key':key},payload:{...createBody({customer}),type:'FORM'}})
  assert.equal(reply.code,403)
- assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','orderForm'])
+ assert.deepEqual(h.remote.map(x=>x.operation),['interaction','read','messages','orderForm'])
  const other=harness({scopes:[]})
  const unauthorized=await other.call('GET',endpoint(storeB,appA))
  assert.equal(unauthorized.code,409)
