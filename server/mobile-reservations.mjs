@@ -48,7 +48,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
   return {tenantId:result.rows[0].tenant_id,revision:result.rows[0].revision,payload:result.rows[0].payload,appId};
  }
  async function storeLive(ctx,storeId,client=pool){
-  const result=await client.query(`SELECT s.id,s.name,s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,
+  const result=await client.query(`SELECT s.id,s.name,s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,s.service_hours,
    t.time_zone,r.enabled,r.min_advance_minutes,r.max_advance_days,r.first_time,r.last_time,
    r.preparation_minutes
    FROM stores s JOIN tenants t ON t.id=s.tenant_id
@@ -95,7 +95,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
    const row=await storeLive(ctx,candidate.storeId);
    const settings=mapReservationSettings(row);
    const scheduled=computeReservationSlots({date:q.date,mode:q.mode,
-    store:{...old,active:row.active,delivery_enabled:row.delivery_enabled,
+    store:{...old,serviceMode:q.mode,serviceHours:row.service_hours,active:row.active,delivery_enabled:row.delivery_enabled,
      pickup_enabled:row.pickup_enabled,openingHours:row.opening_hours},
     settings:{...settings,enabled:settings.enabled&&old.reservationSettings.enabled},
     timeZone:row.time_zone||'America/Lima',now:now(),
