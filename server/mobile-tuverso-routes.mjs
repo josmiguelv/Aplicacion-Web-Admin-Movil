@@ -339,7 +339,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
       throw fail(403,'Interacción no autorizada para esta aplicación y sede')
     if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED')
       throw fail(409,'La solicitud ya no permite enviar mensajes')
-    if(type==='FORM'){
+    if(type==='FORM'||!independentMessage){
+      // Existing clients may issue either a follow-up FORM or a legacy order
+      // TEXT after creation. Both are the same initial order when FORM already
+      // exists and must not create a duplicate.
       // Existing clients issue a second FORM after creation. When the first
       // message already is a FORM, return that receipt instead of sending a
       // duplicate. Read is scoped by the validated interaction + binding.
