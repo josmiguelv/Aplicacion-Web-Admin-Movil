@@ -70,7 +70,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST',...(operationalConversationStatus?{operationalConversationStatus}:{})}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});if(historyFailure)return {ok:false,httpStatus:503,errorCode:'CONNECTION_FAILED'};return {ok:true,data:{interactionId:id,messages:[
    ...(initialForms.has(id)?[initialForms.get(id)]:[]),
-   ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString())),
+   ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[]),
    ...(legacyText?[{id:randomUUID(),direction:'INBOUND',text:legacyText,createdAt:new Date().toISOString()}]:[])
   ]}}},
