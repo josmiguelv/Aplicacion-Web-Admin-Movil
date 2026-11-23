@@ -89,3 +89,30 @@ El backend necesita las variables de entorno locales que ya utiliza el proyecto,
 ## Requisitos de cada entrega
 
 Toda entrega debe informar: commit, archivos modificados, necesidad de migración (sí/no), comandos PowerShell para actualizar, instalar/compilar/ejecutar, pruebas locales y alcance. **No declarar validación PASS sin ejecutar realmente la prueba correspondiente.**
+
+
+## Migración 012 — horarios independientes de servicios
+
+Solo modifica el PostgreSQL local del Administrador Web. No realiza copias de seguridad, no modifica TU VERSO y no ejecuta pruebas sobre la base de datos. Añade `stores.service_hours` como JSONB con valor inicial vacío (los horarios antiguos permanecen y sirven de alternativa hasta configurar cada servicio).
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\012-store-service-hours.sql" |
+ docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "La migración 012 falló" }
+```
+
+Si la 011 todavía no se aplicó, ejecutarla **antes** de la 012 siguiendo su apartado anterior. No repetir las migraciones 008, 009 o 010.
+
+### Compilar e iniciar localmente
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+Después ejecutar `pnpm start` y `pnpm dev` en dos terminales distintas. Cada tarjeta de sede abre exclusivamente sus controles: Datos y ubicación, Horario físico, Delivery (recepción, entregas y tarifa), Recojo (recepción y retiro), Reservas y Pagos. El horario de recepción de Delivery puede comenzar antes que el horario de apertura del local.
+
+**No usar GitHub Actions, pruebas ni operaciones de respaldo sobre la base de datos.** Los controles de navegación y compilación no escriben datos en PostgreSQL.
