@@ -69,7 +69,7 @@ function sanitizedData(kind,json){
    externalLocationId:data.externalLocationId,purpose:data.purpose,status:data.status,
    estimatedMinutes:Number.isSafeInteger(data.estimatedMinutes)?data.estimatedMinutes:null,
    decisionReason:typeof data.decisionReason==='string'?data.decisionReason.slice(0,400):null,
-    ...(kind==='read'&&['RESOLVED','CLOSED'].includes(data.operationalConversationStatus)?
+    ...(kind==='read'&&['RESOLVED','CLOSED','OPEN'].includes(data.operationalConversationStatus)?
      {operationalConversationStatus:data.operationalConversationStatus}:{})}
  }
  if(kind==='events'){

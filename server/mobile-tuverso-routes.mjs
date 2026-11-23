@@ -233,7 +233,11 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // A canonical MOBILE_APP conversation may be closed before the customer
     // presses Cancel. Do not attempt to send a message into an already closed chat.
     const operationalConversationStatus=remote.data?.operationalConversationStatus
-    if(operation==='cancel'&&['CLOSED','RESOLVED'].includes(operationalConversationStatus)){
+    // A conversation is open or closed only when TU VERSO explicitly says so.
+    // Absence of an operational status is UNKNOWN, never inferred from assignment.
+    const conversationState=['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
+     'CLOSED':operationalConversationStatus==='OPEN'?'OPEN':'UNKNOWN'
+    if(operation==='cancel'&&conversationState==='CLOSED'){
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
@@ -267,8 +271,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const agentMessages=messages.filter(message=>message.direction==='OUTBOUND')
      .map(message=>({id:message.id,text:message.text,createdAt:message.createdAt}))
     return json(res,200,{interactionId,storeId:input.storeId,
-     status:remote.data.status,agentMessages,messagesAvailable,
-     ...(['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
+     status:remote.data.status,agentMessages,messagesAvailable,conversationState,
+     ...(['OPEN','CLOSED','RESOLVED'].includes(operationalConversationStatus)?
       {operationalConversationStatus}:{})})
    }
    if(messageMatch){
