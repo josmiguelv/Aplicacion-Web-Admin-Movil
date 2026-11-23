@@ -43,13 +43,14 @@ export function computeReservationSlots({date,mode,store,settings,timeZone='Amer
   !settings?.enabled)return {enabled:false,slots:[]};
  const cfg=settings;
  if(!Number.isSafeInteger(cfg.minAdvanceMinutes)||!Number.isSafeInteger(cfg.maxAdvanceDays)||
-  !Number.isSafeInteger(cfg.slotMinutes)||!Number.isSafeInteger(cfg.maxOrdersPerSlot)||
   !Number.isSafeInteger(cfg.preparationMinutes)||!cfg.firstTime||!cfg.lastTime)
   return {enabled:false,slots:[]};
  const min=minute(cfg.firstTime),max=minute(cfg.lastTime);
- if(max<=min||![15,30,60].includes(cfg.slotMinutes))return {enabled:false,slots:[]};
+ if(max<=min)return {enabled:false,slots:[]};
+ // Without configurable slot intervals, any minute within the permitted range
+ // can be requested. The preview is informational, not a capacity hold.
  const slots=[];
- for(let m=min;m<=max;m+=cfg.slotMinutes){
+ for(let m=min;m<=max;m++){
   const time=hhmm(m),epoch=localDateTimeEpoch(date,time,timeZone);
   if(epoch===null||epoch<now.getTime()+cfg.minAdvanceMinutes*60000||
      epoch>now.getTime()+cfg.maxAdvanceDays*86400000)continue;
