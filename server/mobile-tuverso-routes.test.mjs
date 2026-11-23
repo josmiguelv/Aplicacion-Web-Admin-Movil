@@ -19,6 +19,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
+ const initialForms=new Map()
  const terminalSessions=new Map()
  let referenceForTest=''
  const pool={async query(sql,args){
@@ -60,11 +61,16 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});
    if(upstream.create)return {ok:false,httpStatus:upstream.create,errorCode:'UPSTREAM_'+upstream.create}
    if(!createdIds.has(input.idempotencyKey))createdIds.set(input.idempotencyKey,randomUUID())
-   return {ok:true,httpStatus:201,data:{interactionId:createdIds.get(input.idempotencyKey),status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
+   const conversationId=createdIds.get(input.idempotencyKey)
+   if(input.type==='FORM'&&!initialForms.has(conversationId))
+     initialForms.set(conversationId,{id:randomUUID(),direction:'INBOUND',type:'FORM',
+       text:input.form.title,mobileForm:{form:input.form},createdAt:new Date().toISOString()})
+   return {ok:true,httpStatus:201,data:{interactionId:conversationId,status:'PENDING',externalReference:input.externalReference,externalLocationId:binding.external_location_id,purpose:'ORDER_REQUEST'}}
   },
   readInteraction:async(token,id)=>{remote.push({operation:'read',token,id});if(upstream.read)return {ok:false,httpStatus:upstream.read};return {ok:true,data:{interactionId:id,status:remoteStatus,externalReference:referenceForTest,externalLocationId:'location-a',purpose:'ORDER_REQUEST',...(operationalConversationStatus?{operationalConversationStatus}:{})}}},
   readMessages:async(token,id)=>{remote.push({operation:'messages',token,id});if(historyFailure)return {ok:false,httpStatus:503,errorCode:'CONNECTION_FAILED'};return {ok:true,data:{interactionId:id,messages:[
-   ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString()})),
+   ...(initialForms.has(id)?[initialForms.get(id)]:[]),
+   ...(Array.isArray(decisionMessages)?decisionMessages:(decisionMessage?[decisionMessage]:[])).map(text=>({id:randomUUID(),direction:'OUTBOUND',text,createdAt:new Date().toISOString())),
    ...(cancelled?[{id:randomUUID(),direction:'INBOUND',text:'[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.',createdAt:new Date().toISOString()}]:[]),
    ...(legacyText?[{id:randomUUID(),direction:'INBOUND',text:legacyText,createdAt:new Date().toISOString()}]:[])
   ]}}},
