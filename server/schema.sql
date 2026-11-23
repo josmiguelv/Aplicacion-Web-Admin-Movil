@@ -439,6 +439,8 @@ CREATE TABLE IF NOT EXISTS mobile_scheduled_orders (
  interaction_id UUID,
  form_key UUID NOT NULL,
  form_sent BOOLEAN NOT NULL DEFAULT false,
+ cancel_notice_key UUID NOT NULL DEFAULT gen_random_uuid(),
+ cancel_notice_sent BOOLEAN NOT NULL DEFAULT false,
  agent_decision_message_id UUID,
  approved_at TIMESTAMPTZ,
  payment_method TEXT CHECK(payment_method IN ('yape','plin','card','cash')),
