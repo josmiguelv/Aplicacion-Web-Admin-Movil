@@ -45,6 +45,9 @@ jobs:
           node --check server/index.mjs
           node --check server/mobile-reservation-settings.mjs
           node --check server/mobile-reservation-slots.mjs
+          node --check server/mobile-reservations.mjs
+          node --check server/admin-reservations.mjs
+          node --check server/mobile-reservation-domain.mjs
           node --check server/bootstrap-admin.mjs
           node --check server/smoke.mjs
       - name: Build frontend
