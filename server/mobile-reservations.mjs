@@ -8,7 +8,7 @@ import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessa
 import {calculateOrderCart} from './mobile-order-availability.mjs';
 import {checkoutPolicy} from './mobile-checkout-followups.mjs';
 import {mapReservationSettings} from './mobile-reservation-settings.mjs';
-import {computeReservationSlots} from './mobile-reservation-slots.mjs';
+import {computeReservationSlots,localDateTimeEpoch} from './mobile-reservation-slots.mjs';
 import {UUID,APP,DAY,TIME,fail,sha,ownerHash,externalRef,
  normalizeReserveRequest,normalizedForm,explicitAgentDecision,publicReservation} from './mobile-reservation-domain.mjs';
 
@@ -86,7 +86,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
   const candidateStores=q.mode==='delivery'
    ?await deliveryQuotes(ctx.payload,{...q,useGps:true},ctx.revision,false,
       // Iterate future opening hours, never the current isOpen flag.
-      new Date(q.date+'T12:00:00Z'))
+      new Date(localDateTimeEpoch(q.date,q.time,ctx.payload.timeZone||'America/Lima')))
    :[{storeId:q.storeId,deliveryFee:0,routeDistanceKm:null}];
   for(const candidate of candidateStores){
    if(q.storeId&&candidate.storeId!==q.storeId)continue;
@@ -253,7 +253,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
    }
    const sel=await selection(ctx,value);
    if(value.storeId!==sel.storeId||
-     value.mode==='delivery'&&value.expectedDeliveryFeePen!==Math.round(sel.deliveryFeePen*100)/100*100)
+     value.mode==='delivery'&&value.expectedDeliveryFeePen!==Math.round(sel.deliveryFeePen*100))
     throw fail(409,'La sede o tarifa cambiaron. Revisa la cotización');
    const cart=calculateOrderCart(ctx.payload.products,value.items);
    normalizedForm({date:value.date,time:value.time,mode:value.mode,cart});
