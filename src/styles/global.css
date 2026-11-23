@@ -81,3 +81,18 @@
 @media (max-width:620px){.ops-local-grid,.ops-global-grid,.ops-module-grid{grid-template-columns:1fr 1fr;gap:10px}.ops-local-card,.ops-module-card{padding:15px;min-height:180px}.ops-local-card>strong{font-size:16px}.ops-card-status{padding:3px 6px;font-size:10px}.ops-local-card>.ops-card-status{right:10px;top:13px}.ops-card-tags{gap:4px}.ops-card-tags>span{font-size:10px}.ops-module-card>span:not(.ops-module-state){max-width:100%}.ops-local-head{padding:16px}.ops-workspace-head{align-items:flex-start}}
 @media (max-width:410px){.ops-local-grid,.ops-global-grid,.ops-module-grid{grid-template-columns:1fr}.ops-local-card{min-height:210px}}
 @media (prefers-reduced-motion:reduce){.ops-local-card,.ops-module-card{transition:none}.ops-local-card:hover,.ops-module-card:hover{transform:none}}
+
+/* Horarios independientes por servicio: una ficha, un formulario, sin selector de sede duplicado. */
+.ops-store-single-panel .ops-sede-editor{border:0;padding:0;margin:0;box-shadow:none}
+.ops-store-single-panel .ops-sede-editor>.ops-inline:first-child{margin-bottom:18px}
+.ops-schedule-block{margin:12px 0 22px}
+.ops-schedule-block>.ops-hint{font-size:13px!important;line-height:1.55;margin:0 0 14px}
+.ops-schedule-block>.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ops-schedule-block .ops-row{display:grid;grid-template-columns:1fr auto;gap:9px 12px;padding:14px;align-items:center;background:#fafbfc;border:1px solid #e3e8ef;border-radius:12px}
+.ops-schedule-block .ops-row>strong{font-size:13px}
+.ops-schedule-block .ops-row>label:not(.ops-check){min-width:0}
+.ops-schedule-block .ops-row>label:not(.ops-check) input{width:100%;min-width:0}
+.ops-schedule-block .ops-row>label.ops-check{justify-content:flex-end;color:#586678}
+.ops-store-single-panel section[id^="ops-store-"]>h3{font-size:17px;margin:22px 0 12px}
+@media(max-width:750px){.ops-schedule-block>.ops-grid{grid-template-columns:1fr}}
+@media(max-width:380px){.ops-schedule-block .ops-row{grid-template-columns:1fr}.ops-schedule-block .ops-row>label.ops-check{justify-content:flex-start}}
