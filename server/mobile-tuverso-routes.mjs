@@ -239,10 +239,10 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    if(ctx.revision!==(input.catalogRevision??input.quoteRevision))throw fail(409,'El catálogo cambió: actualiza tu pedido')
    const cart=calculateOrderCart(ctx.payload.products,input.items)
    const customer=normalizeCustomer(input.customer)
-   // Open promptly; an agent's response is checked with separate short GET requests.
-   const listSummary=cart.summary.length<=1200?cart.summary:(
-    customer?('Pedido de '+cart.items.length+' productos del catálogo. Subtotal S/ '+cart.subtotal.toFixed(2)+'. Revisar detalle en conversación.'):null)
-   if(!listSummary)throw fail(422,'El resumen del pedido supera el limite permitido')
+   // The CREATE summary is the one-line opening TEXT visible to the agent.
+   // Product, subtotal and address details belong in the separate approval message.
+   // Keep this literal identical for every new MOBILE_APP order.
+   const listSummary='Pedido nuevo !! Aplicación móvil'
    const integration=await binding(ctx.tenantId,input.appId,input.storeId,'create')
    // Do not precheck availability again here: a prior create may have succeeded
    // upstream before its HTTP acknowledgement was lost, and the assigned agent
