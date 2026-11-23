@@ -354,6 +354,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
   if(/^\/api\/v1\/mobile\/stores\/[0-9a-f-]{36}\/reservation-slots$/i.test(url.pathname))
    return await mobileReservationSlotsRoute({req,res,url})
   if(url.pathname==='/api/v1/mobile/reservations'||url.pathname==='/api/v1/mobile/reservations/quote'||
+     /^\/api\/v1\/mobile\/reservations\/by-key\/[0-9a-f-]{36}$/i.test(url.pathname)||
      /^\/api\/v1\/mobile\/reservations\/[0-9a-f-]{36}(?:\/(?:payment|cancel))?$/i.test(url.pathname))
    return await mobileReservationsRoutes({req,res,url})
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
