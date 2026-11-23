@@ -39,10 +39,12 @@ function validCustomer(c){
 }
 function validRequest(input){
  if(!input||typeof input!=='object'||Array.isArray(input)||
-    Object.keys(input).some(k=>!['customerExternalId','externalReference','summary','idempotencyKey','customer'].includes(k))||
+    Object.keys(input).some(k=>!['customerExternalId','externalReference','summary','idempotencyKey','customer','type','form'].includes(k))||
     !field(input.customerExternalId,180)||!field(input.externalReference,180)||
     !field(input.summary,1200)||!id(input.idempotencyKey)||
-    (input.customer!==undefined&&!validCustomer(input.customer)))throw Error('TUVERSO_REQUEST_INVALID')
+    (input.customer!==undefined&&!validCustomer(input.customer))||
+    !(input.type===undefined&&input.form===undefined||
+      input.type==='FORM'&&validMobileForm(input.form)))throw Error('TUVERSO_REQUEST_INVALID')
  return input
 }
 async function readBoundedJson(response){
@@ -93,7 +95,8 @@ function sanitizedData(kind,json){
        typeof m.text!=='string'||m.text.length>8000||typeof m.createdAt!=='string'))
     return null
   return {interactionId:data.interactionId,status:data.status,
-    messages:data.messages.map(m=>({id:m.id,direction:m.direction,text:m.text,createdAt:m.createdAt})),
+    messages:data.messages.map(m=>({id:m.id,direction:m.direction,text:m.text,createdAt:m.createdAt,
+     ...(m.type==='FORM'&&validMobileForm(m.mobileForm?.form)?{type:'FORM'}:{})})),
     hasMore:data.hasMore===true,nextCursor:typeof data.nextCursor==='string'?data.nextCursor:null}
  }
  return null
@@ -130,7 +133,8 @@ export async function createMobileInteraction(token,binding,input){
  return perform(token,'create','/api/v1/interactions',{method:'POST',idempotencyKey:b.idempotencyKey,
   requestBody:{externalLocationId,purpose:kind,customerExternalId:b.customerExternalId,
    externalReference:b.externalReference,summary:b.summary,
-    ...(b.customer?{customer:b.customer}:{})}})
+    ...(b.customer?{customer:b.customer}:{}),
+    ...(b.type==='FORM'?{type:'FORM',form:b.form}:{})}})
 }
 export async function readMobileInteraction(token,interactionId){
  if(!id(interactionId))throw Error('TUVERSO_INTERACTION_INVALID')
