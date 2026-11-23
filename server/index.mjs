@@ -3,6 +3,7 @@ import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
 import {createMobileReservationSlotsRoute} from './mobile-reservation-slots.mjs'
+import {createMobileReservationsRoutes} from './mobile-reservations.mjs'
 import {readStoreReservationSettings,saveStoreReservationSettings,publishedReservationSettings} from './mobile-reservation-settings.mjs'
 import {checkoutPolicy,updateCheckoutPolicy,runCheckoutNotifications} from './mobile-checkout-followups.mjs'
 import {createServer} from 'node:http'
@@ -69,7 +70,7 @@ function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
  const begin=value(cfg.open),end=value(cfg.close),isOpen=end>begin?(minutes>=begin&&minutes<end):(minutes>=begin);
  return {hoursConfigured:true,isOpen,closesAt:isOpen?cfg.close:null};
 }
-function withLiveHours(store,timeZone){return {...store,...storeHours(store,new Date(),timeZone)}}
+function withLiveHours(store,timeZone,at=new Date()){return {...store,...storeHours(store,at,timeZone)}}
 
 async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,tenantSettings]=await Promise.all([
  tx.query('SELECT s.id,s.name,s.address,s.latitude,s.longitude,s.radius_km,s.delivery_fee_pen,s.delivery_rate_per_km_pen,s.delivery_pricing_mode,s.active,s.delivery_enabled,s.pickup_enabled,s.dine_in_enabled,s.opening_hours,s.consult_order_availability, r.enabled AS reservation_enabled, r.min_advance_minutes AS reservation_min_advance_minutes, r.max_advance_days AS reservation_max_advance_days, r.first_time AS reservation_first_time, r.last_time AS reservation_last_time, r.slot_minutes AS reservation_slot_minutes, r.max_orders_per_slot AS reservation_max_orders_per_slot, r.preparation_minutes AS reservation_preparation_minutes FROM stores s LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id WHERE s.tenant_id=$1 AND s.active=true ORDER BY s.name',[tenantId]),
@@ -81,7 +82,11 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
  tx.query('SELECT time_zone FROM tenants WHERE id=$1 AND active=true',[tenantId])
  ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,consultOrderAvailability:s.consult_order_availability===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,min_advance_minutes:s.reservation_min_advance_minutes,max_advance_days:s.reservation_max_advance_days,first_time:s.reservation_first_time,last_time:s.reservation_last_time,slot_minutes:s.reservation_slot_minutes,max_orders_per_slot:s.reservation_max_orders_per_slot,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
-async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(s=>withLiveHours(s,q.rows[0].payload.timeZone))},true)}
+async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,stores:(q.rows[0].payload.stores||[]).map(s=>({
+ ...withLiveHours(s,q.rows[0].payload.timeZone),
+ reservationSettings:{...(s.reservationSettings||{}),
+  acceptingRequests:process.env.B3_RESERVATIONS_LIVE_ENABLED==='true'&&s.reservationSettings?.enabled===true}
+}))},true)}
 
 const routesApiKey=process.env.GOOGLE_ROUTES_API_KEY||'';
 const routeCache=new Map();
@@ -129,8 +134,8 @@ async function roadDistanceKm(store,destination,revision){
  try{return await promise}finally{routePending.delete(key)}
 }
 
-async function deliveryQuotes(config,b,revision,legacyLimaFallback=false){
- const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone)).filter(s=>s.active&&s.delivery_enabled===true&&s.hoursConfigured===true&&s.isOpen===true);
+async function deliveryQuotes(config,b,revision,legacyLimaFallback=false,at=new Date()){
+ const eligible=config.stores.map(s=>withLiveHours(s,config.timeZone,at)).filter(s=>s.active&&s.delivery_enabled===true&&s.hoursConfigured===true&&s.isOpen===true);
  if(!eligible.length)throw bad(409,'No hay sedes abiertas y habilitadas para Delivery');
  const hasCoordinates=checkLatLng(b.latitude,b.longitude)&&b.useGps===true;
  if(!hasCoordinates)throw bad(422,'Necesitamos coordenadas verificadas del destino para estimar el delivery sin Google Routes.');
@@ -186,6 +191,7 @@ async function isOrderCandidateLive(tenantId,candidate){
 const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
 const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:(store,zone)=>{const hours=storeHours(store,new Date(),zone||DEFAULT_TENANT_TZ);return hours.hoursConfigured===true&&hours.isOpen===true}});
 const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours});
+const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours,deliveryQuotes});
 async function quote(req,res){
  const b=await body(req);
  if(!word(b.appId,150)||!mode(b.mode))throw bad(400,'Modalidad y aplicación obligatorias');
@@ -342,6 +348,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(await mobileTuVersoRoutes({req,res,url}))return
  if(await mobileOrderAvailabilityRoutes({req,res,url}))return
   if(await mobileReservationSlotsRoute({req,res,url}))return
+  if(await mobileReservationsRoutes({req,res,url}))return
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
