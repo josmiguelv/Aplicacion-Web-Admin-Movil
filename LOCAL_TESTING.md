@@ -25,7 +25,31 @@ docker exec integra-admin-postgres psql -X -U $pgUser -d $pgDb -P pager=off -c "
 docker exec integra-admin-postgres psql -X -U $pgUser -d $pgDb -P pager=off -c "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='payment_methods_mode_check';"
 ```
 
-Las migraciones `008`, `009` y `010` se aplicaron previamente a esta base local. **No volver a ejecutarlas** al realizar cambios solo visuales. Para una migración nueva, documentar el nombre, dependencias, comando de aplicación y verificación antes de iniciar la prueba.
+Las migraciones `008`, `009` y `010` se aplicaron previamente a esta base local. **No volver a ejecutarlas**.
+
+### Migración 011 — reservas sin intervalos ni cupos (requiere aplicarse una sola vez)
+
+Esta migración relaja la restricción SQL de configuración completa para que `slot_minutes` y `max_orders_per_slot` no sean obligatorios. Conserva ambas columnas heredadas y sus datos; nunca se ejecuta en TU VERSO.
+
+```powershell
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\011-reservations-without-slots-or-capacity.sql" |
+ docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "Migración 011 falló" }
+
+docker exec integra-admin-postgres psql -X -U $pgUser -d $pgDb -P pager=off -c "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='b3_reservation_complete_when_enabled';"
+```
+
+La nueva restricción debe exigir anticipación, rango horario y preparación, pero no debe exigir `slot_minutes` ni `max_orders_per_slot`. Una vez verificada, no volver a aplicarla al actualizar solo el frontend.
+
+### Pruebas focalizadas de reservas
+
+```powershell
+node --test server/mobile-reservation-settings.test.mjs server/mobile-reservation-slots.test.mjs server/mobile-reservation-domain.test.mjs
+```
+
+La prueba PostgreSQL de `mobile-reservation-settings.test.mjs` está protegida para un entorno de pruebas aislado y se omite en ejecución local: nunca se debe forzar `CI=true` contra la base con datos reales.
 
 ## 3. Dependencias y compilación
 
