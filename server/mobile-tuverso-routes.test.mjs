@@ -523,13 +523,42 @@ test('temporary history outage keeps accepted interaction pending for Android wi
  assert.equal(r.payload.messagesAvailable,false)
  assert.equal(h.remote.filter(x=>x.operation==='interaction').length,0)
 })
-test('cancellation refuses to proceed when prior conversation cannot be checked',async()=>{
+test('history outage does not block authorized cancellation; retries stay idempotent',async()=>{
  const id=randomUUID(),key=randomUUID(),h=harness({historyFailure:true})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
- const r=await h.call('POST','/api/v1/mobile/interactions/'+id+'/cancel',{
-  headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA}})
- assert.equal(r.code,503)
- assert.equal(h.remote.filter(x=>x.operation==='cancel').length,0)
+ const path='/api/v1/mobile/interactions/'+id
+ const credentials={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ const first=await h.call('POST',path+'/cancel',credentials)
+ assert.equal(first.code,200)
+ assert.equal(first.payload.status,'CANCELLED')
+ const notices=h.remote.filter(x=>x.operation==='cancel')
+ assert.equal(notices.length,1)
+ assert.equal(notices[0].value.idempotencyKey,key)
+ const retry=await h.call('POST',path+'/cancel',credentials)
+ assert.equal(retry.code,200)
+ assert.equal(retry.payload.status,'CANCELLED')
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1)
+ const status=await h.call('GET',path+'/status?appId='+appA+'&storeId='+storeA,{headers:credentials.headers})
+ assert.equal(status.code,200)
+ assert.equal(status.payload.status,'CANCELLED')
+})
+
+test('history outage and upstream failure keep cancellation unconfirmed and retryable',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({historyFailure:true,upstream:{message:503}})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const url='/api/v1/mobile/interactions/'+id
+ const credentials={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ const first=await h.call('POST',url+'/cancel',credentials)
+ assert.equal(first.code,503)
+ assert.equal(h.queries.filter(x=>x.sql.startsWith('INSERT INTO mobile_checkout_followups')&&x.sql.includes('agent_notice_sent')).length,0)
+ const second=await h.call('POST',url+'/cancel',credentials)
+ assert.equal(second.code,503)
+ const notices=h.remote.filter(x=>x.operation==='cancel')
+ assert.equal(notices.length,2)
+ assert.equal(notices[0].value.idempotencyKey,notices[1].value.idempotencyKey)
+ const status=await h.call('GET',url+'/status?appId='+appA+'&storeId='+storeA,{headers:credentials.headers})
+ assert.equal(status.code,200)
+ assert.notEqual(status.payload.status,'CANCELLED')
 })
 test('personal FCM device is registered only after authorized conversation read, without broadcasting',async()=>{
  const id=randomUUID(),key=randomUUID(),token='f'.repeat(160)
