@@ -1,7 +1,7 @@
 name: Admin B3 MOBILE_APP FORM S2S focal
 on:
   push:
-    branches: [fix/b3-mobile-form-to-tuverso-20261122]
+    branches: [fix/b3-mobile-form-to-tuverso-20261122, fix/b3-single-form-intake-rebased-20261122]
     paths:
       - 'server/tuverso-mobile-connector.mjs'
       - 'server/mobile-tuverso-routes.mjs'
