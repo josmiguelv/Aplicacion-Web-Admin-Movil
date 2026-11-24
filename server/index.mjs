@@ -217,7 +217,7 @@ async function isOrderCandidateLive(tenantId,candidate){
  return true
 }
 const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
-const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:store=>store.active!==false&&(store.delivery_enabled===true||store.pickup_enabled===true)});
+const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,imageBody,imageMime,json:(res,status,value)=>json(res,status,value,true),storeOpen:store=>store.active!==false&&(store.delivery_enabled===true||store.pickup_enabled===true)});
 const reservationFulfillmentHours=()=>({hoursConfigured:true,isOpen:true});
 const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours:reservationFulfillmentHours});
 const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours:reservationFulfillmentHours,deliveryQuotes});
@@ -549,6 +549,17 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
   return json(res,200,await publicCommercialNotifications(pool,id),true);
  }
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
+ const receiptMedia=url.pathname.match(/^\/api\/v1\/mobile\/payment-receipts\/images\/([0-9a-f-]{36})$/i)
+ if(receiptMedia){
+  if(req.method!=='GET')throw bad(405,'Método no permitido')
+  const found=await sql(`SELECT i.mime,i.content FROM mobile_payment_receipt_images r
+   JOIN product_images i ON i.id=r.image_id AND i.tenant_id=r.tenant_id
+   JOIN tenants t ON t.id=r.tenant_id AND t.active=true
+   WHERE r.image_id=$1 LIMIT 1`,[receiptMedia[1]])
+  if(!found.rowCount)throw bad(404,'Comprobante no encontrado')
+  res.writeHead(200,{'Content-Type':found.rows[0].mime,'Cache-Control':'private,no-store','X-Content-Type-Options':'nosniff'})
+  return res.end(found.rows[0].content)
+ }
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
   let found;
