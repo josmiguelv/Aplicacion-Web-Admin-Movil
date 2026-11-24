@@ -188,3 +188,12 @@ Solo se aplica una vez. **No ejecutar respaldos ni pruebas de base de datos**. L
 Por seguridad, el envío comercial se encuentra **deshabilitado por defecto**. Para habilitarlo en un entorno donde Firebase Cloud Messaging y el consentimiento del cliente estén realmente configurados, se requieren las variables `B3_MARKETING_PUSH_ENABLED=true` y `B3_FCM_SERVICE_ACCOUNT_JSON` (cuenta del proyecto Firebase, solo en variables del backend). Se reutiliza la misma cuenta de Firebase que usan las notificaciones personales, pero los envíos comerciales van exclusivamente al tema `pollosb3_promotions` asociado al appId registrado `com.integrab2g.pollosb3`. El cliente debe suscribirse de forma voluntaria. No habilitar este worker en pruebas locales sin autorización; no se modifica Android en esta fase.
 
 Ejecutar `pnpm install --frozen-lockfile`, `pnpm build` y lanzar `pnpm start` / `pnpm dev` en terminales separadas. No utilizar GitHub Actions, no tocar TU VERSO.
+
+
+## Corrección de navegación: solo «Avisos al celular» debajo de Locales
+
+Se revierte **solo la reorganización equivocada de tarjetas**. La pantalla inicial conserva las tarjetas de sedes y, debajo, muestra únicamente una tarjeta general **Avisos al celular** (notificaciones comerciales para todas las sedes). Los módulos Productos, Promociones, Empleo, Datos de la empresa, Notificaciones (recordatorios personales de pago) y Publicar cambios vuelven a aparecer dentro del panel de configuración de cada sede, con su indicación «Compartida» y sin convertirse en datos exclusivos de la sede.
+
+No se revierten las API, la lógica comercial ni los datos. **Este rollback visual no necesita ninguna migración nueva.** Si la 016 todavía no fue aplicada, sigue siendo necesaria para que funcione el nuevo módulo de avisos comerciales; si ya se aplicó, no repetirla.
+
+No ejecutar GitHub Actions ni operaciones, respaldos o pruebas de BD. Actualizar con `git fetch`, `git merge --ff-only FETCH_HEAD`, compilar `pnpm build` y reiniciar los servicios locales.
