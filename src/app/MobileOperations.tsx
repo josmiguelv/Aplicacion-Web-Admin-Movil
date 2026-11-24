@@ -430,19 +430,33 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      + Nuevo producto</button>
    </div>
    {!productEditorOpen?<>
-    <div className="ops-record-list"><h3>Productos registrados ({products.length})</h3>
+    <div className="ops-product-catalog">
+     <h3>Productos registrados ({products.length})</h3>
      {products.length===0?<p className="ops-hint">Todavía no hay productos registrados. Selecciona «Nuevo producto» para agregar el primero.</p>:
-      products.map(item=><div key={item.id} className="ops-record-row ops-product-row">
-       <div className="ops-product-info"><strong>{item.name}</strong>
-        <small>{item.category||'Sin categoría'}</small></div>
-       <span>S/ {Number(item.price_pen).toFixed(2)}</span>
-       <span className={item.active?"ops-state ops-state--yes":"ops-state ops-state--no"}>{item.active?"Disponible":"No disponible"}</span>
-       <button type="button" className="button button-secondary" disabled={loading} onClick={()=>{
-        setProduct({id:item.id,name:item.name,description:item.description||'',category:item.category||'',
-         pricePen:String(item.price_pen),imageUrl:item.image_url||'',active:item.active})
-        setProductEditorOpen(true);setSavedArea('')
-       }}>Editar producto</button>
-      </div>)}
+      <div className="ops-product-cards">{products.map(item=><article key={item.id} className="ops-product-card">
+       <div className="ops-product-card-image">
+        {item.image_url?
+         <img src={item.image_url.startsWith('/api/v1/mobile/images/')?
+          item.image_url.replace('/api/v1/mobile/images/',`/api/admin/tenants/${tenantId}/images/`):
+          item.image_url} alt={`Fotografía de ${item.name}`} loading="lazy"/>:
+         <div className="ops-product-card-placeholder"><Package size={30}/><span>Sin fotografía</span></div>}
+        <span className={item.active?'ops-product-card-status is-active':'ops-product-card-status is-inactive'}>
+         {item.active?'Activo':'Inactivo'}
+        </span>
+       </div>
+       <div className="ops-product-card-content">
+        <small>{item.category||'Sin categoría'}</small>
+        <strong>{item.name}</strong>
+        <div className="ops-product-card-footer">
+         <span className="ops-product-card-price">S/ {Number(item.price_pen).toFixed(2)}</span>
+         <button type="button" className="button button-secondary" disabled={loading} onClick={()=>{
+          setProduct({id:item.id,name:item.name,description:item.description||'',category:item.category||'',
+           pricePen:String(item.price_pen),imageUrl:item.image_url||'',active:item.active})
+          setProductEditorOpen(true);setSavedArea('')
+         }}>Editar</button>
+        </div>
+       </div>
+      </article>)}</div>}
     </div>
    </>:<>
     <div className="ops-products-editor-head">
