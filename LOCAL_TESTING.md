@@ -70,3 +70,25 @@ Cada sede configura `Delivery`, `Reservación` y `Recojo en tienda` con cuatro c
 **No hay migración adicional para este cambio visual/de API.** La migración 010, ejecutada anteriormente, ya admite `reservation` en `payment_methods`. La 013 sigue siendo la última migración requerida por los cambios anteriores de preparación; no ejecutarla otra vez si ya está aplicada.
 
 Actualizar y comprobar compilación local con los comandos del apartado 1 y `pnpm install --frozen-lockfile`, `pnpm build`. Ejecutar backend `pnpm start` y frontend `pnpm dev` en terminales separadas. No ejecutar GitHub Actions, pruebas de BD ni respaldos.
+
+
+## Promociones: fechas, horas y siete días de actividad — migración 014
+
+- La edición muestra **Fecha de inicio**, **Fecha de fin**, **Hora de inicio**, **Hora de fin**, y exactamente siete casillas (**Lunes a Domingo**). No configura horarios individuales por día.
+- Debe seleccionarse al menos un día. La hora final debe ser mayor que la inicial, dentro del mismo día. El horario usa la zona horaria configurada para la empresa (Pollos B3: America/Lima, salvo configuración distinta).
+- La publicación almacena las reglas, y la respuesta pública filtra dinámicamente las promociones según fecha, hora y días; así pueden empezar o terminar sin volver a publicar cada día. **No sustituye la publicación inicial**.
+- Por ahora las promociones siguen siendo generales de la empresa y no se restringen a una sede.
+- Las promociones históricas conservan su comportamiento previo basado en `starts_at` y `ends_at`.
+
+**Migración 014 necesaria en PostgreSQL local del Administrador Web**, después de actualizar la rama y una sola vez:
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\014-promotion-date-time-weekdays.sql" |
+  docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "Falló la migración 014" }
+```
+
+No volver a ejecutar migraciones anteriores ya aplicadas. **No realizar respaldos ni pruebas sobre la base de datos.** El único control de desarrollo requerido es `pnpm build` y la revisión visual al iniciar `pnpm start` y `pnpm dev`. No usar GitHub Actions.
