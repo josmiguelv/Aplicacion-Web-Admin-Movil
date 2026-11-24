@@ -3,6 +3,7 @@ import {validatePromotionSchedule,promotionVisible} from './promotion-schedule.m
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
+import {createMobileSurveyRoute,adminSurveyList} from './mobile-order-surveys.mjs'
 import {createMobileReservationSlotsRoute} from './mobile-reservation-slots.mjs'
 import {createMobileReservationsRoutes} from './mobile-reservations.mjs'
 import {createAdminReservationRoutes} from './admin-reservations.mjs'
@@ -218,6 +219,7 @@ async function isOrderCandidateLive(tenantId,candidate){
 }
 const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
 const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,imageBody,imageMime,json:(res,status,value)=>json(res,status,value,true),storeOpen:store=>store.active!==false&&(store.delivery_enabled===true||store.pickup_enabled===true)});
+const mobileSurveyRoute=createMobileSurveyRoute({pool,body,json:(res,status,value)=>json(res,status,value,true)});
 const reservationFulfillmentHours=()=>({hoursConfigured:true,isOpen:true});
 const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours:reservationFulfillmentHours});
 const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours:reservationFulfillmentHours,deliveryQuotes});
@@ -251,6 +253,10 @@ async function quote(req,res){
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
  if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok)throw bad(401,'Credenciales inválidas');const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
  const user=await session(req);if(req.method!=='GET'&&!sameOrigin(req))throw bad(403,'Origen no autorizado');
+ if(url.pathname==='/api/admin/mobile/surveys'){
+  if(req.method!=='GET')throw bad(405,'Método no permitido');
+  return json(res,200,await adminSurveyList({pool,user,params:url.searchParams}));
+ }
  const mobileNoticeMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/mobile-notifications$/i)
  if(mobileNoticeMatch){
   const tenantId=mobileNoticeMatch[1];
@@ -534,6 +540,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(await serviceCatalogRoute({req,res,url,pool,json}))return
  if(url.pathname.startsWith('/api/v1/mobile/')){
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
+ if(await mobileSurveyRoute({req,res,url}))return
  await mobileTuVersoRoutes({req,res,url});if(res.writableEnded)return
  if(await mobileOrderAvailabilityRoutes({req,res,url}))return
   if(/^\/api\/v1\/mobile\/stores\/[0-9a-f-]{36}\/reservation-slots$/i.test(url.pathname))
