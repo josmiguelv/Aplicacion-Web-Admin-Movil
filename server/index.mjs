@@ -3,6 +3,7 @@ import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
 import {checkoutPolicy,updateCheckoutPolicy,runCheckoutNotifications} from './mobile-checkout-followups.mjs'
+import {paymentCatalog,paymentImageMap} from './payment-public-config.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -79,10 +80,8 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
  tx.query('SELECT time_zone FROM tenants WHERE id=$1 AND active=true',[tenantId]),
  tx.query('SELECT method,image_id FROM tenant_payment_images WHERE tenant_id=$1',[tenantId]),
  tx.query('SELECT payment_wait_minutes,reminder_count FROM mobile_checkout_policies WHERE tenant_id=$1',[tenantId])
- ]);const imageMap=Object.fromEntries(paymentImages.rows.map(row=>[row.method,'/api/v1/mobile/images/'+row.image_id]));
- const paymentOptions=methods=>methods.map(method=>({method,imageUrl:imageMap[method]??null}));
- const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,consultOrderAvailability:s.consult_order_availability===true,paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[]}),
- paymentOptions:Object.fromEntries(['delivery','pickup','dine_in'].map(mode=>[mode,paymentOptions(payments.rows.filter(p=>p.store_id===s.id&&p.mode===mode).map(p=>p.method))]))})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null,
+ ]);const imageMap=paymentImageMap(paymentImages.rows);
+ const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,consultOrderAvailability:s.consult_order_availability===true,...paymentCatalog(paymentImages.rows,payments.rows,s.id)})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null,
  paymentWaitMinutes:checkoutSettings.rows[0]?.payment_wait_minutes??10,
  reminderCount:checkoutSettings.rows[0]?.reminder_count??2,
  paymentImages:imageMap};
