@@ -314,7 +314,29 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  }else if(resource==='promotions'){
   if(!word(b.title,180)||!bool(b.active))throw bad(400,'Promoción inválida');const args=[tenantId,b.title,b.startsAt||null,b.endsAt||null,b.active];result=await client.query(`INSERT INTO promotions(tenant_id,title,starts_at,ends_at,active) VALUES($1,$2,$3,$4,$5) RETURNING *`,args)
  }else if(resource==='payments'){
-  if(!uuid(b.storeId)||!mode(b.mode)||!method(b.method)||!bool(b.enabled))throw bad(400,'Pago inválido');const exists=await client.query('SELECT id FROM stores WHERE id=$1 AND tenant_id=$2',[b.storeId,tenantId]);if(!exists.rowCount)throw bad(404,'Local no encontrado');result=await client.query(`INSERT INTO payment_methods(tenant_id,store_id,mode,method,enabled) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,store_id,mode,method) DO UPDATE SET enabled=EXCLUDED.enabled RETURNING *`,[tenantId,b.storeId,b.mode,b.method,b.enabled]);
+  if(!uuid(b.storeId)||!mode(b.mode))throw bad(400,'Pago inválido');
+  const exists=await client.query('SELECT id FROM stores WHERE id=$1 AND tenant_id=$2',[b.storeId,tenantId]);
+  if(!exists.rowCount)throw bad(404,'Local no encontrado');
+  if(b.methods!==undefined){
+   const keys=['yape','plin','card','cash'];
+   if(!b.methods||typeof b.methods!=='object'||Array.isArray(b.methods)||
+      Object.keys(b.methods).length!==keys.length||
+      !keys.every(key=>Object.prototype.hasOwnProperty.call(b.methods,key)&&bool(b.methods[key])))
+     throw bad(400,'Selecciona el estado de los cuatro métodos de pago');
+   result=await client.query(`INSERT INTO payment_methods(tenant_id,store_id,mode,method,enabled)
+    SELECT $1,$2,$3,p.method,p.enabled
+    FROM unnest($4::text[],$5::boolean[]) AS p(method,enabled)
+    ON CONFLICT(tenant_id,store_id,mode,method)
+    DO UPDATE SET enabled=EXCLUDED.enabled RETURNING *`,
+    [tenantId,b.storeId,b.mode,keys,keys.map(key=>b.methods[key])]);
+  }else{
+   if(!method(b.method)||!bool(b.enabled))throw bad(400,'Pago inválido');
+   result=await client.query(`INSERT INTO payment_methods(tenant_id,store_id,mode,method,enabled)
+    VALUES($1,$2,$3,$4,$5)
+    ON CONFLICT(tenant_id,store_id,mode,method)
+    DO UPDATE SET enabled=EXCLUDED.enabled RETURNING *`,
+    [tenantId,b.storeId,b.mode,b.method,b.enabled]);
+  }
  }else if(resource==='apps'){
   if(!word(b.appId,150)||!/^com\.[a-zA-Z0-9_.]+$/.test(b.appId))throw bad(400,'Identificador Android inválido');result=await client.query(`INSERT INTO mobile_apps(tenant_id,app_id) VALUES($1,$2) RETURNING *`,[tenantId,b.appId]);
  }else if(resource==='complaints'){
