@@ -210,3 +210,23 @@
 .ops-reminder-editor .ops-grid{grid-template-columns:1fr;gap:12px}
 .ops-reminder-editor .ops-marketing-preview{margin-top:16px}
 @media(max-width:760px){.ops-reminder-editors{grid-template-columns:1fr}}
+
+
+/* All save/publish confirmations: subtle fixed toast (<2s total including fade). */
+.ops-floating-toast{
+ position:fixed;top:22px;right:24px;z-index:10000;
+ display:flex;align-items:flex-start;gap:10px;
+ width:max-content;max-width:min(420px,calc(100vw - 32px));
+ padding:13px 16px;border:1px solid #d9e7df;border-radius:12px;
+ background:#fff;box-shadow:0 8px 26px rgba(22,40,35,.12);
+ color:#23352e;font-size:13px;line-height:1.45;font-weight:550;
+ pointer-events:none;opacity:1;transform:translateY(0);
+ animation:ops-toast-enter .2s ease-out both;
+ transition:opacity .35s ease,transform .35s ease;
+}
+.ops-floating-toast svg{flex:none;color:#17845b;margin-top:1px}
+.ops-floating-toast span{min-width:0;overflow-wrap:anywhere}
+.ops-floating-toast--leaving{opacity:0;transform:translateY(-6px)}
+@keyframes ops-toast-enter{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.ops-floating-toast{top:12px;left:16px;right:16px;width:auto;max-width:none}}
+@media(prefers-reduced-motion:reduce){.ops-floating-toast{animation:none;transition:none}}
