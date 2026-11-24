@@ -752,7 +752,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    (reminderCount>0&&(!reminderTitle.trim()||reminderTitle.trim().length>120||!reminderMessage.trim()||reminderMessage.trim().length>500))||
    (reminderCount===2&&(!reminder2Title.trim()||reminder2Title.trim().length>120||!reminder2Message.trim()||reminder2Message.trim().length>500))}
    onClick={()=>void act(async()=>{
-    const r=await api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',
+    const r=await api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string;reminder2Title:string;reminder2Message:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',
      {paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage,reminder2Title,reminder2Message})
     setPaymentWaitMinutes(r.paymentWaitMinutes);setReminderCount(r.reminderCount)
     setRemindersEnabled(r.remindersEnabled);setReminderTitle(r.reminderTitle);setReminderMessage(r.reminderMessage)
