@@ -93,7 +93,11 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
    COALESCE((SELECT string_agg(st.name, ', ' ORDER BY st.name)
      FROM job_vacancy_stores vs JOIN stores st ON st.id=vs.store_id AND st.tenant_id=vs.tenant_id
      WHERE vs.vacancy_id=j.id AND vs.tenant_id=j.tenant_id AND st.active=true),'') AS "locationLabel"
-  FROM job_vacancies j WHERE j.tenant_id=$1 AND j.active=true ORDER BY j.updated_at DESC,j.id`,[tenantId]),
+  FROM job_vacancies j WHERE j.tenant_id=$1 AND j.active=true
+   AND EXISTS (SELECT 1 FROM job_vacancy_stores vs JOIN stores st
+    ON st.id=vs.store_id AND st.tenant_id=vs.tenant_id
+    WHERE vs.tenant_id=j.tenant_id AND vs.vacancy_id=j.id AND st.active=true)
+   ORDER BY j.updated_at DESC,j.id`,[tenantId]),
  tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]),
  tx.query('SELECT time_zone FROM tenants WHERE id=$1 AND active=true',[tenantId])
  ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
@@ -321,7 +325,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
      typeof b.summary!=='string'||b.summary.length>500||
      typeof b.description!=='string'||b.description.length>5000||
      typeof b.requirements!=='string'||b.requirements.length>5000||
-     !['FULL_TIME','PART_TIME'].includes(b.employmentType)||
+     !['Tiempo completo','Medio tiempo'].includes(b.employmentType)||
      !Array.isArray(storeIds)||storeIds.length===0||
      storeIds.length>100||new Set(storeIds).size!==storeIds.length||
      !storeIds.every(uuid)||
