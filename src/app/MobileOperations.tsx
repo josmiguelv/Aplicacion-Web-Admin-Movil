@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, Bike, Building2, CalendarDays, Check, Clock3, Copy, CreditCard, MapPin, Package, Send, ShoppingBag, Store, Smartphone, Tag, Settings2, Bell } from 'lucide-react'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
@@ -90,7 +90,37 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [complaintsBookUrl,setComplaintsBookUrl]=useState('')
  const [loading,setLoading]=useState(false)
  const [savedArea,setSavedArea]=useState<string>('')
- const savedNext=(area:string)=>savedArea===area&&<div className="ops-save-next" role="status"><div className="ops-save-next-heading"><Check size={18}/><strong>Cambios guardados</strong></div><p>Los cambios están guardados. Para que aparezcan en la aplicación, debes publicarlos.</p><div className="ops-save-next-actions"><button type="button" className="button button-secondary" onClick={()=>setSavedArea('')}>Seguir editando</button><button type="button" className="button button-primary" onClick={()=>chooseArea('publish')}><Send size={15}/> Ir a publicar</button></div></div>
+ const [toast,setToast]=useState<{id:number;text:string;closing:boolean}|null>(null)
+ const toastSeq=useRef(0)
+ const toastTimers=useRef<ReturnType<typeof setTimeout>[]>([])
+ const savedNext=(_area:string)=>null
+ const clearToastTimers=()=>{for(const timer of toastTimers.current)clearTimeout(timer);toastTimers.current=[]}
+ useEffect(()=>{
+  const content=message.trim()||
+   (storeSavedNotice?'Configuración de la sede guardada. Publica los cambios para actualizar la aplicación.':'')||
+   (savedArea?(
+     savedArea==='payments'?'Métodos de pago guardados correctamente.':
+     savedArea==='reservations'?'Reservas configuradas correctamente.':
+     savedArea==='products'?'Producto guardado correctamente. Publica los cambios para actualizar la aplicación.':
+     savedArea==='promotions'?'Promoción guardada correctamente. Publica los cambios para actualizar la aplicación.':
+     savedArea==='vacancies'?'Vacante guardada correctamente. Publica los cambios para actualizar la aplicación.':
+     'Cambios guardados correctamente.'
+    ):'')
+  if(!content)return
+  clearToastTimers()
+  const id=++toastSeq.current
+  setToast({id,text:content,closing:false})
+  toastTimers.current=[
+   setTimeout(()=>setToast(current=>current?.id===id?{...current,closing:true}:current),1500),
+   setTimeout(()=>{
+    setToast(current=>current?.id===id?null:current)
+    setMessage('');setSavedArea('');setStoreSavedNotice(false)
+   },1900)
+  ]
+  return clearToastTimers
+ },[message,savedArea,storeSavedNotice])
+ useEffect(()=>()=>clearToastTimers(),[])
+
  const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'commercial-notifications'|'publish'>('overview')
  const chooseArea=(area:typeof activeArea)=>{
   if(area===activeArea)return
@@ -309,19 +339,14 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   <button className="button button-primary" disabled={loading||!hasUnsavedStoreChanges} onClick={saveStore}>
    Guardar {store.id?'configuración':'nuevo local'}
   </button>
-  {storeSavedNotice&&!hasUnsavedStoreChanges&&<div className="ops-save-next" role="status">
-   <div className="ops-save-next-heading"><Check size={18}/><strong>Cambios guardados</strong></div>
-   <p>Para que la aplicación reciba la nueva configuración debes publicar los cambios.</p>
-   <div className="ops-save-next-actions"><button type="button" className="button button-secondary"
-    onClick={()=>setStoreSavedNotice(false)}>Seguir editando</button>
-    <button type="button" className="button button-primary" onClick={()=>chooseArea('publish')}>Ir a publicar</button>
-   </div>
-  </div>}
  </div>
  if(!session)return <main className="ops-wrapper"><h1>Administración comercial</h1><p>Inicia sesión con una cuenta verificada en el servidor. El selector de rol de la maqueta no concede permisos.</p><form className="ops-panel ops-form" onSubmit={login}><label>Correo<input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Contraseña<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} required/></label><button className="button button-primary" disabled={loading}>Iniciar sesión</button>{error&&<p role="alert" className="ops-error">{error}</p>}</form></main>
  return <div className="ops-wrapper">
   <div className="ops-top"><div><p className="eyebrow">ADMINISTRACIÓN DE EMPRESAS Y SEDES</p><h1>{session.role==='SUPER_ADMIN'?tenants.find(t=>t.id===tenantId)?.name||'Administrador de empresas':'Administrador de tu empresa'}</h1><p>Selecciona un local para identificar rápidamente qué configuración estás editando.</p></div>{!embeddedSession&&<button className="button button-secondary" onClick={()=>void act(async()=>{await api('/api/admin/logout','POST');setSession(null);setTenantId('');setTenants([])})}>Cerrar sesión</button>}</div>
-  {error&&<div className="ops-error" role="alert">{error}</div>}{message&&<div className="ops-success" role="status"><Check size={15}/>{message}</div>}
+  {error&&<div className="ops-error" role="alert">{error}</div>}
+   {toast&&<div className={`ops-floating-toast${toast.closing?' ops-floating-toast--leaving':''}`} role="status" aria-live="polite" aria-atomic="true">
+    <Check size={17} aria-hidden="true"/><span>{toast.text}</span>
+   </div>}
   {session.role==='SUPER_ADMIN'&&!embeddedSession&&<section className="ops-panel"><h2><Building2 size={19}/> Empresas</h2><div className="ops-inline"><select value={tenantId} onChange={e=>{setTenantId(e.target.value);setSelectedStoreId('');setActiveArea('overview')}} aria-label="Empresa seleccionada"><option value="">Selecciona una empresa</option>{tenants.map(t=><option value={t.id} key={t.id}>{t.name}</option>)}</select><input placeholder="Nueva empresa" value={companyName} onChange={e=>setCompanyName(e.target.value)}/><button className="button button-secondary" disabled={!companyName.trim()||loading} onClick={()=>void act(async()=>{const created=await api<Tenant>('/api/admin/tenants','POST',{name:companyName});setTenants(v=>[...v,created]);setTenantId(created.id);setSelectedStoreId('');setActiveArea('overview');setCompanyName('');setMessage('Empresa creada. Debes crear sus usuarios y registrar su aplicación.')})}>Crear empresa</button></div><p className="ops-hint">Cada administrador de empresa tiene permisos limitados a su tenant. Las cuentas deben crearse desde el endpoint autorizado de superadministración.</p></section>}
   {tenantId&&<>
 
