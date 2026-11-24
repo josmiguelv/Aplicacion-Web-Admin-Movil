@@ -259,7 +259,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   if(req.method==='GET')return json(res,200,await checkoutPolicy(pool,tenantId))
   if(req.method!=='POST')throw bad(405,'Método no permitido')
   const input=await body(req)
-  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['paymentWaitMinutes','reminderCount'].includes(k)))throw bad(400,'Configuración de seguimiento inválida')
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['paymentWaitMinutes','reminderCount','remindersEnabled','reminderTitle','reminderMessage'].includes(k)))throw bad(400,'Configuración de seguimiento inválida')
   const saved=await updateCheckoutPolicy(pool,tenantId,input)
   await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'CHECKOUT_POLICY_UPDATED',tenantId])
   return json(res,200,saved)
