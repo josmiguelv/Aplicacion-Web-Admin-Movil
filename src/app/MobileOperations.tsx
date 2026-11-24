@@ -636,7 +636,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    notices.length===0?<p className="ops-hint">Aún no hay avisos comerciales de la empresa.</p>:
    <div className="ops-marketing-list">{notices.map(n=><div key={n.id} className="ops-marketing-list-item">
     <div><strong>{n.title}</strong><p>{n.status==='DRAFT'?'Borrador':n.status==='PUBLISHED'?'Publicado':'Desactivado'}
-      {n.pushSentAt?' · Aceptado por FCM':n.pushError?' · Error de envío FCM':' · Sin envío push confirmado'}</p>
+      {n.pushSentAt?' · Último envío aceptado por FCM: '+limaDatetime(n.pushSentAt).replace('T',' '):n.pushError?' · Error de envío FCM':' · Sin envío push confirmado'}</p>
       <small>{n.startDate} — {n.endDate} · {n.runTime||'Ejecución única'} · {(n.weekdays||[]).map(day=>['','Lu','Ma','Mi','Ju','Vi','Sá','Do'][day]).join(', ')||'Programación anterior'}</small></div>
     <div className="ops-inline">
      <button type="button" className="button button-secondary" onClick={()=>{
