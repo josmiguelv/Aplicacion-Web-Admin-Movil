@@ -148,3 +148,14 @@ La configuración preexistente de **Seguimiento de pago y recordatorios personal
 - No utilizar GitHub Actions, no hacer respaldos ni pruebas en PostgreSQL.
 
 Para actualizar la copia local, utilizar `git fetch` y `git merge --ff-only FETCH_HEAD` indicados al inicio; compilar con `pnpm build` y ejecutar backend y frontend por separado.
+
+
+## Corrección de pantalla inicial «Error interno» / locales ausentes
+
+La página inicial carga las sedes independientemente de Productos, Empleo, Aplicaciones y Notificaciones. Un error en un módulo auxiliar **no debe ocultar las tarjetas de sedes** ni mostrar falsamente «Todavía no hay locales registrados». Ahora el Administrador diferencia `storesLoaded` y muestra nombres de los módulos que fallaron.
+
+Este ajuste es **solo frontend**: no requiere migraciones nuevas. Si aparece «Empleo / Vacantes (revisar migración 015)», comprobar que se haya aplicado la migración 015 previamente indicada; si aparece «Notificaciones / Seguimiento de pago (revisar migración 007)», comprobar que se haya aplicado la 007. Estas asociaciones no prueban por sí solas la causa del error.
+
+No ejecutar respaldo, SELECT ni pruebas de base de datos. Para obtener la causa si el error persiste, observar los mensajes de la terminal donde se ejecuta `pnpm start`. No utilizar GitHub Actions.
+
+Actualizar localmente con `git fetch` + `git merge --ff-only FETCH_HEAD`, compilar con `pnpm build`, reiniciar `pnpm start` y `pnpm dev` y recargar la página.
