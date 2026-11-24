@@ -217,3 +217,7 @@ En la llamada privada POST /api/v1/interactions hacia TU VERSO, incorpora custom
 Ejemplo de customer enviado: {"firstName":"Ana","lastName":"Quispe","phone":"+51912345678","email":"ana@example.com","phoneVerified":false,"emailVerified":false}.
 
 Estado: cambios en rama de desarrollo; no certificados en producción. La prueba de integración real con TU VERSO debe verificar que el contrato remoto acepta el nuevo objeto.
+
+## Extensión aditiva de pagos en catálogo — 23/11/2026
+
+Solo cambia el Administrador Web. El catálogo público conserva `stores[].paymentMethods` (listas de `yape`, `plin`, `card`, `cash`) y añade `paymentImages` (imagen única por empresa para Yape/Plin/Izipay), `stores[].paymentOptions` (lista de `{method,imageUrl}` por modalidad) y `paymentWaitMinutes` y `reminderCount` globales por empresa. La cotización `POST /api/v1/mobile/fulfillment/resolve` también entrega `paymentOptions` filtradas por modalidad y `paymentWaitMinutes`. Ningún dato adicional autoriza ni confirma pagos; no se toca TU VERSO ni Android. Migración Admin `008-payment-provider-images.sql` necesaria antes de iniciar el backend de esta rama.

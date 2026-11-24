@@ -137,3 +137,9 @@ Ejecutar solo las pruebas relacionadas con el cambio. Las pruebas unitarias simu
 - Actualizar tipos, contrato, ejemplo y estado de despliegue si el comportamiento cambió.
 - Añadir y ejecutar pruebas focalizadas que cubran el riesgo introducido.
 - No activar flags live ni hacer llamadas reales a TU VERSO como efecto colateral de una prueba rutinaria.
+
+## Proyección pública de pagos (23/11/2026)
+
+La configuración visual de pagos reside solo en PostgreSQL del Administrador: `payment_methods` determina qué métodos están habilitados en cada sede y modalidad; `tenant_payment_images` (migración local 008) contiene la única imagen por empresa para `yape`/`plin`/`card` y apunta a `product_images` de la misma empresa. El plazo de pago existente sigue en `mobile_checkout_policies`. `server/payment-public-config.mjs` proyecta los métodos y URLs por sede sin exponer imágenes de métodos deshabilitados; las imágenes solo son públicas tras publicar el catálogo. No se almacenan ni exponen credenciales de pasarela ni se confirma el pago.
+
+Riesgos: actualizar código sin aplicar migración 008 causa error SQL al publicar y al consultar la nueva configuración administrativa; no aplicar en producción sin respaldo y control de despliegue. La configuración de imagen solo es válida cuando el activo pertenece al tenant; la tabla por sí sola no concede acceso entre empresas. Validación focal: `node --test server/payment-public-config.test.mjs`. No tocar infraestructura TU VERSO ni aplicación móvil.

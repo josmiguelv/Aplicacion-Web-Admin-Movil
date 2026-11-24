@@ -102,8 +102,9 @@ function orderForm(cart,store,customer){
 // A client-authored FORM is informational only: it never supplies authoritative prices,
 // store availability, fulfillment status or an approval decision.
 function validClientForm(value){
- if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','fields'].includes(key))||
+ if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','imageUrl','fields'].includes(key))||
     !validText(value.title,180)||
+    value.imageUrl!==undefined&&(typeof value.imageUrl!=='string'||value.imageUrl.length>1500||!/^https:\/\/[^\\s<>"']+$/i.test(value.imageUrl))||
     value.subtitle!==undefined&&(typeof value.subtitle!=='string'||value.subtitle.length>350||
      /[\x00-\x1f\x7f]/.test(value.subtitle))||
     !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>5)return false
@@ -134,7 +135,7 @@ function publicStore(payload,storeId){
 function authorizedHour(store,storeOpen){
  if(!storeOpen(store))throw fail(409,'La sede no está abierta o habilitada')
 }
-export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
+export function createMobileTuVersoRoutes({pool,body,json,storeOpen,imageBody,imageMime,
  availability=checkAvailability,createInteraction=createMobileInteraction,
  readInteraction=readMobileInteraction,readMessages=readMobileInteractionMessages,
  sendMessage=sendMobileInteractionMessage,decrypt=decryptCredential,
@@ -181,7 +182,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   const creating=url.pathname==='/api/v1/mobile/interactions'
   const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
-  if(!match&&!creating&&!statusMatch&&!messageMatch)return false
+  const receiptMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt$/i)
+  if(!match&&!creating&&!statusMatch&&!messageMatch&&!receiptMatch)return false
   try{
    rateLimit(req)
    if(match){
@@ -271,6 +273,34 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      ...(['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
       {operationalConversationStatus}:{})})
    }
+   if(receiptMatch){
+    if(req.method!=='POST')throw fail(405,'Método no permitido')
+    const interactionId=receiptMatch[1],appId=url.searchParams.get('appId'),storeId=url.searchParams.get('storeId')
+    const access=req.headers['x-order-access-key'],receiptId=req.headers['idempotency-key']
+    if(!VALID_UUID.test(interactionId)||!VALID_UUID.test(storeId||'')||
+       !VALID_UUID.test(access||'')||!VALID_UUID.test(receiptId||'')||
+       receiptId===access||!APP.test(appId||''))
+      throw fail(400,'Identificadores del comprobante invalidos')
+    const ctx=await context(appId,storeId,false)
+    const owner={interactionId,tenantId:ctx.tenantId,appId,storeId,accessKey:access}
+    const session=await checkoutSessionState(pool,owner)
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(session))throw fail(409,'Pedido cerrado')
+    const payment=await readCheckoutPayment(pool,owner)
+    if(payment.status!=='PAYMENT_PENDING')throw fail(409,'No existe un plazo de pago vigente')
+    if(!imageBody||!imageMime)throw fail(503,'Carga de comprobantes no configurada')
+    const bytes=await imageBody(req),mime=imageMime(bytes)
+    if(!['image/jpeg','image/png'].includes(mime))throw fail(415,'Solo JPG o PNG')
+    // Stable UUID prevents duplicate storage on transport retry. Only the
+    // tenant owning this active interaction can write the file.
+    const prior=await pool.query('SELECT tenant_id,mime,content FROM product_images WHERE id=$1',[receiptId])
+    if(prior.rowCount){
+      if(prior.rows[0].tenant_id!==ctx.tenantId||prior.rows[0].mime!==mime||
+         !prior.rows[0].content.equals(bytes))throw fail(409,'El identificador de comprobante ya esta usado')
+    }else{
+      await pool.query('INSERT INTO product_images(id,tenant_id,mime,content) VALUES($1,$2,$3,$4)',[receiptId,ctx.tenantId,mime,bytes])
+    }
+    return json(res,201,{imagePath:'/api/v1/mobile/payment-receipts/'+receiptId,imageId:receiptId,uploaded:true})
+   }
    if(messageMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
     if(interactionMode()!=='LIVE')throw fail(503,'Mensajes de TU VERSO no habilitados')
@@ -309,6 +339,19 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // The structured order remains server-derived. A separately supplied
     // FORM is displayed literally but can never authorize an order or price.
     const ctx=await context(input.appId,input.storeId,false)
+    if(directForm&&input.form.imageUrl!==undefined){
+      // A payment receipt must be an image uploaded through this same tenant,
+      // not an arbitrary URL supplied by the mobile app.
+      let image
+      try{image=new URL(input.form.imageUrl)}catch{throw fail(400,'URL de comprobante inválida')}
+      const match=image.pathname.match(/^\/api\/v1\/mobile\/payment-receipts\/([0-9a-f-]{36})$/i)
+      const host=String(req.headers.host||'').toLowerCase()
+      if(image.protocol!=='https:'||image.host.toLowerCase()!==host||
+         image.username||image.password||image.search||image.hash||!match)
+        throw fail(400,'El comprobante debe provenir de la API autorizada')
+      const owned=await pool.query('SELECT 1 FROM product_images WHERE id=$1 AND tenant_id=$2',[match[1],ctx.tenantId])
+      if(!owned.rowCount)throw fail(404,'Comprobante no disponible para esta empresa')
+    }
     const session=await checkoutSessionState(pool,{interactionId,tenantId:ctx.tenantId,
      appId:input.appId,storeId:input.storeId,accessKey:access})
     if(['CANCELLED','EXPIRED','FINISHED'].includes(session))
@@ -320,6 +363,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      form={
       title:input.form.title.trim(),
       ...(input.form.subtitle!==undefined?{subtitle:input.form.subtitle.trim()}:{}),
+      ...(input.form.imageUrl!==undefined?{imageUrl:input.form.imageUrl}:{}),
       fields:input.form.fields.map(row=>({variable:row.variable.trim(),value:row.value.trim()})),
      }
     }else{

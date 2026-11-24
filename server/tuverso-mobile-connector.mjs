@@ -151,9 +151,10 @@ export async function pollMobileInteractionEvents(token,{after=null,limit=50}={}
 // Mirrors TU VERSO PRE-F2/07: a FORM has no extra free-text body or buttons.
 function validMobileForm(form){
  if(!form||typeof form!=='object'||Array.isArray(form)||
-    Object.keys(form).some(k=>!['title','subtitle','fields'].includes(k)))return false
+    Object.keys(form).some(k=>!['title','subtitle','imageUrl','fields'].includes(k)))return false
  if(typeof form.title!=='string'||!form.title.trim()||form.title.trim().length>180||
     form.subtitle!==undefined&&(typeof form.subtitle!=='string'||form.subtitle.trim().length>350)||
+    form.imageUrl!==undefined&&(typeof form.imageUrl!=='string'||form.imageUrl.length>1500||!/^https:\/\/[^\\s<>"']+$/i.test(form.imageUrl))||
     !Array.isArray(form.fields)||form.fields.length>5)return false
  const labels=new Set()
  for(const entry of form.fields){
