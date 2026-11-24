@@ -296,3 +296,30 @@ pnpm build
 Después reiniciar `pnpm start` y `pnpm dev` en terminales separadas. La habilitación efectiva del trabajador requiere `B3_CHECKOUT_WORKER_ENABLED=true` y `B3_FCM_SERVICE_ACCOUNT_JSON` en el backend; **no habilitar todavía para clientes reales** sin cerrar la confirmación del pago y verificar permisos de notificaciones y token en Android. Las credenciales Firebase nunca deben ir en frontend ni Git.
 
 No GitHub Actions, pruebas ni respaldos de BD, cambios de TU VERSO o cambios de Android.
+
+
+## Dos recordatorios personales independientes (migración 019)
+
+En `Notificaciones para el cliente → Recordatorios personales de pago`, el número elegido determina los editores visibles:
+- 0: se ocultan ambos editores y no se envían recordatorios.
+- 1: aparece **Recordatorio 1** con su título, mensaje y vista previa.
+- 2: aparecen **Recordatorio 1** y **Recordatorio 2**, cada uno con título, mensaje y vista previa separados.
+
+El backend guarda ambos contenidos por empresa y envía el primer texto al primer recordatorio y el segundo texto al segundo. Las sesiones de pago conservan sus propios plazos y cada aviso se envía solo al token FCM del pedido autorizado. No se modifican Android ni TU VERSO; el trabajador FCM permanece desactivado por defecto.
+
+**Migración 019 requerida una sola vez** después de 018, únicamente en `integra-admin-postgres`:
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\019-second-private-payment-reminder.sql" |
+  docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "La migración 019 falló" }
+```
+
+## Confirmaciones flotantes globales (solo frontend, sin migración nueva)
+
+Los mensajes de éxito de **Guardar** y **Publicar** de todos los módulos del Administrador pasan a un aviso fijo flotante, con entrada discreta, visible durante 1,5 segundos, transición de salida de 0,35 segundos y eliminación a los 1,9 segundos. No hay avisos persistentes de guardado ni botones flotantes que bloqueen la interfaz. Los errores permanecen legibles en su posición original hasta que se resuelvan. Respeta preferencias de movimiento reducido.
+
+Actualizar el código con `git fetch` y `git merge --ff-only FETCH_HEAD`. Compilar localmente con `pnpm install --frozen-lockfile` y `pnpm build`; ejecutar `pnpm start` y `pnpm dev` en terminales separadas. No ejecutar GitHub Actions, backups ni pruebas de BD.
