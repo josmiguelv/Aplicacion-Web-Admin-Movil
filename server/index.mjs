@@ -157,7 +157,7 @@ async function deliveryQuotes(config,b,revision,legacyLimaFallback=false,at=new 
   const deliveryFee=store.deliveryPricingMode==='FIXED'?store.deliveryFeePen:Math.round((km*store.deliveryRatePerKmPen+Number.EPSILON)*100)/100;
   available.push({storeId:store.id,storeName:store.name,deliveryFee,routeDistanceKm:km,
    deliveryPricingMode:store.deliveryPricingMode,ratePerKmPen:store.deliveryPricingMode==='FIXED'?null:store.deliveryRatePerKmPen,
-   paymentMethods:store.paymentMethods?.delivery||[],consultOrderAvailability:store.consultOrderAvailability===true});
+   paymentMethods:store.paymentMethods?.delivery||[],preparationMinutes:store.deliveryPreparationMinutes??null,consultOrderAvailability:store.consultOrderAvailability===true});
  }
  available.sort((a,b2)=>a.routeDistanceKm-b2.routeDistanceKm||a.storeId.localeCompare(b2.storeId));
  if(!available.length)throw bad(409,'Dirección fuera de la cobertura de las sedes disponibles');
@@ -214,7 +214,7 @@ async function quote(req,res){
   if(!selected)throw bad(409,'Selecciona una sede habilitada para esta modalidad');
  }
  return json(res,200,{revision:q.rows[0].revision,storeId:selected.id,storeName:selected.name,
-  mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],deliveryFeePen,routeDistanceKm:roadKm,
+  mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],preparationMinutes:b.mode==='delivery'?selected.deliveryPreparationMinutes??null:b.mode==='pickup'?selected.pickupPreparationMinutes??null:null,deliveryFeePen,routeDistanceKm:roadKm,
   deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,
   ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
   distanceSource:b.mode==='delivery'?'STRAIGHT_LINE':null,provisional:true,
