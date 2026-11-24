@@ -159,3 +159,32 @@ Este ajuste es **solo frontend**: no requiere migraciones nuevas. Si aparece «E
 No ejecutar respaldo, SELECT ni pruebas de base de datos. Para obtener la causa si el error persiste, observar los mensajes de la terminal donde se ejecuta `pnpm start`. No utilizar GitHub Actions.
 
 Actualizar localmente con `git fetch` + `git merge --ff-only FETCH_HEAD`, compilar con `pnpm build`, reiniciar `pnpm start` y `pnpm dev` y recargar la página.
+
+
+## Módulos generales de empresa debajo de las sedes — avisos comerciales al celular
+
+La pantalla inicial muestra primero las tarjetas de locales reales y, debajo, **Configuración general de la empresa**. Las opciones generales ya no aparecen dentro de la ficha de una sede. Se ofrecen:
+- Productos, Promociones, Empleo, Datos de la empresa y Publicación.
+- **Avisos al celular**: módulo comercial diferente de los recordatorios personales de pago. El administrador escribe título, mensaje, carga imagen opcional, define inicio/vencimiento en horario fijo de Perú (UTC−5), visualiza la vista previa del celular, guarda borradores, publica y desactiva.
+- **Recordatorios de pago**: conserva la política existente 5–30 minutos / 0–2 avisos, por dispositivo y pedido. No se envían al tema comercial.
+
+Los avisos comerciales se guardan por `tenant_id` y no se asignan a sedes individuales. La API del Administrador es `/api/admin/tenants/{tenantId}/mobile-notifications`; la API pública `/api/v1/mobile/notifications?appId=...` y el catálogo publicado incluyen solamente avisos vigentes. Una publicación no equivale a la recepción en el teléfono.
+
+### Migración 016 obligatoria para este módulo (solo Administrador local)
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\016-company-mobile-notifications.sql" |
+  docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "La migración 016 falló" }
+```
+
+Solo se aplica una vez. **No ejecutar respaldos ni pruebas de base de datos**. La migración 015 de Vacantes ya se aplicó en este entorno según la ejecución confirmada por el usuario; no volver a aplicarla.
+
+### Envío real de push FCM
+
+Por seguridad, el envío comercial se encuentra **deshabilitado por defecto**. Para habilitarlo en un entorno donde Firebase Cloud Messaging y el consentimiento del cliente estén realmente configurados, se requieren las variables `B3_MARKETING_PUSH_ENABLED=true` y `B3_FCM_SERVICE_ACCOUNT_JSON` (cuenta del proyecto Firebase, solo en variables del backend). Se reutiliza la misma cuenta de Firebase que usan las notificaciones personales, pero los envíos comerciales van exclusivamente al tema `pollosb3_promotions` asociado al appId registrado `com.integrab2g.pollosb3`. El cliente debe suscribirse de forma voluntaria. No habilitar este worker en pruebas locales sin autorización; no se modifica Android en esta fase.
+
+Ejecutar `pnpm install --frozen-lockfile`, `pnpm build` y lanzar `pnpm start` / `pnpm dev` en terminales separadas. No utilizar GitHub Actions, no tocar TU VERSO.
