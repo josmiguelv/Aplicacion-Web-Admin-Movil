@@ -61,3 +61,12 @@ El backend requiere la configuración local existente para acceder a `integra_ad
 - La disponibilidad de pedidos depende de la modalidad habilitada y del agente de TU VERSO, no del horario físico.
 
 No declarar las pruebas como aprobadas sin ver su salida real.
+
+
+## Medios de pago — cuatro opciones por modalidad
+
+Cada sede configura `Delivery`, `Reservación` y `Recojo en tienda` con cuatro casillas independientes: `Yape`, `Plin`, `Tarjeta` y `Efectivo`. El Administrador lee los valores guardados al entrar/cambiar de modalidad. **Guardar métodos de pago** actualiza las cuatro opciones en una única transacción; no se confunden entre sedes ni modalidades. Habilitar un método de pago no habilita el servicio ni verifica un cobro.
+
+**No hay migración adicional para este cambio visual/de API.** La migración 010, ejecutada anteriormente, ya admite `reservation` en `payment_methods`. La 013 sigue siendo la última migración requerida por los cambios anteriores de preparación; no ejecutarla otra vez si ya está aplicada.
+
+Actualizar y comprobar compilación local con los comandos del apartado 1 y `pnpm install --frozen-lockfile`, `pnpm build`. Ejecutar backend `pnpm start` y frontend `pnpm dev` en terminales separadas. No ejecutar GitHub Actions, pruebas de BD ni respaldos.
