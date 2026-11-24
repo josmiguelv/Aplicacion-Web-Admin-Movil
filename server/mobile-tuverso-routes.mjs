@@ -140,6 +140,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  availability=checkAvailability,createInteraction=createMobileInteraction,
  readInteraction=readMobileInteraction,readMessages=readMobileInteractionMessages,
  sendMessage=sendMobileInteractionMessage,decrypt=decryptCredential,
+ imageBody=null,imageMime=null,receiptBaseUrl=()=>process.env.PUBLIC_API_BASE_URL,
  checkMode=connectionMode,interactionMode=mobileInteractionMode,rateLimit=throttled}){
  async function context(appId,storeId,requireOpen=true){
   const result=await pool.query(`SELECT p.tenant_id,p.revision,p.payload
@@ -184,7 +185,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
   const receiptMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt$/i)
-  if(!match&&!creating&&!statusMatch&&!messageMatch&&!receiptMatch)return false
+  const receiptUploadMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt\/upload$/i)
+  if(!match&&!creating&&!statusMatch&&!messageMatch&&!receiptMatch&&!receiptUploadMatch)return false
   try{
    rateLimit(req)
    if(match){
@@ -277,6 +279,48 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      status:remote.data.status,agentMessages,messagesAvailable,conversationState,
      ...(['OPEN','CLOSED','RESOLVED'].includes(operationalConversationStatus)?
       {operationalConversationStatus}:{})})
+   }
+   if(receiptUploadMatch){
+    if(req.method!=='POST')throw fail(405,'Método no permitido')
+    if(interactionMode()!=='LIVE')throw fail(503,'Recepción de comprobantes no habilitada')
+    const interactionId=receiptUploadMatch[1],access=req.headers['x-order-access-key']
+    if(!VALID_UUID.test(access||''))throw fail(403,'Clave del pedido inválida')
+    const appId=url.searchParams.get('appId'),storeId=url.searchParams.get('storeId')
+    if(!APP.test(appId||'')||!VALID_UUID.test(storeId||''))throw fail(400,'Aplicación o sede inválida')
+    const base=receiptBaseUrl()
+    let publicBase
+    try{
+     const parsed=new URL(base)
+     if(!validReceiptImageUrl(parsed.origin+'/check')||parsed.pathname!=='/'||
+        parsed.search||parsed.hash)throw Error('BAD_BASE')
+     publicBase=parsed.origin
+    }catch{throw fail(503,'Configura PUBLIC_API_BASE_URL con la URL HTTPS pública del Administrador')}
+    const ctx=await context(appId,storeId,false)
+    const owner={interactionId,tenantId:ctx.tenantId,appId,storeId,accessKey:access}
+    const state=await checkoutSessionState(pool,owner)
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(state))throw fail(409,'Pedido cerrado')
+    const integration=await binding(ctx.tenantId,appId,storeId)
+    const remote=await readInteraction(integration.token,interactionId)
+    if(!remote.ok)throw fail(remote.httpStatus===404?404:remoteAuthStatus(remote),'No se pudo verificar la interacción')
+    const expected=reference(ctx.tenantId,appId,storeId,access)
+    if(!equals(remote.data?.externalReference,expected)||
+       remote.data?.externalLocationId!==integration.external_location_id||
+       remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Comprobante no autorizado')
+    if(remote.data.status!=='ACCEPTED')throw fail(409,'El pedido no está aceptado para recibir el comprobante')
+    if(typeof imageBody!=='function'||typeof imageMime!=='function')throw fail(503,'Carga de comprobantes no disponible')
+    const bytes=await imageBody(req)
+    const mime=imageMime(bytes)
+    if(!mime)throw fail(415,'Solo imágenes JPEG, PNG y WebP reales')
+    const client=await pool.connect()
+    try{
+     await client.query('BEGIN')
+     const inserted=await client.query('INSERT INTO product_images(tenant_id,mime,content) VALUES($1,$2,$3) RETURNING id',[ctx.tenantId,mime,bytes])
+     const imageId=inserted.rows[0].id
+     await client.query('INSERT INTO mobile_payment_receipt_images(image_id,tenant_id,app_id,store_id,interaction_id) VALUES($1,$2,$3,$4,$5)',
+      [imageId,ctx.tenantId,appId,storeId,interactionId])
+     await client.query('COMMIT')
+     return json(res,201,{imageUrl:publicBase+'/api/v1/mobile/payment-receipts/images/'+imageId,imageId,mime})
+    }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
    }
    if(messageMatch||receiptMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
