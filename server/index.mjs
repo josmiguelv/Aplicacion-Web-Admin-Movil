@@ -203,8 +203,14 @@ async function quote(req,res){
   limitPublicDeliveryQuotes(req);
   const candidates=await deliveryQuotes(config,b,q.rows[0].revision,true);
   if(b.storeId&&!uuid(b.storeId))throw bad(400,'Sede solicitada inválida');
-  const first=candidates[0];selected=eligible.find(s=>s.id===first.storeId);roadKm=first.routeDistanceKm;deliveryFeePen=first.deliveryFee;
-  if(b.storeId&&selected.id!==b.storeId)throw bad(409,'No se pudo cotizar la sede seleccionada');
+  // Once a store accepts the customer's request, quote THAT store if it
+  // remains eligible. The nearest store may be a different, unresponsive one.
+  // Never silently switch an accepted interaction to another store.
+  const candidate=b.storeId?candidates.find(x=>x.storeId===b.storeId):candidates[0];
+  if(!candidate)throw bad(409,'La sede que aceptó no tiene cobertura vigente para esta dirección');
+  selected=eligible.find(s=>s.id===candidate.storeId);
+  if(!selected)throw bad(409,'La sede que aceptó ya no está habilitada para delivery');
+  roadKm=candidate.routeDistanceKm;deliveryFeePen=candidate.deliveryFee;
  }else{
   selected=eligible.find(s=>s.id===b.storeId);
   if(!selected)throw bad(409,'Selecciona una sede abierta para esta modalidad');
