@@ -233,3 +233,33 @@ git fetch https://github.com/josmiguelv/Aplicacion-Web-Admin-Movil.git refs/head
 git merge --ff-only FETCH_HEAD
 pnpm build
 ```
+
+
+## Frecuencia semanal de «Notificaciones para el cliente» — migración 017
+
+Se conserva la fecha de inicio y fin, ahora como **fechas** sin selector de hora. Se añade un único horario de ejecución local en Perú (UTC−5) y exactamente siete casillas para elegir los días: lunes, martes, miércoles, jueves, viernes, sábado y domingo. Se exige al menos un día.
+
+Un aviso publicado se intenta enviar **como máximo una vez por cada fecha seleccionada** dentro del período, a partir de la hora configurada, cuando esté activo el worker de notificaciones comerciales. El ledger `company_mobile_notification_runs` registra cada día para evitar duplicados por reinicios. La hora fija corresponde a Perú, no a la zona local del navegador ni a la del servidor.
+
+Los avisos en borrador y los publicados se pueden **editar** (texto, fechas, días y hora). Los envíos ya realizados se conservan y no se repiten si se edita el mismo aviso durante el día. Los avisos desactivados son reutilizables como base para un aviso nuevo, no editables in situ.
+
+### Migración 017 obligatoria — solo PostgreSQL local del Administrador
+
+Requiere que la migración `016-company-mobile-notifications.sql` del módulo de avisos comerciales ya esté aplicada. Si la 016 aún está pendiente, aplicarla **una sola vez antes** de 017, con el mismo procedimiento.
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+
+Get-Content -Raw "server\migrations\017-company-notification-weekly-frequency.sql" |
+  docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+
+if ($LASTEXITCODE -ne 0) { throw "Falló la migración 017" }
+```
+
+Solo hay que ejecutar la 017 una vez. Las notificaciones existentes se conservan con su funcionamiento de envío único hasta que sean editadas con una frecuencia. No se modifica la lógica de recordatorios de pago.
+
+El envío push permanece desactivado por defecto (`B3_MARKETING_PUSH_ENABLED`), sin tocar Android ni TU VERSO. El formulario permite configurar y editar, pero el envío físico requiere Firebase configurado y autorización del cliente para recibir avisos. No afirmar entrega a dispositivo por aceptación de FCM.
+
+**Sin GitHub Actions, pruebas de BD ni respaldos.** Compilar localmente con `pnpm build` y reiniciar backend y frontend. La compilación local no se ha ejecutado por esta sesión.
