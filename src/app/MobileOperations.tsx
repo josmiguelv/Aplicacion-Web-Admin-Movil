@@ -17,7 +17,15 @@ const modes = [{key:'delivery',name:'Delivery'},{key:'reservation',name:'Reserva
 const payments = [{key:'yape',name:'Yape'},{key:'plin',name:'Plin'},{key:'card',name:'Tarjeta'},{key:'cash',name:'Efectivo'}] as const
 type PaymentMethod = typeof payments[number]['key']
 type PaymentSelection = Record<PaymentMethod,boolean>
+type PaymentMode = 'delivery'|'reservation'|'pickup'
+type PaymentImages = Record<'yape'|'plin'|'card',string>
+type PaymentConfig = {methods:PaymentSelection;images:PaymentImages}
 const blankPaymentSelection=():PaymentSelection=>({yape:false,plin:false,card:false,cash:false})
+const blankPaymentImages=():PaymentImages=>({yape:'',plin:'',card:''})
+const blankPaymentConfig=():PaymentConfig=>({methods:blankPaymentSelection(),images:blankPaymentImages()})
+const blankPaymentModes=():Record<PaymentMode,PaymentConfig>=>({
+ delivery:blankPaymentConfig(),reservation:blankPaymentConfig(),pickup:blankPaymentConfig()
+})
 async function api<T>(path: string, method: 'GET'|'POST'|'PUT'='GET', data?:unknown): Promise<T> {
  const res=await fetch(path,{method,credentials:'include',headers:data?{'Content-Type':'application/json'}:undefined,body:data?JSON.stringify(data):undefined,cache:'no-store'})
  const result=await res.json().catch(()=>({error:'Respuesta inválida'}))
@@ -48,13 +56,20 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [productEditorOpen,setProductEditorOpen]=useState(false)
  const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',employmentType:'Tiempo completo',storeIds:[] as string[],imageUrl:'',whatsappPhone:'',active:false})
  const [vacancy,setVacancy]=useState(emptyVacancy)
- const [paymentStore,setPaymentStore]=useState(''),[paymentMode,setPaymentMode]=useState('delivery')
- const [paymentSelection,setPaymentSelection]=useState<PaymentSelection>(blankPaymentSelection)
- const [paymentBaseline,setPaymentBaseline]=useState<PaymentSelection>(blankPaymentSelection)
+ const [paymentStore,setPaymentStore]=useState('')
+ const [paymentConfigs,setPaymentConfigs]=useState<Record<PaymentMode,PaymentConfig>>(blankPaymentModes)
+ const [paymentBaseline,setPaymentBaseline]=useState<Record<PaymentMode,PaymentConfig>>(blankPaymentModes)
  const [paymentLoading,setPaymentLoading]=useState(false)
  const [paymentLoadError,setPaymentLoadError]=useState('')
  const [paymentReload,setPaymentReload]=useState(0)
- const paymentDirty=payments.some(p=>paymentSelection[p.key]!==paymentBaseline[p.key])
+ const [paymentUploading,setPaymentUploading]=useState('')
+ const paymentDirty=JSON.stringify(paymentConfigs)!==JSON.stringify(paymentBaseline)
+ const updatePaymentMethod=(mode:PaymentMode,method:PaymentMethod,enabled:boolean)=>
+  setPaymentConfigs(current=>({...current,[mode]:{...current[mode],
+   methods:{...current[mode].methods,[method]:enabled}}}))
+ const updatePaymentImage=(mode:PaymentMode,method:keyof PaymentImages,url:string)=>
+  setPaymentConfigs(current=>({...current,[mode]:{...current[mode],
+   images:{...current[mode].images,[method]:url}}}))
  const [newTenantEmail,setNewTenantEmail]=useState(''),[newTenantPassword,setNewTenantPassword]=useState('')
  const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false)
  const [promoStartDate,setPromoStartDate]=useState(''),[promoEndDate,setPromoEndDate]=useState('')
@@ -191,27 +206,29 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  },[activeArea,tenantId,noticesReload])
  useEffect(()=>{
   if(activeArea!=='payments'||!tenantId||!paymentStore){
-   setPaymentLoading(false);setPaymentSelection(blankPaymentSelection());setPaymentBaseline(blankPaymentSelection());setPaymentLoadError('');return
+   setPaymentLoading(false);setPaymentConfigs(blankPaymentModes());setPaymentBaseline(blankPaymentModes());setPaymentLoadError('');return
   }
   let active=true
   setPaymentLoading(true);setPaymentLoadError('')
-  setPaymentSelection(blankPaymentSelection());setPaymentBaseline(blankPaymentSelection())
-  void api<{items:{store_id:string;mode:string;method:string;enabled:boolean}[]}>(`/api/admin/tenants/${tenantId}/payments`)
+  setPaymentConfigs(blankPaymentModes());setPaymentBaseline(blankPaymentModes())
+  void api<{items:{store_id:string;mode:string;method:string;enabled:boolean;image_url:string|null}[]}>(`/api/admin/tenants/${tenantId}/payments`)
    .then(response=>{
     if(!active)return
-    const next=blankPaymentSelection()
+    const next=blankPaymentModes()
     for(const entry of response.items){
-     if(entry.store_id===paymentStore&&entry.mode===paymentMode&&
-      payments.some(item=>item.key===entry.method)){
-      next[entry.method as PaymentMethod]=entry.enabled===true
+     if(entry.store_id===paymentStore&&['delivery','reservation','pickup'].includes(entry.mode)&&
+       payments.some(item=>item.key===entry.method)){
+      const mode=entry.mode as PaymentMode,method=entry.method as PaymentMethod
+      next[mode].methods[method]=entry.enabled===true
+      if(method!=='cash')next[mode].images[method]=entry.image_url||''
      }
     }
-    setPaymentSelection(next);setPaymentBaseline({...next})
+    setPaymentConfigs(next);setPaymentBaseline(structuredClone(next))
    })
    .catch(error=>{if(active)setPaymentLoadError(error instanceof Error?error.message:'No se pudieron consultar los medios de pago')})
    .finally(()=>{if(active)setPaymentLoading(false)})
   return ()=>{active=false}
- },[activeArea,tenantId,paymentStore,paymentMode,paymentReload])
+ },[activeArea,tenantId,paymentStore,paymentReload])
  useEffect(()=>{
   if(!tenantId||!stores.length){setReservationFlags({});return}
   let alive=true
@@ -226,7 +243,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const storeEditorValue=(s:StoreRow)=>({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPreparationMinutes:s.delivery_preparation_minutes==null?'':String(s.delivery_preparation_minutes),pickupPreparationMinutes:s.pickup_preparation_minutes==null?'':String(s.pickup_preparation_minutes),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM' as 'PER_KM'|'FIXED',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,consultOrderAvailability:s.consult_order_availability===true,openingHours:s.opening_hours||{}})
  const enterLocal=(s:StoreRow)=>{
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Hay cambios sin guardar. ¿Quieres salir sin guardarlos?'))return
-  setSelectedStoreId(s.id);setReservationStoreId(s.id);setPaymentStore(s.id);setPaymentMode('delivery');chooseArea('local')
+  setSelectedStoreId(s.id);setReservationStoreId(s.id);setPaymentStore(s.id);chooseArea('local')
  }
  const enterLocalModule=(area:'stores'|'reservations'|'payments',focus:'details'|'hours'|'delivery'|'pickup'='details')=>{
   if(!selectedStore)return
@@ -568,33 +585,84 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     {savedNext('promotions')}
    </section>)}
   {activeArea==='payments'&&(<section className="ops-panel ops-payment-panel">
-    <h2><CreditCard size={19}/> Pagos por local y modalidad</h2>
-    <p className="ops-hint">Configura los métodos de pago de {selectedStore?.name||'este local'} para cada modalidad de forma independiente.</p>
-    <div className="ops-payment-head"><label>Tipo de atención
-     <select value={paymentMode} disabled={loading||paymentLoading} onChange={e=>{setSavedArea('');setPaymentMode(e.target.value)}}>
-      {modes.map(m=><option key={m.key} value={m.key}>{m.name}</option>)}
-     </select></label></div>
-    <h3>Medios de pago habilitados</h3>
-    {paymentLoading?<p role="status" className="ops-hint">Cargando medios de pago...</p>:
-     paymentLoadError?<div role="alert" className="ops-error">{paymentLoadError} <button type="button" className="button button-secondary" onClick={()=>setPaymentReload(x=>x+1)}>Reintentar</button></div>:
-     <div className="ops-payment-method-grid">{payments.map(method=>
-      <label className="ops-payment-method" key={method.key}>
-       <input type="checkbox" disabled={loading} checked={paymentSelection[method.key]}
-        onChange={e=>{setSavedArea('');setPaymentSelection(current=>({...current,[method.key]:e.target.checked}))}}/>
-       <span>{method.name}</span>
-       <span className="ops-payment-status">{paymentSelection[method.key]?'Habilitado':'Deshabilitado'}</span>
-      </label>
-     )}</div>}
-    <button type="button" className="button button-primary" disabled={!paymentStore||loading||paymentLoading||!!paymentLoadError||!paymentDirty}
-     onClick={()=>void act(async()=>{
-      await api(`/api/admin/tenants/${tenantId}/payments`,'POST',
-       {storeId:paymentStore,mode:paymentMode,methods:paymentSelection})
-      setPaymentBaseline({...paymentSelection})
-      setSavedArea('payments')
-     })}>Guardar métodos de pago</button>
-    {savedNext('payments')}
-    <p className="ops-hint">Las tres modalidades se pueden configurar aunque aún no estén habilitadas en el local. Habilitar un medio no verifica ni realiza cobros, ni activa el servicio por sí solo.</p>
-   </section>)}
+   <h2><CreditCard size={19}/> Medios de pago por tipo de atención</h2>
+   <p className="ops-hint">Configura Delivery, Reservación y Recojo en tienda de {selectedStore?.name||'esta sede'} en una sola vista. Las imágenes y activaciones son independientes por modalidad.</p>
+   {paymentLoading?<p role="status" className="ops-hint">Cargando los medios de pago de las tres modalidades...</p>:
+    paymentLoadError?<div role="alert" className="ops-error">{paymentLoadError} <button type="button" className="button button-secondary" onClick={()=>setPaymentReload(x=>x+1)}>Reintentar</button></div>:
+    <div className="ops-payment-matrix">
+     {modes.map(mode=><section className="ops-payment-mode-row" key={mode.key}>
+      <h3>{mode.name}</h3>
+      <div className="ops-payment-four">
+       {payments.map(method=><div className="ops-payment-mini-card" key={method.key}>
+        <label className="ops-payment-check">
+         <input type="checkbox" disabled={loading||!!paymentUploading}
+          checked={paymentConfigs[mode.key as PaymentMode].methods[method.key]}
+          onChange={e=>updatePaymentMethod(mode.key as PaymentMode,method.key,e.target.checked)}/>
+         <strong>{method.name}</strong>
+        </label>
+        <small>{paymentConfigs[mode.key as PaymentMode].methods[method.key]?'Habilitado':'Deshabilitado'}</small>
+        {method.key!=='cash'?<>
+         {paymentConfigs[mode.key as PaymentMode].images[method.key]&&
+          <img className="ops-payment-image-preview" alt={`Imagen de ${method.name} para ${mode.name}`}
+           src={paymentConfigs[mode.key as PaymentMode].images[method.key].replace(
+            '/api/v1/mobile/images/',`/api/admin/tenants/${tenantId}/images/`)}/>}
+         <label className="ops-payment-upload">
+          <span>{paymentConfigs[mode.key as PaymentMode].images[method.key]?'Cambiar imagen':'Cargar imagen'}</span>
+          <input type="file" accept="image/png,image/jpeg,image/webp"
+           disabled={loading||!!paymentUploading}
+           onChange={e=>{const file=e.target.files?.[0];if(!file)return
+            const selectedMode=mode.key as PaymentMode,selectedMethod=method.key as keyof PaymentImages
+            setPaymentUploading(selectedMode+'-'+selectedMethod)
+            void act(async()=>{
+             try{
+              const res=await fetch(`/api/admin/tenants/${tenantId}/images`,{
+               method:'POST',credentials:'include',body:file
+              })
+              const data=await res.json()
+              if(!res.ok)throw new Error(data.error||'No se pudo cargar la imagen')
+              updatePaymentImage(selectedMode,selectedMethod,data.url)
+              setMessage('Imagen cargada. Guarda y publica la configuración para utilizarla en la aplicación.')
+             }finally{setPaymentUploading('')}
+            })
+            e.target.value=''
+           }}/>
+         </label>
+         {paymentConfigs[mode.key as PaymentMode].images[method.key]&&
+          <button className="ops-payment-remove" type="button"
+           onClick={()=>updatePaymentImage(mode.key as PaymentMode,method.key as keyof PaymentImages,'')}>
+           Quitar imagen</button>}
+        </>:<span className="ops-payment-cash-note">Sin imagen</span>}
+       </div>)}
+      </div>
+     </section>)}
+    </div>}
+   <div className="ops-payment-shared-time">
+    <h3>Tiempo de espera para el pago · General</h3>
+    <p className="ops-hint">Un solo plazo para Delivery, Reservación y Recojo en tienda; no hay tres temporizadores de configuración. Se aplica cuando cada pedido entra a su etapa de pago.</p>
+    <label>Minutos para continuar con el pago
+     <input type="number" min="5" max="30" step="1" value={paymentWaitMinutes}
+      onChange={e=>setPaymentWaitMinutes(Number(e.target.value))}/>
+    </label>
+    <p className="ops-hint">Este valor también se comparte con Recordatorios personales de pago. El plazo individual empieza al entrar al pago, nunca al consultar disponibilidad de un agente.</p>
+   </div>
+   <button type="button" className="button button-primary"
+    disabled={!paymentStore||loading||paymentLoading||!!paymentUploading||!!paymentLoadError||
+     !Number.isInteger(paymentWaitMinutes)||paymentWaitMinutes<5||paymentWaitMinutes>30}
+    onClick={()=>void act(async()=>{
+     for(const mode of modes){
+      const config=paymentConfigs[mode.key as PaymentMode]
+      await api(`/api/admin/tenants/${tenantId}/payments`,'POST',{
+       storeId:paymentStore,mode:mode.key,methods:config.methods,images:config.images
+      })
+     }
+     const policy=await api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string;reminder2Title:string;reminder2Message:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',{
+      paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage,reminder2Title,reminder2Message
+     })
+     setPaymentWaitMinutes(policy.paymentWaitMinutes)
+     setPaymentBaseline(structuredClone(paymentConfigs));setSavedArea('payments')
+    })}>Guardar métodos de pago y tiempo de espera</button>
+   <p className="ops-hint">Habilitar un medio no comprueba pagos ni activa una modalidad. Publica los cambios para que la app pueda consultar las imágenes configuradas; efectivo no admite imagen.</p>
+  </section>)}
   {activeArea==='settings'&&(<section className="ops-panel"><h2>Libro de Reclamaciones · Enlace oficial</h2>
   <p>Ingresa únicamente la URL HTTPS del Libro de Reclamaciones real de la empresa seleccionada. La aplicación mostrará el botón de acceso después de publicar los cambios. Este campo no crea ni recibe reclamaciones.</p>
   <label>Dirección HTTPS del Libro de Reclamaciones<input type="url" value={complaintsBookUrl} placeholder="https://..." onChange={e=>setComplaintsBookUrl(e.target.value)} /></label>
