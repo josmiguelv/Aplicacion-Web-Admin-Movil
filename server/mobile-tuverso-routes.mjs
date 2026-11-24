@@ -135,7 +135,7 @@ function publicStore(payload,storeId){
 function authorizedHour(store,storeOpen){
  if(!storeOpen(store))throw fail(409,'La sede no está abierta o habilitada')
 }
-export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
+export function createMobileTuVersoRoutes({pool,body,json,storeOpen,imageBody,imageMime,
  availability=checkAvailability,createInteraction=createMobileInteraction,
  readInteraction=readMobileInteraction,readMessages=readMobileInteractionMessages,
  sendMessage=sendMobileInteractionMessage,decrypt=decryptCredential,
@@ -182,7 +182,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   const creating=url.pathname==='/api/v1/mobile/interactions'
   const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
-  if(!match&&!creating&&!statusMatch&&!messageMatch)return false
+  const receiptMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt$/i)
+  if(!match&&!creating&&!statusMatch&&!messageMatch&&!receiptMatch)return false
   try{
    rateLimit(req)
    if(match){
@@ -271,6 +272,34 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      status:remote.data.status,agentMessages,messagesAvailable,
      ...(['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
       {operationalConversationStatus}:{})})
+   }
+   if(receiptMatch){
+    if(req.method!=='POST')throw fail(405,'Método no permitido')
+    const interactionId=receiptMatch[1],appId=url.searchParams.get('appId'),storeId=url.searchParams.get('storeId')
+    const access=req.headers['x-order-access-key'],receiptId=req.headers['idempotency-key']
+    if(!VALID_UUID.test(interactionId)||!VALID_UUID.test(storeId||'')||
+       !VALID_UUID.test(access||'')||!VALID_UUID.test(receiptId||'')||
+       receiptId===access||!APP.test(appId||''))
+      throw fail(400,'Identificadores del comprobante invalidos')
+    const ctx=await context(appId,storeId,false)
+    const owner={interactionId,tenantId:ctx.tenantId,appId,storeId,accessKey:access}
+    const session=await checkoutSessionState(pool,owner)
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(session))throw fail(409,'Pedido cerrado')
+    const payment=await readCheckoutPayment(pool,owner)
+    if(payment.status!=='PAYMENT_PENDING')throw fail(409,'No existe un plazo de pago vigente')
+    if(!imageBody||!imageMime)throw fail(503,'Carga de comprobantes no configurada')
+    const bytes=await imageBody(req),mime=imageMime(bytes)
+    if(!['image/jpeg','image/png'].includes(mime))throw fail(415,'Solo JPG o PNG')
+    // Stable UUID prevents duplicate storage on transport retry. Only the
+    // tenant owning this active interaction can write the file.
+    const prior=await pool.query('SELECT tenant_id,mime,content FROM product_images WHERE id=$1',[receiptId])
+    if(prior.rowCount){
+      if(prior.rows[0].tenant_id!==ctx.tenantId||prior.rows[0].mime!==mime||
+         !prior.rows[0].content.equals(bytes))throw fail(409,'El identificador de comprobante ya esta usado')
+    }else{
+      await pool.query('INSERT INTO product_images(id,tenant_id,mime,content) VALUES($1,$2,$3,$4)',[receiptId,ctx.tenantId,mime,bytes])
+    }
+    return json(res,201,{imagePath:'/api/v1/mobile/payment-receipts/'+receiptId,imageId:receiptId,uploaded:true})
    }
    if(messageMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
