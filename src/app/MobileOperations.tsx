@@ -82,6 +82,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [noticesReload,setNoticesReload]=useState(0)
  const [paymentWaitMinutes,setPaymentWaitMinutes]=useState(10)
  const [reminderCount,setReminderCount]=useState(2)
+ const [remindersEnabled,setRemindersEnabled]=useState(false)
+ const [reminderTitle,setReminderTitle]=useState('Tu compra está pendiente')
+ const [reminderMessage,setReminderMessage]=useState('Continúa con el pago o cancela tu solicitud de Pollos B3.')
  const [complaintsBookUrl,setComplaintsBookUrl]=useState('')
  const [loading,setLoading]=useState(false)
  const [savedArea,setSavedArea]=useState<string>('')
@@ -102,7 +105,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),
    api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),
    api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`),
-   api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${id}/checkout-settings`)
+   api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string}>(`/api/admin/tenants/${id}/checkout-settings`)
   ])
   const warnings:string[]=[]
   if(st.status==='fulfilled'){
@@ -125,6 +128,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   if(checkout.status==='fulfilled'){
    setPaymentWaitMinutes(checkout.value.paymentWaitMinutes)
    setReminderCount(checkout.value.reminderCount)
+   setRemindersEnabled(checkout.value.remindersEnabled)
+   setReminderTitle(checkout.value.reminderTitle)
+   setReminderMessage(checkout.value.reminderMessage)
   }else warnings.push('Notificaciones / Seguimiento de pago (revisar migración 007)')
   setModuleWarnings(warnings)
  }
@@ -660,23 +666,51 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  </section>)}
  {activeArea==='commercial-notifications'&&(<section className="ops-panel ops-notifications-panel">
   <h2><Bell size={19}/> Recordatorios personales de pago</h2>
-  <p className="ops-hint">Los recordatorios se configuran una sola vez para la empresa y se dirigen únicamente al cliente y pedido correspondiente. Son independientes de los avisos comerciales anteriores.</p>
-  <h3>Seguimiento de pago y recordatorios personales</h3>
-  <p className="ops-hint">El plazo inicia cuando el pedido fue aceptado por la sede y la app presenta el total. Los avisos son individuales por dispositivo y solicitud; nunca se envían a un tema de promociones. La espera de respuesta del agente no tiene este plazo.</p>
+  <p className="ops-hint">Regla única para Pollos B3 y todas sus sedes. Cada pedido inicia su propio plazo cuando es aceptado y la app pasa al pago. Los avisos se dirigen solo al celular registrado para esa solicitud, las 24 horas.</p>
+  <label className="ops-check"><input type="checkbox" checked={remindersEnabled}
+   onChange={e=>setRemindersEnabled(e.target.checked)}/>
+   Habilitar recordatorios personales automáticos</label>
   <div className="ops-grid">
    <label>Tiempo para continuar con el pago (minutos)
-    <input type="number" min="5" max="30" step="1" value={paymentWaitMinutes} onChange={e=>setPaymentWaitMinutes(Number(e.target.value))}/>
+    <input type="number" min="5" max="30" step="1" value={paymentWaitMinutes}
+     onChange={e=>setPaymentWaitMinutes(Number(e.target.value))}/>
    </label>
-   <label>Recordatorios al cliente
-    <select value={reminderCount} onChange={e=>setReminderCount(Number(e.target.value))}>
+   <label>Cantidad de recordatorios
+    <select value={reminderCount} disabled={!remindersEnabled} onChange={e=>setReminderCount(Number(e.target.value))}>
      <option value={0}>Sin recordatorios</option><option value={1}>1 recordatorio</option><option value={2}>2 recordatorios</option>
     </select>
    </label>
   </div>
-  <p className="ops-hint">Ejemplo: con 10 minutos y 2 avisos, los recordatorios se intentan aproximadamente en los minutos 3:20 y 6:40 si el dispositivo tiene notificaciones habilitadas. Al vencimiento se actualiza el estado del pago; no se abre otra conversación.</p>
-  <button className="button button-primary" disabled={loading||!tenantId||!Number.isInteger(paymentWaitMinutes)||paymentWaitMinutes<5||paymentWaitMinutes>30}
-   onClick={()=>void act(async()=>{const r=await api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',{paymentWaitMinutes,reminderCount});setPaymentWaitMinutes(r.paymentWaitMinutes);setReminderCount(r.reminderCount);setMessage('Notificaciones de pago configuradas para todas las sedes de la empresa.')})}>Guardar recordatorios de pago</button>
-  <p className="ops-hint">Esta configuración queda guardada inmediatamente para la empresa. Los avisos automáticos requieren que el servicio de notificaciones esté habilitado y que el cliente permita recibirlas.</p>
+  <h3>Contenido que llegará al celular</h3>
+  <p className="ops-hint">Configura el título y el mensaje personal. Nunca se envían a un tema comercial ni a todos los clientes.</p>
+  <div className="ops-grid">
+   <label>Título de la notificación
+    <input maxLength={120} value={reminderTitle} onChange={e=>setReminderTitle(e.target.value)}/>
+   </label>
+   <label>Mensaje de la notificación
+    <textarea rows={3} maxLength={500} value={reminderMessage} onChange={e=>setReminderMessage(e.target.value)}/>
+   </label>
+  </div>
+  <div className="ops-marketing-preview">
+   <div className="ops-marketing-phone">
+    <div className="ops-marketing-phone-head"><Bell size={15}/> Pollos B3 · Vista previa del aviso personal</div>
+    <strong>{reminderTitle.trim()||'Título de la notificación'}</strong>
+    <p>{reminderMessage.trim()||'Mensaje que verá el cliente en su celular.'}</p>
+    <small>Al tocar el aviso, la aplicación abre el pedido relacionado.</small>
+   </div>
+  </div>
+  <p className="ops-hint">Ejemplo: si el pago empieza a las 12:00, con 10 minutos y 2 recordatorios, los intentos serán aproximadamente a las 12:03:20 y 12:06:40. Si otro pedido inicia a las 23:00, sus recordatorios se calculan independientemente. El envío requiere autorización del dispositivo y Firebase configurado.</p>
+  <button type="button" className="button button-primary" disabled={loading||!tenantId||
+   !Number.isInteger(paymentWaitMinutes)||paymentWaitMinutes<5||paymentWaitMinutes>30||
+   !reminderTitle.trim()||reminderTitle.trim().length>120||!reminderMessage.trim()||reminderMessage.trim().length>500}
+   onClick={()=>void act(async()=>{
+    const r=await api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',
+     {paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage})
+    setPaymentWaitMinutes(r.paymentWaitMinutes);setReminderCount(r.reminderCount)
+    setRemindersEnabled(r.remindersEnabled);setReminderTitle(r.reminderTitle);setReminderMessage(r.reminderMessage)
+    setMessage('Configuración de recordatorios personales guardada para todas las sedes.')
+   })}>Guardar recordatorios de pago</button>
+  <p className="ops-hint">Guardar no envía avisos inmediatamente. El servicio automático sigue controlado por el backend; nunca se envía una notificación grupal. No se modifica el tiempo de espera de TU VERSO.</p>
  </section>)}
  {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div><p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
   </>}
