@@ -8,6 +8,7 @@ import {createMobileReservationsRoutes} from './mobile-reservations.mjs'
 import {createAdminReservationRoutes} from './admin-reservations.mjs'
 import {readStoreReservationSettings,saveStoreReservationSettings,publishedReservationSettings} from './mobile-reservation-settings.mjs'
 import {checkoutPolicy,updateCheckoutPolicy,runCheckoutNotifications} from './mobile-checkout-followups.mjs'
+import {commercialNotificationsAdmin,publicCommercialNotifications,dispatchCommercialNotifications} from './company-mobile-notifications.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
@@ -240,6 +241,18 @@ async function quote(req,res){
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
  if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok)throw bad(401,'Credenciales inválidas');const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
  const user=await session(req);if(req.method!=='GET'&&!sameOrigin(req))throw bad(403,'Origen no autorizado');
+ const mobileNoticeMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/mobile-notifications$/i)
+ if(mobileNoticeMatch){
+  const tenantId=mobileNoticeMatch[1];
+  await tenantOf(user,tenantId);
+  if(req.method==='GET')return json(res,200,await commercialNotificationsAdmin(pool,tenantId,null,'GET'));
+  if(req.method==='POST'){
+   const submitted=await body(req);
+   const saved=await commercialNotificationsAdmin(pool,tenantId,submitted,'POST');
+   return json(res,200,saved);
+  }
+  throw bad(405,'Método de avisos no permitido');
+ }
  const checkoutSettings=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/checkout-settings$/i)
  if(checkoutSettings){
   const tenantId=checkoutSettings[1];await tenantOf(user,tenantId)
@@ -410,6 +423,18 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
 }
 async function serve(res,path){const base=join(process.cwd(),'dist');const target=normalize(join(base,path==='/'?'index.html':path));if(!target.startsWith(base+'/')&&target!==base)throw bad(403,'Ruta inválida');let content;try{content=await readFile(target)}catch{content=await readFile(join(base,'index.html'))}const type=({'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[extname(target)]||'application/octet-stream';res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(content)}
+// Marketing push is OFF by default. Enable only with real FCM credentials,
+// app subscription consent and migration 016 installed in this Administrator DB.
+if(process.env.B3_MARKETING_PUSH_ENABLED==='true'){
+ let inProgress=false;
+ const tick=async()=>{if(inProgress)return;inProgress=true;
+  try{await dispatchCommercialNotifications(pool)}
+  catch(error){console.error('Pollos B3 marketing notifications:',error.message)}
+  finally{inProgress=false}
+ };
+ const timer=setInterval(()=>{void tick()},30000);
+ timer.unref?.();void tick();
+}
 // Payment timers are server-owned; no mobile foreground timer is authoritative.
 // Enable only after applying migration 007 to the isolated Administrator database.
 if(process.env.B3_CHECKOUT_WORKER_ENABLED==='true'){
@@ -437,6 +462,12 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
      /^\/api\/v1\/mobile\/reservations\/by-key\/[0-9a-f-]{36}$/i.test(url.pathname)||
      /^\/api\/v1\/mobile\/reservations\/[0-9a-f-]{36}(?:\/(?:payment|cancel))?$/i.test(url.pathname))
    return await mobileReservationsRoutes({req,res,url})
+ if(url.pathname==='/api/v1/mobile/notifications'){
+  if(req.method!=='GET')throw bad(405,'Solo se permite consultar notificaciones');
+  const id=url.searchParams.get('appId');
+  if(!word(id,150))throw bad(400,'appId obligatorio');
+  return json(res,200,await publicCommercialNotifications(pool,id),true);
+ }
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
