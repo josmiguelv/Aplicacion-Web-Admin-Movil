@@ -51,7 +51,7 @@ Respuesta:
 }
 ```
 
-La consulta no llama a TU VERSO, por lo que sigue disponible si su servicio está desconectado. La API guarda las calificaciones individuales que permitirán calcular el promedio por sede o empresa en una futura tarjeta de «Encuestas de satisfacción», junto con vistas de detalle y filtros. **Esta entrega no crea el panel, la tarjeta ni estadísticas.**
+La consulta no llama a TU VERSO, por lo que sigue disponible si su servicio está desconectado. La API guarda las calificaciones individuales que permitirán calcular el promedio por sede o empresa en una futura tarjeta de «Encuestas de satisfacción», junto con vistas de detalle y filtros. **Esta revisión incorpora la tarjeta visual, el detalle y los filtros, junto con un resumen agregado por sede; no crea estadísticas adicionales ni modifica Android.**
 
 ## Verificación focalizada
 ```powershell
@@ -60,3 +60,19 @@ node --check server/index.mjs
 node --test server/mobile-order-surveys.test.mjs server/mobile-tuverso-routes.test.mjs server/payment-receipt-validation.test.mjs
 ```
 Comprobar integridad SQL antes de aplicar `server/migrations/023-mobile-order-surveys.sql` a la BD local; no aplicar en Railway ni producción sin autorización. Se debe verificar el resultado de las pruebas tras descargar la rama actualizada.
+
+## Módulo visual incorporado
+- En «Locales de la empresa» cada sede muestra calificación promedio sobre 5 y cantidad de encuestas, o «Sin encuestas». Si la API falla, muestra «Encuestas no disponibles», sin inventar cero.
+- En «Configuración de esta sede» existe una tarjeta «Encuestas de satisfacción» que abre la consulta del local. Permite cambiar a todas las sedes si el administrador lo requiere.
+- En la vista se pueden filtrar sede, fecha inicial/final, estrellas y aplicación; se muestran diez respuestas por página, con expandir detalle y paginación.
+- Las fechas individuales se muestran en la zona horaria America/Lima. El filtrado enviado a la API usa días UTC del contrato original.
+- El agregado proviene de `GET /api/admin/mobile/surveys/summary` (autenticación admin existente, `tenantId` explícito para `SUPER_ADMIN`), respuesta `{"stores":[{"storeId":"UUID","total":5,"average":4.6}]}`. Se calcula en PostgreSQL sobre todas las respuestas, no sobre una página parcial.
+- La pantalla es de **solo lectura**. No modifica encuestas, pedidos ni interacciones. Si la migración 023 aún no está aplicada, la consulta informará error y los demás módulos permanecen accesibles.
+
+### Validación local antes de usar
+```powershell
+node --check server/index.mjs
+node --check server/mobile-order-surveys.mjs
+node --test server/mobile-order-surveys.test.mjs server/mobile-tuverso-routes.test.mjs server/payment-receipt-validation.test.mjs
+pnpm build
+```
