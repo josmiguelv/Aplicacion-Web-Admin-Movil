@@ -82,37 +82,27 @@ El backend necesita las variables de entorno locales que ya utiliza el proyecto,
 Toda entrega debe informar: commit, archivos modificados, necesidad de migración (sí/no), comandos PowerShell para actualizar, instalar/compilar/ejecutar, pruebas locales y alcance. **No declarar validación PASS sin ejecutar realmente la prueba correspondiente.**
 
 
-## Migración 012 — horarios independientes de servicios
+## Actualización vigente — disponibilidad según agente de TU VERSO
 
-Solo modifica el PostgreSQL local del Administrador Web. No realiza copias de seguridad, no modifica TU VERSO y no ejecuta pruebas sobre la base de datos. Añade `stores.service_hours` como JSONB con valor inicial vacío (los horarios antiguos permanecen y sirven de alternativa hasta configurar cada servicio).
+- La sede conserva su horario físico `opening_hours`, **solo informativo**.
+- Los tres servicios configurables por sede son Delivery, Recojo y Reservas.
+- El Administrador no define horarios adicionales de Delivery o Recojo.
+- La recepción de pedidos exige que la opción comercial esté habilitada y que TU VERSO confirme un agente disponible. El agente aprueba o rechaza la solicitud.
+- La reserva conserva su fecha/hora solicitadas y las reglas de programación aplicables; el horario físico del local no decide si hay agente disponible.
+- **No aplicar la migración 012:** fue creada para horarios independientes que ahora se han descartado. El código vigente no requiere la columna `service_hours`. Si la columna ya existe, no es necesario revertirla para continuar.
+- Las migraciones 008, 009 y 010 ya se ejecutaron anteriormente. La 011 se utiliza únicamente si todavía está pendiente el cambio de reservas sin intervalos ni cupos.
+- No ejecutar pruebas ni respaldos de base de datos, ni usar GitHub Actions.
+
+Actualización local del código:
 
 ```powershell
 cd "C:\Integra-B2G\Administrador Negocios"
-$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
-$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
-Get-Content -Raw "server\migrations\012-store-service-hours.sql" |
- docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
-if ($LASTEXITCODE -ne 0) { throw "La migración 012 falló" }
-```
-
-Si la 011 todavía no se aplicó, ejecutarla **antes** de la 012 siguiendo su apartado anterior. No repetir las migraciones 008, 009 o 010.
-
-### Compilar e iniciar localmente
-
-```powershell
+git status
+git fetch https://github.com/josmiguelv/Aplicacion-Web-Admin-Movil.git refs/heads/feat/b3-admin-reservation-transactional-20261123
+git merge --ff-only FETCH_HEAD
 pnpm install --frozen-lockfile
 pnpm build
 ```
 
-Después ejecutar `pnpm start` y `pnpm dev` en dos terminales distintas. Cada tarjeta de sede abre exclusivamente sus controles: Datos y ubicación, Horario físico, Delivery (recepción, entregas y tarifa), Recojo (recepción y retiro), Reservas y Pagos. El horario de recepción de Delivery puede comenzar antes que el horario de apertura del local.
+Ejecutar `pnpm start` (backend) y `pnpm dev` (frontend) en terminales separadas. Validar desde las pantallas existentes de sede; no abrir TU VERSO para modificarlo.
 
-**No usar GitHub Actions, pruebas ni operaciones de respaldo sobre la base de datos.** Los controles de navegación y compilación no escriben datos en PostgreSQL.
-
-## Reglas funcionales para horarios independientes
-
-- Horario físico del local: `opening_hours`.
-- Delivery: `service_hours.delivery.orders` permite recibir pedidos; `service_hours.delivery.fulfillment` controla los horarios disponibles para entrega.
-- Recojo: `service_hours.pickup.orders` permite recibir pedidos; `service_hours.pickup.fulfillment` controla los horarios de retiro.
-- Configuraciones no definidas conservan el horario previo de sede por compatibilidad.
-- El agente y la disponibilidad se comprueban por las API existentes del Administrador, sin modificar TU VERSO.
-- Cada tarjeta de sede muestra únicamente sus campos; no se vuelve a seleccionar la sede dentro de sus formularios.
