@@ -296,6 +296,17 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'IMAGE_UPLOADED',x.rows[0].id]);
   return json(res,201,{url:'/api/v1/mobile/images/'+x.rows[0].id,id:x.rows[0].id,mime})
  }
+ const previewImage=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/images\/([0-9a-f-]{36})$/i);
+ if(previewImage&&req.method==='GET'){
+  const tenantId=previewImage[1],imageId=previewImage[2];
+  await tenantOf(user,tenantId);
+  const found=await sql('SELECT mime,content FROM product_images WHERE tenant_id=$1 AND id=$2',
+    [tenantId,imageId]);
+  if(!found.rowCount)throw bad(404,'Imagen de la empresa no encontrada');
+  res.writeHead(200,{'Content-Type':found.rows[0].mime,
+   'Cache-Control':'private,no-store','X-Content-Type-Options':'nosniff'});
+  return res.end(found.rows[0].content);
+ }
  const m=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/(stores|products|promotions|payments|apps|publish|vacancies|complaints)$/);
  if(!m)throw bad(404,'Ruta no encontrada');const tenantId=m[1],resource=m[2];await tenantOf(user,tenantId);
  if(req.method==='GET'){
