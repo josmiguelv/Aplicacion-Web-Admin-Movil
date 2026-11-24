@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {createHash,randomUUID} from 'node:crypto'
-import {createMobileSurveyRoute,adminSurveyList,parseSurveyFilters,validateSurvey} from './mobile-order-surveys.mjs'
+import {createMobileSurveyRoute,adminSurveyList,adminSurveySummary,parseSurveyFilters,validateSurvey} from './mobile-order-surveys.mjs'
 
 const tenant=randomUUID(),appId='com.integrab2g.pollosb3',storeId=randomUUID(),interactionId=randomUUID(),access=randomUUID()
 const otherStore=randomUUID(),otherTenant=randomUUID(),integrationId=randomUUID()
@@ -87,4 +87,21 @@ test('tenant-scoped admin list applies filters and pagination without upstream c
  await assert.rejects(adminSurveyList({pool,user:{role:'TENANT_ADMIN',tenant_id:tenant},params:new URLSearchParams({tenantId:otherTenant})}),{code:403})
  const root=await adminSurveyList({pool,user:{role:'SUPER_ADMIN',tenant_id:null},params:new URLSearchParams({tenantId:tenant})})
  assert.equal(root.total,1)
+})
+
+test('summary uses full tenant data and returns exact averages and counts per store',async()=>{
+ const queries=[]
+ const pool={async query(sql,args){
+  queries.push({sql,args})
+  return {rows:[{store_id:storeId,total:4,average:4.75}]}
+ }}
+ const data=await adminSurveySummary({pool,user:{role:'TENANT_ADMIN',tenant_id:tenant},params:new URLSearchParams()})
+ assert.deepEqual(data,{stores:[{storeId,total:4,average:4.75}]})
+ assert.equal(queries[0].args[0],tenant)
+ assert.ok(queries[0].sql.includes('GROUP BY s.store_id'))
+ assert.ok(queries[0].sql.includes('avg(s.rating)'))
+ await assert.rejects(adminSurveySummary({pool,user:{role:'TENANT_ADMIN',tenant_id:tenant},params:new URLSearchParams({tenantId:otherTenant})}),{code:403})
+ await assert.rejects(adminSurveySummary({pool,user:{role:'SUPER_ADMIN',tenant_id:null},params:new URLSearchParams()}),{code:403})
+ const root=await adminSurveySummary({pool,user:{role:'SUPER_ADMIN',tenant_id:null},params:new URLSearchParams({tenantId:tenant})})
+ assert.equal(root.stores[0].average,4.75)
 })
