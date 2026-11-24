@@ -58,7 +58,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [vacancy,setVacancy]=useState(emptyVacancy)
  const [paymentStore,setPaymentStore]=useState('')
  const [paymentConfigs,setPaymentConfigs]=useState<Record<PaymentMode,PaymentConfig>>(blankPaymentModes)
- const [paymentBaseline,setPaymentBaseline]=useState<Record<PaymentMode,PaymentConfig>>(blankPaymentModes)
  const [paymentLoading,setPaymentLoading]=useState(false)
  const [paymentLoadError,setPaymentLoadError]=useState('')
  const [paymentReload,setPaymentReload]=useState(0)
@@ -205,11 +204,11 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  },[activeArea,tenantId,noticesReload])
  useEffect(()=>{
   if(activeArea!=='payments'||!tenantId||!paymentStore){
-   setPaymentLoading(false);setPaymentConfigs(blankPaymentModes());setPaymentBaseline(blankPaymentModes());setPaymentLoadError('');return
+   setPaymentLoading(false);setPaymentConfigs(blankPaymentModes());setPaymentLoadError('');return
   }
   let active=true
   setPaymentLoading(true);setPaymentLoadError('')
-  setPaymentConfigs(blankPaymentModes());setPaymentBaseline(blankPaymentModes())
+  setPaymentConfigs(blankPaymentModes())
   void api<{items:{store_id:string;mode:string;method:string;enabled:boolean;image_url:string|null}[]}>(`/api/admin/tenants/${tenantId}/payments`)
    .then(response=>{
     if(!active)return
@@ -222,7 +221,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       if(method!=='cash')next[mode].images[method]=entry.image_url||''
      }
     }
-    setPaymentConfigs(next);setPaymentBaseline(structuredClone(next))
+    setPaymentConfigs(next)
    })
    .catch(error=>{if(active)setPaymentLoadError(error instanceof Error?error.message:'No se pudieron consultar los medios de pago')})
    .finally(()=>{if(active)setPaymentLoading(false)})
@@ -672,7 +671,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage,reminder2Title,reminder2Message
      })
      setPaymentWaitMinutes(policy.paymentWaitMinutes)
-     setPaymentBaseline(structuredClone(paymentConfigs));setSavedArea('payments')
+     setSavedArea('payments')
     })}>Guardar métodos de pago y tiempo de espera</button>
    <p className="ops-hint">Habilitar un medio no comprueba pagos ni activa una modalidad. Publica los cambios para que la app pueda consultar las imágenes configuradas; efectivo no admite imagen.</p>
   </section>)}
