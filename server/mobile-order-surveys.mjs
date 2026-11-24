@@ -125,3 +125,16 @@ export async function adminSurveyList({pool,user,params}){
   rating:x.rating,tags:x.tags,comment:x.comment,createdAt:new Date(x.created_at).toISOString()})),
   total:count.rows[0].total,limit:f.limit,offset:f.offset}
 }
+
+export async function adminSurveySummary({pool,user,params}){
+ const requested=params.get('tenantId')
+ if([...params.keys()].some(k=>k!=='tenantId'||params.getAll(k).length!==1))throw fail(400,'Filtros inválidos')
+ const tenantId=user.role==='SUPER_ADMIN'?requested:user.tenant_id
+ if(!UUID.test(tenantId||'')||(user.role!=='SUPER_ADMIN'&&requested!==null&&requested!==tenantId))
+  throw fail(403,'Empresa no autorizada')
+ const result=await pool.query(`SELECT s.store_id,count(*)::int AS total,
+  round(avg(s.rating)::numeric,2)::float AS average
+  FROM mobile_order_surveys s JOIN tenants t ON t.id=s.tenant_id AND t.active=true
+  WHERE s.tenant_id=$1 GROUP BY s.store_id ORDER BY s.store_id`,[tenantId])
+ return {stores:result.rows.map(row=>({storeId:row.store_id,total:Number(row.total),average:Number(row.average)}))}
+}
