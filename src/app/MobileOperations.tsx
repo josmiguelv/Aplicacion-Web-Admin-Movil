@@ -10,7 +10,7 @@ type StoreRow = { delivery_preparation_minutes:number|null;pickup_preparation_mi
 type ReservationSettings = {enabled:boolean;preparationMinutes:number|null}
 const blankReservation = ():ReservationSettings => ({enabled:false,preparationMinutes:null})
 type ProductRow = {id:string;name:string;description:string;category:string;price_pen:number;image_url:string|null;active:boolean}
-type CompanyNotice = {id:string;title:string;message:string;imageUrl:string|null;scheduledAt:string;expiresAt:string;status:'DRAFT'|'PUBLISHED'|'DISABLED';pushSentAt:string|null;pushError:string|null}
+type CompanyNotice = {id:string;title:string;message:string;imageUrl:string|null;scheduledAt:string;expiresAt:string;startDate:string;endDate:string;weekdays:number[]|null;runTime:string|null;status:'DRAFT'|'PUBLISHED'|'DISABLED';pushSentAt:string|null;pushError:string|null}
 const limaDatetime=(iso:string)=>{const date=new Date(iso);if(Number.isNaN(date.getTime()))return '';const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`}
 type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;employment_type:string;location_label:string;store_ids:string[];image_url:string|null;whatsapp_phone:string;active:boolean}
 const modes = [{key:'delivery',name:'Delivery'},{key:'reservation',name:'Reservación'},{key:'pickup',name:'Recojo en tienda'}]
@@ -73,6 +73,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [noticeImage,setNoticeImage]=useState('')
  const [noticeStarts,setNoticeStarts]=useState('')
  const [noticeExpires,setNoticeExpires]=useState('')
+ const [noticeRunTime,setNoticeRunTime]=useState('')
+ const [noticeWeekdays,setNoticeWeekdays]=useState<number[]>([])
+ const [noticeEditStatus,setNoticeEditStatus]=useState<'DRAFT'|'PUBLISHED'|'DISABLED'>('DRAFT')
  const [notices,setNotices]=useState<CompanyNotice[]>([])
  const [noticesLoading,setNoticesLoading]=useState(false)
  const [noticesError,setNoticesError]=useState('')
@@ -581,22 +584,38 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      })}}/></label>
     {noticeImage&&<button type="button" className="button button-secondary" onClick={()=>setNoticeImage('')}>Quitar imagen</button>}
     <div className="ops-marketing-time">
-     <label>Inicio (hora de Perú UTC−5)<input type="datetime-local" value={noticeStarts}
+     <label>Fecha de inicio<input type="date" value={noticeStarts}
       onChange={e=>setNoticeStarts(e.target.value)}/></label>
-     <label>Fin de vigencia (hora de Perú UTC−5)<input type="datetime-local" value={noticeExpires}
+     <label>Fecha de fin<input type="date" min={noticeStarts||undefined} value={noticeExpires}
       onChange={e=>setNoticeExpires(e.target.value)}/></label>
     </div>
+    <fieldset className="ops-notice-weekdays">
+     <legend>Días de ejecución</legend>
+     <div className="ops-notice-days">
+      {([{day:1,label:'Lunes'},{day:2,label:'Martes'},{day:3,label:'Miércoles'},
+       {day:4,label:'Jueves'},{day:5,label:'Viernes'},{day:6,label:'Sábado'},
+       {day:7,label:'Domingo'}] as const).map(option=><label key={option.day} className="ops-notice-day">
+       <input type="checkbox" checked={noticeWeekdays.includes(option.day)}
+        onChange={event=>setNoticeWeekdays(prev=>event.target.checked?
+         [...prev,option.day].sort((a,b)=>a-b):prev.filter(n=>n!==option.day))}/>
+       {option.label}
+      </label>)}
+     </div>
+    </fieldset>
+    <label>Hora de ejecución (Perú UTC−5)<input type="time" value={noticeRunTime}
+     onChange={e=>setNoticeRunTime(e.target.value)}/></label>
+    <p className="ops-hint">Se intentará un envío por cada día marcado, a la hora indicada, entre las fechas de inicio y fin. No se envían varias notificaciones el mismo día.</p>
     <div className="ops-inline">
      <button type="button" className="button button-primary" disabled={loading||noticesLoading||
-      !noticeTitle.trim()||!noticeMessage.trim()||!noticeStarts||!noticeExpires||noticeExpires<=noticeStarts}
+      !noticeTitle.trim()||!noticeMessage.trim()||!noticeStarts||!noticeExpires||noticeExpires<noticeStarts||!noticeRunTime||noticeWeekdays.length===0||noticeEditStatus==='DISABLED'}
       onClick={()=>void act(async()=>{
        const saved=await api<CompanyNotice>(`/api/admin/tenants/${tenantId}/mobile-notifications`,'POST',{
         action:'save',...(noticeId?{id:noticeId}:{}),title:noticeTitle,message:noticeMessage,imageUrl:noticeImage,
-        scheduledAt:noticeStarts,expiresAt:noticeExpires
-       });setNoticeId(saved.id);setNoticesReload(x=>x+1);setMessage('Borrador guardado. Revisa la vista previa y luego publícalo.')
-      })}>Guardar borrador</button>
+        startDate:noticeStarts,endDate:noticeExpires,runTime:noticeRunTime,weekdays:noticeWeekdays
+       });setNoticeId(saved.id);setNoticesReload(x=>x+1);setMessage(saved.status==='PUBLISHED'?'Frecuencia del aviso publicado actualizada. Los envíos anteriores permanecen registrados.':'Borrador guardado. Revisa la vista previa y luego publícalo.')
+      })}>{noticeEditStatus==='PUBLISHED'?'Guardar cambios':'Guardar borrador'}</button>
      <button type="button" className="button button-secondary" onClick={()=>{
-      setNoticeId('');setNoticeTitle('');setNoticeMessage('');setNoticeImage('');setNoticeStarts('');setNoticeExpires('')
+      setNoticeId('');setNoticeTitle('');setNoticeMessage('');setNoticeImage('');setNoticeStarts('');setNoticeExpires('');setNoticeRunTime('');setNoticeWeekdays([]);setNoticeEditStatus('DRAFT')
      }}>Nuevo aviso</button>
     </div>
    </div>
@@ -618,13 +637,15 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    <div className="ops-marketing-list">{notices.map(n=><div key={n.id} className="ops-marketing-list-item">
     <div><strong>{n.title}</strong><p>{n.status==='DRAFT'?'Borrador':n.status==='PUBLISHED'?'Publicado':'Desactivado'}
       {n.pushSentAt?' · Aceptado por FCM':n.pushError?' · Error de envío FCM':' · Sin envío push confirmado'}</p>
-      <small>{limaDatetime(n.scheduledAt).replace('T',' ')} — {limaDatetime(n.expiresAt).replace('T',' ')} (Perú)</small></div>
+      <small>{n.startDate} — {n.endDate} · {n.runTime||'Ejecución única'} · {(n.weekdays||[]).map(day=>['','Lu','Ma','Mi','Ju','Vi','Sá','Do'][day]).join(', ')||'Programación anterior'}</small></div>
     <div className="ops-inline">
      <button type="button" className="button button-secondary" onClick={()=>{
-      setNoticeId(n.status==='DRAFT'?n.id:'');setNoticeTitle(n.title);setNoticeMessage(n.message);
-      setNoticeImage(n.imageUrl||'');setNoticeStarts(limaDatetime(n.scheduledAt));setNoticeExpires(limaDatetime(n.expiresAt))
-      if(n.status!=='DRAFT')setMessage('El aviso publicado es de solo lectura. Guarda uno nuevo si quieres modificarlo.')
-     }}>{n.status==='DRAFT'?'Editar':'Ver detalle'}</button>
+      setNoticeId(n.status==='DISABLED'?'':n.id);setNoticeTitle(n.title);setNoticeMessage(n.message);
+      setNoticeImage(n.imageUrl||'');setNoticeStarts(n.startDate||limaDatetime(n.scheduledAt).slice(0,10));
+      setNoticeExpires(n.endDate||limaDatetime(n.expiresAt).slice(0,10));
+      setNoticeRunTime(n.runTime||'');setNoticeWeekdays(n.weekdays||[]);setNoticeEditStatus(n.status);
+      if(n.status==='DISABLED')setMessage('Aviso desactivado: puedes usar sus datos para preparar uno nuevo.')
+     }}>{n.status==='DISABLED'?'Ver y reutilizar':'Editar'}</button>
      {n.status==='DRAFT'&&<button type="button" className="button button-primary" disabled={loading} onClick={()=>void act(async()=>{
       await api(`/api/admin/tenants/${tenantId}/mobile-notifications`,'POST',{action:'publish',id:n.id})
       setNoticesReload(x=>x+1);setMessage('Publicado. El envío push requiere Firebase y consentimiento del cliente.')
