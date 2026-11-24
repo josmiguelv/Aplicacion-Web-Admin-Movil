@@ -487,6 +487,80 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   <button className="button button-secondary" disabled={loading||!tenantId} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/complaints`,'POST',{appId,url:complaintsBookUrl.trim()});setSavedArea('settings')})}>Guardar enlace</button>{savedNext('settings')}
   <p className="ops-hint">Debe corresponder al Libro auténtico del proveedor y permitir obtener constancia del reclamo. Si está vacío, la aplicación informará que el acceso digital aún no está configurado; no simulará registros.</p>
  </section>)}
+ {activeArea==='commercial-notifications'&&(<section className="ops-panel ops-marketing-panel">
+  <h2><Bell size={19}/> Avisos comerciales al celular</h2>
+  <p className="ops-hint">Avisos para los clientes de toda la empresa. Configura el contenido, la imagen y el periodo de vigencia; separado de recordatorios personales de pago.</p>
+  <div className="ops-marketing-layout">
+   <div className="ops-marketing-fields">
+    <label>Título de la notificación<input maxLength={120} value={noticeTitle} placeholder="Título que verá el cliente"
+     onChange={e=>setNoticeTitle(e.target.value)}/></label>
+    <label>Mensaje del aviso<textarea rows={4} maxLength={1000} value={noticeMessage}
+     onChange={e=>setNoticeMessage(e.target.value)} placeholder="Descripción que recibirá el celular"/></label>
+    <label>Imagen (opcional)<input type="file" accept="image/png,image/jpeg,image/webp"
+     onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{
+      const response=await fetch(`/api/admin/tenants/${tenantId}/images`,{method:'POST',credentials:'include',body:file})
+      const data=await response.json()
+      if(!response.ok)throw new Error(data.error||'No se pudo cargar la imagen')
+      setNoticeImage(data.url);setMessage('Imagen agregada al aviso.')
+     })}}/></label>
+    {noticeImage&&<button type="button" className="button button-secondary" onClick={()=>setNoticeImage('')}>Quitar imagen</button>}
+    <div className="ops-marketing-time">
+     <label>Inicio (hora de Perú UTC−5)<input type="datetime-local" value={noticeStarts}
+      onChange={e=>setNoticeStarts(e.target.value)}/></label>
+     <label>Fin de vigencia (hora de Perú UTC−5)<input type="datetime-local" value={noticeExpires}
+      onChange={e=>setNoticeExpires(e.target.value)}/></label>
+    </div>
+    <div className="ops-inline">
+     <button type="button" className="button button-primary" disabled={loading||noticesLoading||
+      !noticeTitle.trim()||!noticeMessage.trim()||!noticeStarts||!noticeExpires||noticeExpires<=noticeStarts}
+      onClick={()=>void act(async()=>{
+       const saved=await api<CompanyNotice>(`/api/admin/tenants/${tenantId}/mobile-notifications`,'POST',{
+        action:'save',...(noticeId?{id:noticeId}:{}),title:noticeTitle,message:noticeMessage,imageUrl:noticeImage,
+        scheduledAt:noticeStarts,expiresAt:noticeExpires
+       });setNoticeId(saved.id);setNoticesReload(x=>x+1);setMessage('Borrador guardado. Revisa la vista previa y luego publícalo.')
+      })}>Guardar borrador</button>
+     <button type="button" className="button button-secondary" onClick={()=>{
+      setNoticeId('');setNoticeTitle('');setNoticeMessage('');setNoticeImage('');setNoticeStarts('');setNoticeExpires('')
+     }}>Nuevo aviso</button>
+    </div>
+   </div>
+   <div className="ops-marketing-preview" aria-label="Vista previa en celular">
+    <div className="ops-marketing-phone">
+     <div className="ops-marketing-phone-head"><Bell size={15}/> Pollos B3 · Vista previa</div>
+     <strong>{noticeTitle||'Título del aviso'}</strong>
+     <p>{noticeMessage||'Aquí aparecerá la descripción que recibirá el cliente.'}</p>
+     {noticeImage&&<img src={noticeImage} alt="Imagen del aviso"/>}
+     <small>Detalle disponible en la aplicación mientras esté vigente</small>
+    </div>
+    <p className="ops-hint">Esta vista previa no envía notificaciones.</p>
+   </div>
+  </div>
+  <h3>Avisos guardados</h3>
+  {noticesLoading?<p role="status">Cargando avisos...</p>:noticesError?<p role="alert">{noticesError}
+   <button className="button button-secondary" onClick={()=>setNoticesReload(x=>x+1)}>Reintentar</button></p>:
+   notices.length===0?<p className="ops-hint">Aún no hay avisos comerciales de la empresa.</p>:
+   <div className="ops-marketing-list">{notices.map(n=><div key={n.id} className="ops-marketing-list-item">
+    <div><strong>{n.title}</strong><p>{n.status==='DRAFT'?'Borrador':n.status==='PUBLISHED'?'Publicado':'Desactivado'}
+      {n.pushSentAt?' · Aceptado por FCM':n.pushError?' · Error de envío FCM':' · Sin envío push confirmado'}</p>
+      <small>{limaDatetime(n.scheduledAt).replace('T',' ')} — {limaDatetime(n.expiresAt).replace('T',' ')} (Perú)</small></div>
+    <div className="ops-inline">
+     <button type="button" className="button button-secondary" onClick={()=>{
+      setNoticeId(n.status==='DRAFT'?n.id:'');setNoticeTitle(n.title);setNoticeMessage(n.message);
+      setNoticeImage(n.imageUrl||'');setNoticeStarts(limaDatetime(n.scheduledAt));setNoticeExpires(limaDatetime(n.expiresAt))
+      if(n.status!=='DRAFT')setMessage('El aviso publicado es de solo lectura. Guarda uno nuevo si quieres modificarlo.')
+     }}>{n.status==='DRAFT'?'Editar':'Ver detalle'}</button>
+     {n.status==='DRAFT'&&<button type="button" className="button button-primary" disabled={loading} onClick={()=>void act(async()=>{
+      await api(`/api/admin/tenants/${tenantId}/mobile-notifications`,'POST',{action:'publish',id:n.id})
+      setNoticesReload(x=>x+1);setMessage('Publicado. El envío push requiere Firebase y consentimiento del cliente.')
+     })}>Publicar</button>}
+     {n.status==='PUBLISHED'&&<button type="button" className="button button-secondary" disabled={loading} onClick={()=>void act(async()=>{
+      await api(`/api/admin/tenants/${tenantId}/mobile-notifications`,'POST',{action:'disable',id:n.id})
+      setNoticesReload(x=>x+1);setMessage('Aviso desactivado.')
+     })}>Desactivar</button>}
+    </div>
+   </div>)}</div>}
+  <p className="ops-hint">El envío push está desactivado por defecto en el backend. Requiere Firebase configurado y suscripción voluntaria al tema comercial del aplicativo; guardar o publicar no significa que se entregó al celular.</p>
+ </section>)}
  {activeArea==='notifications'&&(<section className="ops-panel ops-notifications-panel">
   <h2><Bell size={19}/> Notificaciones de la empresa</h2>
   <p className="ops-hint">Se configuran una sola vez para todas las sedes de esta empresa. Los avisos se dirigen al cliente y pedido correspondiente, no a listas masivas de promociones.</p>
