@@ -92,3 +92,25 @@ if ($LASTEXITCODE -ne 0) { throw "Falló la migración 014" }
 ```
 
 No volver a ejecutar migraciones anteriores ya aplicadas. **No realizar respaldos ni pruebas sobre la base de datos.** El único control de desarrollo requerido es `pnpm build` y la revisión visual al iniciar `pnpm start` y `pnpm dev`. No usar GitHub Actions.
+
+
+## Vacantes: elegir una o varias sedes activas — migración 015
+
+El formulario de Empleo muestra todas las sedes activas de la empresa con casillas; exige elegir al menos una. La modalidad solo admite **Tiempo completo** o **Medio tiempo**. Se eliminan del formulario Horario y el campo técnico Imagen cargada; permanece la carga de fotografía opcional y su vista previa.
+
+El backend guarda las asociaciones en `job_vacancy_stores` de forma transaccional, asegura que cada sede sea de esta empresa y esté activa y publica los identificadores y nombres de las sedes elegidas. Las vacantes preexistentes no se borran, pero para publicar una vacante antigua será necesario editarla, elegir su(s) sede(s) y guardarla.
+
+**Migración 015 necesaria una sola vez en PostgreSQL local del Administrador Web:**
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\015-job-vacancy-stores.sql" |
+  docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "Falló la migración 015" }
+```
+
+La migración 014, referente a promociones, debe aplicarse antes de levantar este código **solo si todavía está pendiente**; se explica en el apartado anterior. No repetir ninguna migración ya ejecutada.
+
+Compilar localmente con `pnpm install --frozen-lockfile` y `pnpm build`, iniciar con `pnpm start` y `pnpm dev`. No utilizar GitHub Actions, respaldos ni pruebas de BD.
