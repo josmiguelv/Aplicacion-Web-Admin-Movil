@@ -12,6 +12,7 @@ function validDate(s){
 }
 const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 function timeParts(date,timeZone){
+ timeZone='America/Lima';
  const p=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',
   hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date);
  return Object.fromEntries(p.filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
@@ -68,7 +69,7 @@ export function createMobileReservationSlotsRoute({pool,json,storeHours,now=()=>
   const published=p.rows[0],store=published.payload?.stores?.find(s=>s.id===storeId);
   if(!store||store.active!==true)throw FAIL(404,'Sede no disponible');
   const live=await pool.query(`SELECT s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,
-    r.*,t.time_zone FROM stores s
+    r.* FROM stores s
     JOIN tenants t ON t.id=s.tenant_id
     LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id
     WHERE s.tenant_id=$1 AND s.id=$2 AND t.active=true`,[published.tenant_id,storeId]);
@@ -78,10 +79,10 @@ export function createMobileReservationSlotsRoute({pool,json,storeHours,now=()=>
    pickup_enabled:row.pickup_enabled,openingHours:row.opening_hours};
   const calculated=computeReservationSlots({date,mode,store:openStore,settings:{
    ...config,enabled:config.enabled&&store.reservationSettings?.enabled===true
-  },timeZone:row.time_zone||'America/Lima',now:now(),
+  },timeZone:'America/Lima',now:now(),
    isOpenAt:()=>true});
   return json(res,200,{storeId,appId,revision:published.revision,date,mode,
-   timeZone:row.time_zone||'America/Lima',enabled:calculated.enabled,
+   timeZone:'America/Lima',enabled:calculated.enabled,
    slots:calculated.slots,capacityVerified:false,agentAvailable:null,
    acceptingRequests:false,notice:'Horarios preliminares. Aún no se pueden confirmar reservas.'},true);
  }
