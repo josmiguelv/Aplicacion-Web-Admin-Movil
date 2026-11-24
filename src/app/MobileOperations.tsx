@@ -315,24 +315,19 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    {moduleWarnings.length>0&&<p role="status" className="ops-global-note">Algunos módulos no pudieron cargar: {moduleWarnings.join(', ')}. Puedes consultar tus locales mientras se corrige el módulo afectado.</p>}
    <div className="ops-local-grid">{!storesLoaded?<div className="ops-panel" role="status">No se pudo completar la carga de locales. No significa que se hayan eliminado; revisa el error del servidor.</div>:stores.length===0?<div className="ops-panel">Todavía no hay locales registrados.</div>:stores.map(local=><button type="button" className="ops-local-card" key={local.id} onClick={()=>enterLocal(local)}><span className="ops-card-icon"><Store size={23}/></span><span className="ops-card-status" data-enabled={local.active}>{local.active?'Activo':'Inactivo'}</span><strong>{local.name}</strong><span className="ops-card-address"><MapPin size={14}/>{local.address||'Dirección sin configurar'}</span><span className="ops-card-tags"><span data-on={local.delivery_enabled}>Delivery {local.delivery_enabled?'· Sí':'· No'}</span><span data-on={local.pickup_enabled}>Recojo {local.pickup_enabled?'· Sí':'· No'}</span><span data-on={reservationFlags[local.id]===true}>Reserva {reservationFlags[local.id]===undefined?'· Consultando':reservationFlags[local.id]===null?'· Sin datos':reservationFlags[local.id]?'· Sí':'· No'}</span></span><span className="ops-card-link">Configurar local <ArrowRight size={16}/></span></button>)}</div>
   </section>}
-  {activeArea==='overview'&&<section className="ops-workspace" aria-label="Configuración general de la empresa">
-   <div className="ops-workspace-head ops-global-head"><div><h2>Configuración general de la empresa</h2><p>Estas opciones son compartidas por todas las sedes. No necesitas entrar a un local para configurarlas.</p></div></div>
-   <div className="ops-module-grid">{([
-    {area:'products',title:'Productos',subtitle:'Catálogo maestro de la empresa',icon:Package},
-    {area:'promotions',title:'Promociones',subtitle:'Promociones comerciales',icon:Tag},
-    {area:'vacancies',title:'Empleo',subtitle:'Vacantes de las sedes de la empresa',icon:Store},
-    {area:'commercial-notifications',title:'Avisos al celular',subtitle:'Título, mensaje, imagen y programación para clientes',icon:Bell},
-    {area:'notifications',title:'Recordatorios de pago',subtitle:'Notificaciones personales del pedido',icon:Clock3},
-    {area:'settings',title:'Datos de la empresa',subtitle:'Libro de Reclamaciones y accesos',icon:Settings2},
-    {area:'publish',title:'Publicar cambios',subtitle:'Actualizar el catálogo de la aplicación',icon:Send}
-   ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}>
-     <item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span>
+  {activeArea==='overview'&&<section className="ops-workspace" aria-label="Avisos generales de la empresa">
+   <div className="ops-workspace-head"><div><h2>Avisos al celular</h2><p>Notificaciones comerciales para los clientes de todas las sedes de esta empresa.</p></div></div>
+   <div className="ops-module-grid">
+    <button type="button" className="ops-module-card" onClick={()=>chooseArea('commercial-notifications')}>
+     <Bell size={24}/><strong>Avisos al celular</strong>
+     <span>Título, mensaje, imagen y programación para clientes · Todas las sedes</span>
      <ArrowRight className="ops-card-arrow" size={17}/>
-   </button>)}</div>
+    </button>
+   </div>
   </section>}
   {activeArea==='local'&&selectedStore&&<section className="ops-workspace" aria-label={'Configuración de '+selectedStore.name}>
     <div className="ops-local-head"><button type="button" className="ops-back" onClick={()=>chooseArea('overview')}><ArrowLeft size={16}/> Todos los locales</button><div className="ops-local-title"><span className="ops-card-icon"><Store size={25}/></span><div><p className="eyebrow">CONFIGURANDO LOCAL</p><h2>{selectedStore.name}</h2><p><MapPin size={14}/> {selectedStore.address||'Dirección sin configurar'}</p></div><span className="ops-card-status" data-enabled={selectedStore.active}>{selectedStore.active?'Activo':'Inactivo'}</span></div></div>
-    <div className="ops-workspace-head"><div><h2>Configuración de esta sede</h2><p>Selecciona una tarjeta para configurar únicamente esta sede.</p></div></div>
+    <div className="ops-workspace-head"><div><h2>Configuración de esta sede</h2><p>Selecciona una tarjeta. Las opciones de sede editan este local; las tarjetas marcadas «Compartida» administran toda la empresa.</p></div></div>
     <div className="ops-module-grid">{([
      {title:'Datos y ubicación',subtitle:'Dirección, GPS y estado del local',icon:MapPin,focus:'details',action:'stores',on:true},
      {title:'Horarios',subtitle:'Apertura y cierre por día',icon:Clock3,focus:'hours',action:'stores',on:true},
@@ -340,7 +335,15 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      {title:'Recojo en tienda',subtitle:selectedStore.pickup_enabled?'Habilitado para pedidos':'Servicio deshabilitado',icon:ShoppingBag,focus:'pickup',action:'stores',on:selectedStore.pickup_enabled},
      {title:'Reservas',focus:'details',subtitle:reservationFlags[selectedStore.id]===true?'Reserva habilitada · Sujeta a agente disponible':reservationFlags[selectedStore.id]===null?'No se pudo consultar':'Pendiente de habilitar',icon:CalendarDays,action:'reservations',on:reservationFlags[selectedStore.id]===true},
      {title:'Formas de pago',focus:'details',subtitle:'Delivery, Reservación y Recojo en tienda',icon:CreditCard,action:'payments',on:true}
-    ] as const).map(item=><button type="button" className="ops-module-card" key={item.title} onClick={()=>enterLocalModule(item.action,item.focus)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span>{!item.on&&<span className="ops-module-state" data-enabled={false}>Deshabilitado</span>}<ArrowRight className="ops-card-arrow" size={17}/></button>)}</div>
+    ] as const).map(item=><button type="button" className="ops-module-card" key={item.title} onClick={()=>enterLocalModule(item.action,item.focus)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span>{!item.on&&<span className="ops-module-state" data-enabled={false}>Deshabilitado</span>}<ArrowRight className="ops-card-arrow" size={17}/></button>)}{([
+      {area:'products',title:'Productos',subtitle:'Catálogo maestro de la empresa · compartido',icon:Package},
+      {area:'promotions',title:'Promociones',subtitle:'Promociones generales · compartidas',icon:Tag},
+      {area:'vacancies',title:'Empleo',subtitle:'Vacantes de la empresa · compartidas',icon:Store},
+      {area:'settings',title:'Datos de la empresa',subtitle:'Configuración general · compartida',icon:Settings2},
+      {area:'notifications',title:'Notificaciones',subtitle:'Recordatorios personales de pago · todas las sedes',icon:Bell},
+      {area:'publish',title:'Publicar cambios',subtitle:'Publicación del catálogo de la empresa',icon:Send}
+     ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={false}>Compartida</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}</div>
+    <p className="ops-global-note">Las tarjetas marcadas como compartidas abren formularios generales de la empresa; aún no realizan cambios exclusivos en este local. La personalización por sede requiere API y persistencia adicionales.</p>
    </section>}
   {!['overview','local'].includes(activeArea)&&<div className="ops-context-bar"><button type="button" className="ops-back" onClick={()=>chooseArea(selectedStore&&['stores','reservations','payments'].includes(activeArea)?'local':'overview')}><ArrowLeft size={16}/> {selectedStore&&['stores','reservations','payments'].includes(activeArea)?'Volver a '+selectedStore.name:'Volver a empresas y locales'}</button><span>{selectedStore&&['stores','reservations','payments'].includes(activeArea)?'Local: '+selectedStore.name:'Configuración general de la empresa · todas las sedes'}</span></div>}
   {activeArea==='settings'&&session.role==='SUPER_ADMIN'&&!embeddedSession&&<section className="ops-panel"><h2>Acceso del administrador de empresa</h2><p>Solo el superadministrador puede crear credenciales para el tenant seleccionado.</p><div className="ops-inline"><input type="email" placeholder="Correo del administrador" value={newTenantEmail} onChange={e=>setNewTenantEmail(e.target.value)}/><input type="password" placeholder="Contraseña segura (mín. 14)" value={newTenantPassword} onChange={e=>setNewTenantPassword(e.target.value)}/><button className="button button-secondary" disabled={loading} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/users`,'POST',{email:newTenantEmail,password:newTenantPassword});setNewTenantPassword('');setNewTenantEmail('');setMessage('Administrador creado exclusivamente para esta empresa.')})}>Crear administrador</button></div></section>}
