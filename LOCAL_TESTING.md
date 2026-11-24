@@ -136,3 +136,15 @@ pnpm build
 ```
 
 Después iniciar `pnpm start` y `pnpm dev` en terminales distintas. No aplicar migraciones nuevas para el ajuste de zona horaria; las migraciones 014/015 de cambios anteriores deben estar aplicadas si aún estaban pendientes.
+
+
+## Configuración de empresa → Notificaciones
+
+La configuración preexistente de **Seguimiento de pago y recordatorios personales** tiene una tarjeta independiente llamada **Notificaciones** marcada como compartida y aplica a todas las sedes de la empresa seleccionada. Conservar los valores `paymentWaitMinutes` (5–30) y `reminderCount` (0–2), desde el endpoint `/api/admin/tenants/{tenantId}/checkout-settings`.
+
+- No cambiar la regla de destinatarios: los recordatorios son individuales por dispositivo y pedido, no promociones masivas.
+- Guardar los ajustes no requiere publicar el catálogo; el proceso automático requiere `B3_CHECKOUT_WORKER_ENABLED=true`, soporte de notificaciones en el dispositivo y la configuración local preexistente (migración 007).
+- Este cambio solo reorganiza la navegación. **No requiere migraciones nuevas ni cambios de base de datos**, ni modifica Android o TU VERSO.
+- No utilizar GitHub Actions, no hacer respaldos ni pruebas en PostgreSQL.
+
+Para actualizar la copia local, utilizar `git fetch` y `git merge --ff-only FETCH_HEAD` indicados al inicio; compilar con `pnpm build` y ejecutar backend y frontend por separado.
