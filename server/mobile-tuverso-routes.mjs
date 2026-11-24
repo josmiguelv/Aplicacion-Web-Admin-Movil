@@ -132,7 +132,7 @@ function publicStore(payload,storeId){
  return store
 }
 function authorizedHour(store,storeOpen){
- if(!storeOpen(store))throw fail(409,'La sede no está abierta o habilitada')
+ if(!storeOpen(store))throw fail(409,'La sede no está habilitada')
 }
 export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  availability=checkAvailability,createInteraction=createMobileInteraction,
@@ -150,12 +150,12 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   const store=publicStore(catalog.payload,storeId)
   if(requireOpen)authorizedHour(store,storeOpen)
   if(!requireOpen)return {tenantId:catalog.tenant_id,revision:catalog.revision,payload:catalog.payload,store}
-  const live=await pool.query(`SELECT s.active,s.delivery_enabled,s.opening_hours,s.service_hours,t.time_zone
+  const live=await pool.query(`SELECT s.active,s.delivery_enabled,s.pickup_enabled
    FROM stores s JOIN tenants t ON t.id=s.tenant_id
    WHERE s.tenant_id=$1 AND s.id=$2 AND t.active=true`,[catalog.tenant_id,storeId])
-  if(live.rowCount!==1||!live.rows[0].active||!live.rows[0].delivery_enabled||!storeOpen({
-   ...store,openingHours:live.rows[0].opening_hours,serviceHours:live.rows[0].service_hours
-  },live.rows[0].time_zone))throw fail(409,'La sede ya no está abierta o habilitada')
+  if(live.rowCount!==1||!live.rows[0].active||!(live.rows[0].delivery_enabled||live.rows[0].pickup_enabled)||!storeOpen({
+   ...store,active:live.rows[0].active,delivery_enabled:live.rows[0].delivery_enabled,pickup_enabled:live.rows[0].pickup_enabled
+  }))throw fail(409,'La sede ya no está habilitada')
   return {tenantId:catalog.tenant_id,revision:catalog.revision,payload:catalog.payload,store}
  }
  async function binding(tenantId,appId,storeId){
