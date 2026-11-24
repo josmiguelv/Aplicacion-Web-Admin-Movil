@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { ArrowLeft, ArrowRight, Bike, Building2, CalendarDays, Check, Clock3, Copy, CreditCard, MapPin, Package, Send, ShoppingBag, Store, Smartphone, Tag, Settings2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bike, Building2, CalendarDays, Check, Clock3, Copy, CreditCard, MapPin, Package, Send, ShoppingBag, Store, Smartphone, Tag, Settings2, Bell } from 'lucide-react'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
@@ -67,7 +67,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [loading,setLoading]=useState(false)
  const [savedArea,setSavedArea]=useState<string>('')
  const savedNext=(area:string)=>savedArea===area&&<div className="ops-save-next" role="status"><div className="ops-save-next-heading"><Check size={18}/><strong>Cambios guardados</strong></div><p>Los cambios están guardados. Para que aparezcan en la aplicación, debes publicarlos.</p><div className="ops-save-next-actions"><button type="button" className="button button-secondary" onClick={()=>setSavedArea('')}>Seguir editando</button><button type="button" className="button button-primary" onClick={()=>chooseArea('publish')}><Send size={15}/> Ir a publicar</button></div></div>
- const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'publish'>('overview')
+ const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'notifications'|'publish'>('overview')
  const chooseArea=(area:typeof activeArea)=>{
   if(area===activeArea)return
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Tienes cambios sin guardar en el local. ¿Quieres salir sin guardarlos?'))return
@@ -273,6 +273,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       {area:'promotions',title:'Promociones',subtitle:'Promociones generales · compartidas',icon:Tag},
       {area:'vacancies',title:'Empleo',subtitle:'Vacantes de la empresa · compartidas',icon:Store},
       {area:'settings',title:'Datos de la empresa',subtitle:'Configuración general · compartida',icon:Settings2},
+       {area:'notifications',title:'Notificaciones',subtitle:'Recordatorios personales de pago · todas las sedes',icon:Bell},
       {area:'publish',title:'Publicar cambios',subtitle:'Publicación del catálogo de la empresa',icon:Send}
      ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={false}>Compartida</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}</div>
     <p className="ops-global-note">Las tarjetas marcadas como compartidas abren formularios generales de la empresa; aún no realizan cambios exclusivos en este local. La personalización por sede requiere API y persistencia adicionales.</p>
@@ -421,8 +422,11 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   <label>Dirección HTTPS del Libro de Reclamaciones<input type="url" value={complaintsBookUrl} placeholder="https://..." onChange={e=>setComplaintsBookUrl(e.target.value)} /></label>
   <button className="button button-secondary" disabled={loading||!tenantId} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/complaints`,'POST',{appId,url:complaintsBookUrl.trim()});setSavedArea('settings')})}>Guardar enlace</button>{savedNext('settings')}
   <p className="ops-hint">Debe corresponder al Libro auténtico del proveedor y permitir obtener constancia del reclamo. Si está vacío, la aplicación informará que el acceso digital aún no está configurado; no simulará registros.</p>
-  <div className="ops-divider" style={{margin:'24px 0',borderTop:'1px solid #e5e7eb'}}/>
-  <h2>Seguimiento de pago · Notificaciones personales</h2>
+ </section>)}
+ {activeArea==='notifications'&&(<section className="ops-panel ops-notifications-panel">
+  <h2><Bell size={19}/> Notificaciones de la empresa</h2>
+  <p className="ops-hint">Se configuran una sola vez para todas las sedes de esta empresa. Los avisos se dirigen al cliente y pedido correspondiente, no a listas masivas de promociones.</p>
+  <h3>Seguimiento de pago y recordatorios personales</h3>
   <p className="ops-hint">El plazo inicia cuando el pedido fue aceptado por la sede y la app presenta el total. Los avisos son individuales por dispositivo y solicitud; nunca se envían a un tema de promociones. La espera de respuesta del agente no tiene este plazo.</p>
   <div className="ops-grid">
    <label>Tiempo para continuar con el pago (minutos)
@@ -434,9 +438,10 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     </select>
    </label>
   </div>
-  <p className="ops-hint">Ejemplo: a 10 minutos y 2 avisos, se programa un recordatorio aproximadamente a los minutos 3:20 y 6:40. Al vencimiento el pedido deja de ser pagable y se avisa a la sede. No se inicia otra conversación.</p>
+  <p className="ops-hint">Ejemplo: con 10 minutos y 2 avisos, los recordatorios se intentan aproximadamente en los minutos 3:20 y 6:40 si el dispositivo tiene notificaciones habilitadas. Al vencimiento se actualiza el estado del pago; no se abre otra conversación.</p>
   <button className="button button-primary" disabled={loading||!tenantId||!Number.isInteger(paymentWaitMinutes)||paymentWaitMinutes<5||paymentWaitMinutes>30}
-   onClick={()=>void act(async()=>{const r=await api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',{paymentWaitMinutes,reminderCount});setPaymentWaitMinutes(r.paymentWaitMinutes);setReminderCount(r.reminderCount);setMessage('Configuración de seguimiento de pago guardada para esta empresa.')})}>Guardar tiempo y recordatorios</button>
+   onClick={()=>void act(async()=>{const r=await api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',{paymentWaitMinutes,reminderCount});setPaymentWaitMinutes(r.paymentWaitMinutes);setReminderCount(r.reminderCount);setSavedArea('notifications');setMessage('Notificaciones de pago configuradas para todas las sedes de la empresa.')})}>Guardar notificaciones</button>
+  {savedNext('notifications')}
  </section>)}
  {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div><p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
   </>}
