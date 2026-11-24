@@ -189,3 +189,15 @@
  .ops-products-panel .ops-product-row{grid-template-columns:1fr}
  .ops-products-panel .ops-product-row>button{justify-self:stretch}
 }
+
+
+/* Weekly frequency: exactly seven simple day checkboxes and one Peru-local send time. */
+.ops-notice-weekdays{border:0;margin:8px 0 0;padding:0;min-width:0}
+.ops-notice-weekdays legend{font-size:13px;font-weight:700;margin-bottom:9px}
+.ops-notice-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}
+.ops-notice-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;cursor:pointer;border:1px solid #dce4eb;border-radius:11px;background:#fff;padding:12px 5px;font-size:12px;font-weight:650}
+.ops-notice-day:has(input:checked){background:#edf9f1;border-color:#8ccbaa;color:#116348}
+.ops-notice-day:focus-within{outline:2px solid #15714f;outline-offset:2px}
+.ops-notice-day input[type=checkbox]{width:18px;height:18px;accent-color:#15714f}
+@media(max-width:650px){.ops-notice-days{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:390px){.ops-notice-days{grid-template-columns:repeat(2,minmax(0,1fr))}}
