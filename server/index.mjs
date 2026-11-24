@@ -230,7 +230,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'CHECKOUT_POLICY_UPDATED',tenantId])
   return json(res,200,saved)
  }
- const paymentImagesMatch=url.pathname.match(/^\\/api\\/admin\\/tenants\\/([0-9a-f-]{36})\\/payment-images$/i)
+ const paymentImagesMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/payment-images$/i)
  if(paymentImagesMatch){
   const tenantId=paymentImagesMatch[1];await tenantOf(user,tenantId)
   if(req.method==='GET'){
