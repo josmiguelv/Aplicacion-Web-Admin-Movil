@@ -288,7 +288,15 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  const m=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/(stores|products|promotions|payments|apps|publish|vacancies|complaints)$/);
  if(!m)throw bad(404,'Ruta no encontrada');const tenantId=m[1],resource=m[2];await tenantOf(user,tenantId);
  if(req.method==='GET'){
-  const table={stores:'stores',products:'products',promotions:'promotions',payments:'payment_methods',apps:'mobile_apps',vacancies:'job_vacancies'}[resource];if(!table)throw bad(405,'Acción no permitida');const x=await sql(`SELECT * FROM ${table} WHERE tenant_id=$1 ORDER BY 1`,[tenantId]);return json(res,200,{items:x.rows})
+  if(resource==='vacancies'){
+   const x=await sql(`SELECT j.*,
+      COALESCE((SELECT array_agg(vs.store_id ORDER BY vs.store_id)
+       FROM job_vacancy_stores vs WHERE vs.tenant_id=j.tenant_id AND vs.vacancy_id=j.id),
+       ARRAY[]::uuid[]) AS store_ids
+     FROM job_vacancies j WHERE j.tenant_id=$1 ORDER BY j.id`,[tenantId]);
+   return json(res,200,{items:x.rows});
+  }
+  const table={stores:'stores',products:'products',promotions:'promotions',payments:'payment_methods',apps:'mobile_apps'}[resource];if(!table)throw bad(405,'Acción no permitida');const x=await sql(`SELECT * FROM ${table} WHERE tenant_id=$1 ORDER BY 1`,[tenantId]);return json(res,200,{items:x.rows})
  }
  if(req.method!=='POST'&&req.method!=='PUT')throw bad(405,'Acción no permitida');const b=await body(req);const client=await pool.connect();try{await client.query('BEGIN');let result;
  if(resource==='stores'){
