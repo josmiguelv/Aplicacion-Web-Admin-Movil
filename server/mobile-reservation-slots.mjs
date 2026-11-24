@@ -74,14 +74,14 @@ export function createMobileReservationSlotsRoute({pool,json,storeHours,now=()=>
   if(p.rowCount!==1)throw FAIL(404,'Catálogo no disponible');
   const published=p.rows[0],store=published.payload?.stores?.find(s=>s.id===storeId);
   if(!store||store.active!==true)throw FAIL(404,'Sede no disponible');
-  const live=await pool.query(`SELECT s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,s.service_hours,
+  const live=await pool.query(`SELECT s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,
     r.*,t.time_zone FROM stores s
     JOIN tenants t ON t.id=s.tenant_id
     LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id
     WHERE s.tenant_id=$1 AND s.id=$2 AND t.active=true`,[published.tenant_id,storeId]);
   if(live.rowCount!==1)throw FAIL(404,'Sede no disponible');
   const row=live.rows[0],config=mapReservationSettings(row);
-  const openStore={...store,serviceMode:mode,serviceHours:row.service_hours,active:row.active,delivery_enabled:row.delivery_enabled,
+  const openStore={...store,serviceMode:mode,active:row.active,delivery_enabled:row.delivery_enabled,
    pickup_enabled:row.pickup_enabled,openingHours:row.opening_hours};
   const calculated=computeReservationSlots({date,mode,store:openStore,settings:{
    ...config,enabled:config.enabled&&store.reservationSettings?.enabled===true
