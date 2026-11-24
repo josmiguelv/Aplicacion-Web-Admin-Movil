@@ -165,8 +165,8 @@ export async function dispatchCommercialNotifications(pool,{send=sendCompanyPush
   WHERE n.status='PUBLISHED' AND n.scheduled_at<=$1 AND n.expires_at>$1
     AND (n.weekdays IS NULL OR ($2=ANY(n.weekdays) AND n.run_time<=$3::time))
     AND (n.weekdays IS NOT NULL OR n.push_sent_at IS NULL)
-    AND EXISTS(SELECT 1 FROM mobile_apps a WHERE a.tenant_id=n.tenant_id
-       AND a.app_id=$4 AND a.enabled=true)
+    AND EXISTS(SELECT 1 FROM mobile_apps a JOIN tenants t ON t.id=a.tenant_id
+       WHERE a.tenant_id=n.tenant_id AND a.app_id=$4 AND a.enabled=true AND t.active=true)
   ORDER BY n.scheduled_at,n.id LIMIT 100`,[now,weekday,clock,mobileAppId]);
  let claimedCount=0;
  for(const row of candidates.rows){
