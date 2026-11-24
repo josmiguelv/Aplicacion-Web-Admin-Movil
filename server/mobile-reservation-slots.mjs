@@ -10,7 +10,6 @@ function validDate(s){
  const d=new Date(s+'T12:00:00Z');
  return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===s;
 }
-const minute=time=>Number(time.slice(0,2))*60+Number(time.slice(3));
 const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 function timeParts(date,timeZone){
  const p=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',
@@ -38,23 +37,17 @@ export function localDateTimeEpoch(date,time,timeZone){
 export function computeReservationSlots({date,mode,store,settings,timeZone='America/Lima',
  now=new Date(),isOpenAt}){
  if(!validDate(date)||!['delivery','pickup'].includes(mode))throw FAIL(400,'Fecha o modalidad de reserva inválida');
- if(typeof isOpenAt!=='function')throw Error('MISSING_STORE_HOURS_CHECK');
  if(!store||store.active!==true||store[mode+'_enabled']!==true||
   !settings?.enabled)return {enabled:false,slots:[]};
  const cfg=settings;
- if(!Number.isSafeInteger(cfg.minAdvanceMinutes)||!Number.isSafeInteger(cfg.maxAdvanceDays)||
-  !Number.isSafeInteger(cfg.preparationMinutes)||!cfg.firstTime||!cfg.lastTime)
-  return {enabled:false,slots:[]};
- const min=minute(cfg.firstTime),max=minute(cfg.lastTime);
- if(max<=min)return {enabled:false,slots:[]};
- // Without configurable slot intervals, any minute within the permitted range
- // can be requested. The preview is informational, not a capacity hold.
+ if(!Number.isSafeInteger(cfg.preparationMinutes)||cfg.preparationMinutes<1||
+    cfg.preparationMinutes>240)return {enabled:false,slots:[]};
+ // No time windows, advance limits, or capacity limits. The requested time
+ // must be in the future; TU VERSO still decides if an agent can receive it.
  const slots=[];
- for(let m=min;m<=max;m++){
+ for(let m=0;m<1440;m++){
   const time=hhmm(m),epoch=localDateTimeEpoch(date,time,timeZone);
-  if(epoch===null||epoch<now.getTime()+cfg.minAdvanceMinutes*60000||
-     epoch>now.getTime()+cfg.maxAdvanceDays*86400000)continue;
-  if(!isOpenAt(store,new Date(epoch),timeZone))continue;
+  if(epoch===null||epoch<=now.getTime())continue;
   slots.push({time,scheduledAt:new Date(epoch).toISOString()});
  }
  return {enabled:true,slots};
@@ -86,7 +79,7 @@ export function createMobileReservationSlotsRoute({pool,json,storeHours,now=()=>
   const calculated=computeReservationSlots({date,mode,store:openStore,settings:{
    ...config,enabled:config.enabled&&store.reservationSettings?.enabled===true
   },timeZone:row.time_zone||'America/Lima',now:now(),
-   isOpenAt:(s,at,zone)=>{const h=storeHours(s,at,zone);return h.hoursConfigured===true&&h.isOpen===true;}});
+   isOpenAt:()=>true});
   return json(res,200,{storeId,appId,revision:published.revision,date,mode,
    timeZone:row.time_zone||'America/Lima',enabled:calculated.enabled,
    slots:calculated.slots,capacityVerified:false,agentAvailable:null,
