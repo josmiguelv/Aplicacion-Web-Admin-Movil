@@ -71,9 +71,29 @@ CREATE TABLE IF NOT EXISTS promotions (
   title TEXT NOT NULL,
   starts_at TIMESTAMPTZ,
   ends_at TIMESTAMPTZ,
+  starts_on DATE,
+  ends_on DATE,
+  active_from TIME WITHOUT TIME ZONE,
+  active_until TIME WITHOUT TIME ZONE,
+  active_weekdays INTEGER[],
   active BOOLEAN NOT NULL DEFAULT false,
+  CONSTRAINT promotions_schedule_valid CHECK(
+    (starts_on IS NULL AND ends_on IS NULL AND active_from IS NULL AND active_until IS NULL AND active_weekdays IS NULL)
+    OR (starts_on IS NOT NULL AND ends_on IS NOT NULL AND starts_on<=ends_on
+        AND active_from IS NOT NULL AND active_until IS NOT NULL AND active_from<active_until
+        AND active_weekdays IS NOT NULL AND cardinality(active_weekdays) BETWEEN 1 AND 7
+        AND active_weekdays <@ ARRAY[1,2,3,4,5,6,7]::INTEGER[]
+        AND array_position(active_weekdays,NULL) IS NULL)
+  ),
   UNIQUE(id,tenant_id)
 );
+-- Fields used by date/time/day promotion schedules; update existing local DB via migration 014.
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS starts_on DATE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS ends_on DATE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS active_from TIME WITHOUT TIME ZONE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS active_until TIME WITHOUT TIME ZONE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS active_weekdays INTEGER[];
+
 CREATE TABLE IF NOT EXISTS payment_methods (
   tenant_id UUID NOT NULL REFERENCES tenants(id),
   store_id UUID NOT NULL,
