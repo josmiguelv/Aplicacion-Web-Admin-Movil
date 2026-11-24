@@ -323,3 +323,25 @@ if ($LASTEXITCODE -ne 0) { throw "La migración 019 falló" }
 Los mensajes de éxito de **Guardar** y **Publicar** de todos los módulos del Administrador pasan a un aviso fijo flotante, con entrada discreta, visible durante 1,5 segundos, transición de salida de 0,35 segundos y eliminación a los 1,9 segundos. No hay avisos persistentes de guardado ni botones flotantes que bloqueen la interfaz. Los errores permanecen legibles en su posición original hasta que se resuelvan. Respeta preferencias de movimiento reducido.
 
 Actualizar el código con `git fetch` y `git merge --ff-only FETCH_HEAD`. Compilar localmente con `pnpm install --frozen-lockfile` y `pnpm build`; ejecutar `pnpm start` y `pnpm dev` en terminales separadas. No ejecutar GitHub Actions, backups ni pruebas de BD.
+
+
+## Pagos por modalidad en filas y tarjetas de producto (migración 020)
+
+En cada local, «Formas de pago» muestra sin desplegables las **tres modalidades**: Delivery, Reservación y Recojo en tienda; cada fila muestra Yape, Plin, Tarjeta y Efectivo con selección independiente. Para Yape/Plin/Tarjeta puede cargarse, sustituirse o quitarse una imagen, guardada por `tenant_id + store_id + mode + method`, reutilizando el endpoint autenticado de imágenes del Administrador. Efectivo no ofrece imagen.
+
+Una sola sección **Tiempo de espera para el pago · General** ajusta `payment_wait_minutes` de la política empresarial existente, compartida con las notificaciones personales y aplicable a las tres modalidades. No se alteran los plazos de aceptación de TU VERSO. El botón guarda las tres selecciones y el plazo. La publicación del catálogo agrega `paymentMethodImages` para consumo futuro de la aplicación; **no modificar Android ni TU VERSO aquí**.
+
+La migración `020-payment-method-images.sql` se aplica **una vez** después de `019`, solo en la base local `integra-admin-postgres`:
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\020-payment-method-images.sql" |
+  docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "La migración 020 falló" }
+```
+
+En **Productos**, el catálogo muestra tarjetas con fotografía si existe, categoría, nombre, precio, estado visible **Activo/Inactivo** y botón Editar. No se abre formulario hasta pulsar Editar o Nuevo producto. El editor mantiene nombre, precio, categoría, descripción, imagen y activación. Esta vista no requiere migración.
+
+Actualizar con `git fetch` y `git merge --ff-only FETCH_HEAD`, ejecutar `pnpm build`; levantar `pnpm start` y `pnpm dev`. No GitHub Actions ni operaciones, respaldos o pruebas automáticas de BD. No modificar Android ni TU VERSO.
