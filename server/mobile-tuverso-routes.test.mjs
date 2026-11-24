@@ -733,3 +733,43 @@ test('TU VERSO explicit OPEN is recognized while absence remains UNKNOWN',async(
  assert.equal(Object.hasOwn(missing.payload,'operationalConversationStatus'),false)
  assert.equal(missing.payload.messagesAvailable,false)
 })
+
+
+test('payment receipt sends exactly one image FORM for an accepted authorized order',async()=>{
+ const access=randomUUID(),id=randomUUID(),messageKey=randomUUID()
+ const h=harness({remoteStatus:'ACCEPTED'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
+  subtitle:'Comprobante de pago Yape',imageUrl:'https://cdn.example.com/comprobante.jpg',
+  fields:[{variable:'Pedido',value:'B3-1025'},{variable:'Método',value:'Yape'}]}}
+ const result=await h.call('POST','/api/v1/mobile/interactions/'+id+'/payment-receipt',{
+  headers:{'x-order-access-key':access,'idempotency-key':messageKey},payload})
+ assert.equal(result.code,200)
+ assert.equal(result.payload.type,'FORM')
+ assert.equal(result.payload.paymentStatus,'PENDING_VALIDATION')
+ assert.deepEqual(h.remote.map(x=>x.operation),['read','orderForm'])
+ assert.equal(h.remote[1].value.idempotencyKey,messageKey)
+ assert.equal(h.remote[1].value.form.imageUrl,payload.form.imageUrl)
+})
+test('payment receipt rejects invalid image, missing idempotency, wrong access and unaccepted order',async()=>{
+ const access=randomUUID(),id=randomUUID(),key=randomUUID()
+ const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
+  imageUrl:'https://127.0.0.1/private.png',fields:[{variable:'Método',value:'Yape'}]}}
+ const h=harness({remoteStatus:'ACCEPTED'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const path='/api/v1/mobile/interactions/'+id+'/payment-receipt'
+ const bad=await h.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},payload})
+ assert.equal(bad.code,400)
+ assert.equal(h.remote.length,0)
+ payload.form.imageUrl='https://cdn.example.com/receipt.png'
+ const noKey=await h.call('POST',path,{headers:{'x-order-access-key':access},payload})
+ assert.equal(noKey.code,400)
+ const rejected=harness({remoteStatus:'PENDING'})
+ rejected.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const pending=await rejected.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},payload})
+ assert.equal(pending.code,409)
+ assert.deepEqual(rejected.remote.map(x=>x.operation),['read'])
+ const forbidden=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID(),'idempotency-key':key},payload})
+ assert.equal(forbidden.code,403)
+ assert.deepEqual(h.remote.map(x=>x.operation),['read'])
+})
