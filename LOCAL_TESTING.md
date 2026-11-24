@@ -197,3 +197,18 @@ Se revierte **solo la reorganización equivocada de tarjetas**. La pantalla inic
 No se revierten las API, la lógica comercial ni los datos. **Este rollback visual no necesita ninguna migración nueva.** Si la 016 todavía no fue aplicada, sigue siendo necesaria para que funcione el nuevo módulo de avisos comerciales; si ya se aplicó, no repetirla.
 
 No ejecutar GitHub Actions ni operaciones, respaldos o pruebas de BD. Actualizar con `git fetch`, `git merge --ff-only FETCH_HEAD`, compilar `pnpm build` y reiniciar los servicios locales.
+
+
+## Notificaciones para el cliente — única tarjeta de empresa debajo de locales
+
+La única tarjeta situada bajo los locales ahora se llama **Notificaciones para el cliente**. En esa misma pantalla están:
+1. Avisos comerciales al celular: título, contenido, imagen, vigencia, borradores y publicación.
+2. Recordatorios personales de pago: plazo de 5–30 minutos y hasta 2 avisos, conservando los ajustes de la empresa.
+
+Se elimina exclusivamente la tarjeta **Notificaciones** del panel de configuración de cada sede. Productos, Promociones, Empleo, Datos de la empresa y Publicar cambios permanecen en el panel de la sede como tarjetas compartidas.
+
+**Este cambio de navegación y formulario no requiere migración nueva.** La migración 016 continúa siendo necesaria solo si todavía no se aplicó para el módulo de avisos comerciales; no volver a ejecutarla si ya se aplicó. La configuración de recordatorios de pago reutiliza la base de datos existente.
+
+No usar GitHub Actions, no ejecutar respaldos ni pruebas de la base de datos, no cambiar Android ni TU VERSO.
+
+Actualizar en local con `git fetch`, `git merge --ff-only FETCH_HEAD` y `pnpm build`; reiniciar `pnpm start` y `pnpm dev` en sus terminales.
