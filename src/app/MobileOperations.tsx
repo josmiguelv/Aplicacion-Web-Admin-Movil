@@ -338,11 +338,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      )}</div>}
     <button type="button" className="button button-primary" disabled={!paymentStore||loading||paymentLoading||!!paymentLoadError||!paymentDirty}
      onClick={()=>void act(async()=>{
-      const changes=payments.filter(method=>paymentSelection[method.key]!==paymentBaseline[method.key])
-      for(const method of changes){
-       await api(`/api/admin/tenants/${tenantId}/payments`,'POST',
-        {storeId:paymentStore,mode:paymentMode,method:method.key,enabled:paymentSelection[method.key]})
-      }
+      await api(`/api/admin/tenants/${tenantId}/payments`,'POST',
+       {storeId:paymentStore,mode:paymentMode,methods:paymentSelection})
       setPaymentBaseline({...paymentSelection})
       setSavedArea('payments')
      })}>Guardar métodos de pago</button>
