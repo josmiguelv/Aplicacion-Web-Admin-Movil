@@ -113,3 +113,21 @@
 .ops-payment-method:has(input:checked) .ops-payment-status{color:#166647;font-weight:650}
 .ops-payment-panel>button.button-primary{margin-bottom:12px}
 @media(max-width:540px){.ops-payment-method-grid{grid-template-columns:1fr}.ops-payment-method{padding:13px 14px}}
+
+
+/* Pollos B3 promotions: one date interval, one daily time interval, seven weekday switches. */
+.ops-promo-fields{display:grid;grid-template-columns:minmax(220px,1.3fr) repeat(2,minmax(150px,1fr));gap:14px;margin:20px 0 12px}
+.ops-promo-time-fields{display:grid;grid-template-columns:repeat(2,minmax(150px,220px));gap:14px;margin:0 0 23px}
+.ops-promo-fields>label,.ops-promo-time-fields>label{display:flex;flex-direction:column;gap:7px;min-width:0;font-weight:650;font-size:13px}
+.ops-promo-fields input,.ops-promo-time-fields input{width:100%;min-width:0}
+.ops-promo-weekdays{padding:0;border:0;margin:0 0 22px;min-width:0}
+.ops-promo-weekdays legend{font-size:14px;font-weight:700;margin-bottom:12px}
+.ops-promo-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.ops-promo-day{border:1px solid #dce4eb;background:#fff;border-radius:10px;padding:12px 7px;cursor:pointer;display:flex;gap:6px;align-items:center;justify-content:center;font-size:12px;font-weight:650;min-width:0}
+.ops-promo-day.is-selected{background:#f1faf5;border-color:#a4d6bc;color:#136a45}
+.ops-promo-day:focus-within{outline:2px solid #166c4b;outline-offset:2px}
+.ops-promo-day input[type=checkbox]{height:16px;width:16px;flex:none;accent-color:#16724e}
+.ops-promo-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+@media(max-width:1000px){.ops-promo-days{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:680px){.ops-promo-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-promo-fields>label:first-child{grid-column:1/-1}.ops-promo-time-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-promo-days{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:380px){.ops-promo-fields,.ops-promo-time-fields{grid-template-columns:1fr}.ops-promo-fields>label:first-child{grid-column:auto}}
