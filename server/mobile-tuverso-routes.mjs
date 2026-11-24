@@ -339,6 +339,19 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,imageBody,im
     // The structured order remains server-derived. A separately supplied
     // FORM is displayed literally but can never authorize an order or price.
     const ctx=await context(input.appId,input.storeId,false)
+    if(directForm&&input.form.imageUrl!==undefined){
+      // A payment receipt must be an image uploaded through this same tenant,
+      // not an arbitrary URL supplied by the mobile app.
+      let image
+      try{image=new URL(input.form.imageUrl)}catch{throw fail(400,'URL de comprobante inválida')}
+      const match=image.pathname.match(/^\/api\/v1\/mobile\/payment-receipts\/([0-9a-f-]{36})$/i)
+      const host=String(req.headers.host||'').toLowerCase()
+      if(image.protocol!=='https:'||image.host.toLowerCase()!==host||
+         image.username||image.password||image.search||image.hash||!match)
+        throw fail(400,'El comprobante debe provenir de la API autorizada')
+      const owned=await pool.query('SELECT 1 FROM product_images WHERE id=$1 AND tenant_id=$2',[match[1],ctx.tenantId])
+      if(!owned.rowCount)throw fail(404,'Comprobante no disponible para esta empresa')
+    }
     const session=await checkoutSessionState(pool,{interactionId,tenantId:ctx.tenantId,
      appId:input.appId,storeId:input.storeId,accessKey:access})
     if(['CANCELLED','EXPIRED','FINISHED'].includes(session))
