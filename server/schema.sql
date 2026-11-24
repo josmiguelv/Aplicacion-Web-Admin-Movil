@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS stores (
   pickup_enabled BOOLEAN NOT NULL DEFAULT false,
   dine_in_enabled BOOLEAN NOT NULL DEFAULT false,
   opening_hours JSONB,
+  service_hours JSONB NOT NULL DEFAULT '{}'::jsonb,
+  delivery_preparation_minutes INTEGER CHECK(delivery_preparation_minutes BETWEEN 1 AND 240),
+  pickup_preparation_minutes INTEGER CHECK(pickup_preparation_minutes BETWEEN 1 AND 240),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (id,tenant_id)
 );
@@ -68,15 +71,84 @@ CREATE TABLE IF NOT EXISTS promotions (
   title TEXT NOT NULL,
   starts_at TIMESTAMPTZ,
   ends_at TIMESTAMPTZ,
+  starts_on DATE,
+  ends_on DATE,
+  active_from TIME WITHOUT TIME ZONE,
+  active_until TIME WITHOUT TIME ZONE,
+  active_weekdays INTEGER[],
   active BOOLEAN NOT NULL DEFAULT false,
+  CONSTRAINT promotions_schedule_valid CHECK(
+    (starts_on IS NULL AND ends_on IS NULL AND active_from IS NULL AND active_until IS NULL AND active_weekdays IS NULL)
+    OR (starts_on IS NOT NULL AND ends_on IS NOT NULL AND starts_on<=ends_on
+        AND active_from IS NOT NULL AND active_until IS NOT NULL AND active_from<active_until
+        AND active_weekdays IS NOT NULL AND cardinality(active_weekdays) BETWEEN 1 AND 7
+        AND active_weekdays <@ ARRAY[1,2,3,4,5,6,7]::INTEGER[]
+        AND array_position(active_weekdays,NULL) IS NULL)
+  ),
   UNIQUE(id,tenant_id)
 );
+-- Fields used by date/time/day promotion schedules; update existing local DB via migration 014.
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS starts_on DATE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS ends_on DATE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS active_from TIME WITHOUT TIME ZONE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS active_until TIME WITHOUT TIME ZONE;
+ALTER TABLE promotions ADD COLUMN IF NOT EXISTS active_weekdays INTEGER[];
+
+-- Commercial notices are company-scoped and separate from checkout reminders.
+CREATE TABLE IF NOT EXISTS company_mobile_notifications (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+ title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 120),
+ message TEXT NOT NULL CHECK(length(message) BETWEEN 1 AND 1000),
+ image_url TEXT,
+ scheduled_at TIMESTAMPTZ NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL,
+ weekdays INTEGER[],
+ run_time TIME WITHOUT TIME ZONE,
+ status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','DISABLED')),
+ published_at TIMESTAMPTZ,
+ push_sent_at TIMESTAMPTZ,
+ push_claimed_at TIMESTAMPTZ,
+ push_error TEXT,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ CONSTRAINT company_mobile_notifications_dates CHECK(expires_at>scheduled_at),
+ CONSTRAINT company_mobile_notifications_weekly_schedule_check CHECK(
+  (weekdays IS NULL AND run_time IS NULL)
+  OR (weekdays IS NOT NULL AND run_time IS NOT NULL
+   AND cardinality(weekdays) BETWEEN 1 AND 7
+   AND weekdays <@ ARRAY[1,2,3,4,5,6,7]::INTEGER[]
+   AND array_position(weekdays,NULL) IS NULL)
+ )
+);
+CREATE INDEX IF NOT EXISTS idx_company_mobile_notifications_tenant
+ ON company_mobile_notifications(tenant_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_company_mobile_notifications_push
+ ON company_mobile_notifications(status,scheduled_at) WHERE push_sent_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS company_mobile_notification_runs (
+ notification_id UUID NOT NULL REFERENCES company_mobile_notifications(id) ON DELETE CASCADE,
+ run_date DATE NOT NULL,
+ claim_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ sent_at TIMESTAMPTZ,
+ error TEXT,
+ PRIMARY KEY(notification_id,run_date)
+);
+CREATE INDEX IF NOT EXISTS idx_company_mobile_notification_runs_pending
+ ON company_mobile_notification_runs(claim_at) WHERE sent_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS payment_methods (
   tenant_id UUID NOT NULL REFERENCES tenants(id),
   store_id UUID NOT NULL,
-  mode TEXT NOT NULL CHECK(mode IN ('delivery','pickup','dine_in')),
+  mode TEXT NOT NULL CHECK(mode IN ('delivery','pickup','dine_in','reservation')),
   method TEXT NOT NULL CHECK(method IN ('yape','plin','card','cash')),
   enabled BOOLEAN NOT NULL DEFAULT false,
+  image_url TEXT,
+  CONSTRAINT payment_methods_image_guard CHECK (method='cash' AND image_url IS NULL OR method<>'cash' AND (image_url IS NULL OR image_url ~ '^/api/v1/mobile/images/[0-9a-f-]{36}
+  PRIMARY KEY (tenant_id,store_id,mode,method),
+  FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
+);
+)),
   PRIMARY KEY (tenant_id,store_id,mode,method),
   FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
 );
@@ -108,6 +180,8 @@ CREATE TABLE IF NOT EXISTS product_images (
 CREATE INDEX IF NOT EXISTS idx_product_images_tenant ON product_images(tenant_id);
 -- Additive migration for existing admin databases; null means NOT CONFIGURED.
 ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_hours JSONB;
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS delivery_preparation_minutes INTEGER CHECK(delivery_preparation_minutes BETWEEN 1 AND 240);
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS pickup_preparation_minutes INTEGER CHECK(pickup_preparation_minutes BETWEEN 1 AND 240);
 
 -- Safe additive upgrade of already provisioned databases; run as a reviewed migration before deployment.
 -- Historical radius 0 signified unconfigured coverage: convert it to NULL (unlimited).
@@ -145,6 +219,17 @@ CREATE TABLE IF NOT EXISTS job_vacancies (
  UNIQUE(id,tenant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_job_vacancies_tenant ON job_vacancies(tenant_id);
+-- A vacancy may target one or many stores in the same company.
+CREATE TABLE IF NOT EXISTS job_vacancy_stores (
+ tenant_id UUID NOT NULL,
+ vacancy_id UUID NOT NULL,
+ store_id UUID NOT NULL,
+ PRIMARY KEY (tenant_id,vacancy_id,store_id),
+ FOREIGN KEY(vacancy_id,tenant_id) REFERENCES job_vacancies(id,tenant_id) ON DELETE CASCADE,
+ FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_job_vacancy_stores_store
+ ON job_vacancy_stores(tenant_id,store_id);
 
 -- Official complaints-book URL is configured by the tenant, never guessed by the app.
 ALTER TABLE mobile_apps ADD COLUMN IF NOT EXISTS complaints_book_url TEXT;
@@ -359,6 +444,13 @@ CREATE TABLE IF NOT EXISTS mobile_checkout_policies(
  tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
  payment_wait_minutes INT NOT NULL DEFAULT 10 CHECK(payment_wait_minutes BETWEEN 5 AND 30),
  reminder_count INT NOT NULL DEFAULT 2 CHECK(reminder_count BETWEEN 0 AND 2),
+ reminders_enabled BOOLEAN NOT NULL DEFAULT false,
+ reminder_title TEXT NOT NULL DEFAULT 'Tu compra está pendiente',
+ reminder_message TEXT NOT NULL DEFAULT 'Continúa con el pago o cancela tu solicitud de Pollos B3.',
+ reminder2_title TEXT NOT NULL DEFAULT '⏰ Tu pedido sigue pendiente',
+ reminder2_message TEXT NOT NULL DEFAULT 'Aún tienes un pago pendiente en Pollos B3. Entra a la app y completa tu pedido antes de que termine el plazo.',
+ CONSTRAINT mobile_checkout_policies_reminder2_content_check CHECK (length(trim(reminder2_title)) BETWEEN 1 AND 120 AND length(trim(reminder2_message)) BETWEEN 1 AND 500),
+ CONSTRAINT mobile_checkout_policies_reminder_content_check CHECK (length(trim(reminder_title)) BETWEEN 1 AND 120 AND length(trim(reminder_message)) BETWEEN 1 AND 500),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS mobile_checkout_followups(
@@ -402,10 +494,60 @@ CREATE TABLE IF NOT EXISTS store_reservation_settings(
  FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE,
  CONSTRAINT b3_reservation_complete_when_enabled CHECK(
   NOT enabled OR
-  min_advance_minutes IS NOT NULL AND max_advance_days IS NOT NULL AND
-  first_time IS NOT NULL AND last_time IS NOT NULL AND
-  slot_minutes IS NOT NULL AND max_orders_per_slot IS NOT NULL AND preparation_minutes IS NOT NULL
+  preparation_minutes IS NOT NULL
  ),
  CONSTRAINT b3_reservation_window_valid CHECK(first_time IS NULL OR last_time IS NULL OR first_time < last_time),
  CONSTRAINT b3_reservation_advance_valid CHECK(min_advance_minutes IS NULL OR max_advance_days IS NULL OR min_advance_minutes < max_advance_days*1440)
 );
+
+-- Pollos B3: durable scheduled order lifecycle, isolated Administrator PostgreSQL.
+-- Never apply this migration to TU VERSO's database.
+
+CREATE TABLE IF NOT EXISTS mobile_scheduled_orders (
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ tenant_id UUID NOT NULL REFERENCES tenants(id),
+ app_id TEXT NOT NULL,
+ store_id UUID NOT NULL,
+ idempotency_key UUID NOT NULL,
+ access_hash CHAR(64) NOT NULL CHECK(access_hash ~ '^[a-f0-9]{64}$'),
+ request_hash CHAR(64) NOT NULL CHECK(request_hash ~ '^[a-f0-9]{64}$'),
+ mode TEXT NOT NULL CHECK(mode IN ('delivery','pickup')),
+ scheduled_at TIMESTAMPTZ NOT NULL,
+ service_date TEXT NOT NULL,
+ service_time TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'CREATING'
+  CHECK(status IN ('CREATING','FORM_UNCERTAIN','AWAITING_AGENT','AWAITING_PAYMENT','CONFIRMED','REJECTED','CANCELLED','EXPIRED')),
+ hold_until TIMESTAMPTZ NOT NULL,
+ catalog_revision INTEGER NOT NULL CHECK(catalog_revision>0),
+ products JSONB NOT NULL,
+ customer JSONB NOT NULL,
+ destination JSONB,
+ subtotal_pen NUMERIC(12,2) NOT NULL CHECK(subtotal_pen>=0),
+ delivery_fee_pen NUMERIC(12,2) NOT NULL CHECK(delivery_fee_pen>=0),
+ total_pen NUMERIC(12,2) NOT NULL CHECK(total_pen>=0),
+ preparation_minutes INTEGER NOT NULL CHECK(preparation_minutes BETWEEN 1 AND 240),
+ interaction_id UUID,
+ form_key UUID NOT NULL,
+ form_sent BOOLEAN NOT NULL DEFAULT false,
+ cancel_notice_key UUID NOT NULL DEFAULT gen_random_uuid(),
+ cancel_notice_sent BOOLEAN NOT NULL DEFAULT false,
+ agent_decision_message_id UUID,
+ approved_at TIMESTAMPTZ,
+ payment_method TEXT CHECK(payment_method IN ('yape','plin','card','cash')),
+ payment_status TEXT NOT NULL DEFAULT 'NOT_SELECTED'
+  CHECK(payment_status IN ('NOT_SELECTED','AWAITING_VERIFICATION','VERIFIED','DUE_AT_RECEIPT')),
+ payment_reference TEXT,
+ payment_expires_at TIMESTAMPTZ,
+ confirmed_at TIMESTAMPTZ,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id),
+ UNIQUE(tenant_id,app_id,idempotency_key),
+ UNIQUE(interaction_id),
+ CONSTRAINT reservation_paid_state CHECK(status<>'CONFIRMED' OR payment_status IN ('VERIFIED','DUE_AT_RECEIPT')),
+ CONSTRAINT reservation_form_acked CHECK(NOT form_sent OR interaction_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_b3_reservations_capacity
+ ON mobile_scheduled_orders(tenant_id,store_id,scheduled_at,status,hold_until);
+CREATE INDEX IF NOT EXISTS idx_b3_reservations_admin
+ ON mobile_scheduled_orders(tenant_id,created_at DESC);

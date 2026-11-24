@@ -10,14 +10,14 @@ function validDate(s){
  const d=new Date(s+'T12:00:00Z');
  return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===s;
 }
-const minute=time=>Number(time.slice(0,2))*60+Number(time.slice(3));
 const hhmm=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 function timeParts(date,timeZone){
+ timeZone='America/Lima';
  const p=new Intl.DateTimeFormat('en-US',{timeZone,year:'numeric',month:'2-digit',day:'2-digit',
   hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date);
  return Object.fromEntries(p.filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
 }
-function localDateTimeEpoch(date,time,timeZone){
+export function localDateTimeEpoch(date,time,timeZone){
  // Determine the UTC instant represented by a timezone's local date+time,
  // then verify the roundtrip (DST gaps are rejected, never silently shifted).
  const [y,m,d]=date.split('-').map(Number),[h,min]=time.split(':').map(Number);
@@ -38,22 +38,17 @@ function localDateTimeEpoch(date,time,timeZone){
 export function computeReservationSlots({date,mode,store,settings,timeZone='America/Lima',
  now=new Date(),isOpenAt}){
  if(!validDate(date)||!['delivery','pickup'].includes(mode))throw FAIL(400,'Fecha o modalidad de reserva inválida');
- if(typeof isOpenAt!=='function')throw Error('MISSING_STORE_HOURS_CHECK');
  if(!store||store.active!==true||store[mode+'_enabled']!==true||
   !settings?.enabled)return {enabled:false,slots:[]};
  const cfg=settings;
- if(!Number.isSafeInteger(cfg.minAdvanceMinutes)||!Number.isSafeInteger(cfg.maxAdvanceDays)||
-  !Number.isSafeInteger(cfg.slotMinutes)||!Number.isSafeInteger(cfg.maxOrdersPerSlot)||
-  !Number.isSafeInteger(cfg.preparationMinutes)||!cfg.firstTime||!cfg.lastTime)
-  return {enabled:false,slots:[]};
- const min=minute(cfg.firstTime),max=minute(cfg.lastTime);
- if(max<=min||![15,30,60].includes(cfg.slotMinutes))return {enabled:false,slots:[]};
+ if(!Number.isSafeInteger(cfg.preparationMinutes)||cfg.preparationMinutes<1||
+    cfg.preparationMinutes>240)return {enabled:false,slots:[]};
+ // No time windows, advance limits, or capacity limits. The requested time
+ // must be in the future; TU VERSO still decides if an agent can receive it.
  const slots=[];
- for(let m=min;m<=max;m+=cfg.slotMinutes){
+ for(let m=0;m<1440;m++){
   const time=hhmm(m),epoch=localDateTimeEpoch(date,time,timeZone);
-  if(epoch===null||epoch<now.getTime()+cfg.minAdvanceMinutes*60000||
-     epoch>now.getTime()+cfg.maxAdvanceDays*86400000)continue;
-  if(!isOpenAt(store,new Date(epoch),timeZone))continue;
+  if(epoch===null||epoch<=now.getTime())continue;
   slots.push({time,scheduledAt:new Date(epoch).toISOString()});
  }
  return {enabled:true,slots};
@@ -74,20 +69,20 @@ export function createMobileReservationSlotsRoute({pool,json,storeHours,now=()=>
   const published=p.rows[0],store=published.payload?.stores?.find(s=>s.id===storeId);
   if(!store||store.active!==true)throw FAIL(404,'Sede no disponible');
   const live=await pool.query(`SELECT s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,
-    r.*,t.time_zone FROM stores s
+    r.* FROM stores s
     JOIN tenants t ON t.id=s.tenant_id
     LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id
     WHERE s.tenant_id=$1 AND s.id=$2 AND t.active=true`,[published.tenant_id,storeId]);
   if(live.rowCount!==1)throw FAIL(404,'Sede no disponible');
   const row=live.rows[0],config=mapReservationSettings(row);
-  const openStore={...store,active:row.active,delivery_enabled:row.delivery_enabled,
+  const openStore={...store,serviceMode:mode,active:row.active,delivery_enabled:row.delivery_enabled,
    pickup_enabled:row.pickup_enabled,openingHours:row.opening_hours};
   const calculated=computeReservationSlots({date,mode,store:openStore,settings:{
    ...config,enabled:config.enabled&&store.reservationSettings?.enabled===true
-  },timeZone:row.time_zone||'America/Lima',now:now(),
-   isOpenAt:(s,at,zone)=>{const h=storeHours(s,at,zone);return h.hoursConfigured===true&&h.isOpen===true;}});
+  },timeZone:'America/Lima',now:now(),
+   isOpenAt:()=>true});
   return json(res,200,{storeId,appId,revision:published.revision,date,mode,
-   timeZone:row.time_zone||'America/Lima',enabled:calculated.enabled,
+   timeZone:'America/Lima',enabled:calculated.enabled,
    slots:calculated.slots,capacityVerified:false,agentAvailable:null,
    acceptingRequests:false,notice:'Horarios preliminares. Aún no se pueden confirmar reservas.'},true);
  }

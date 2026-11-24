@@ -33,3 +33,244 @@
 .ops-error{background:#fff0f0;color:#a30713;padding:12px;border-radius:8px;margin:12px 0}
 .ops-success{display:flex;align-items:center;gap:8px;background:#eff9f1;color:#1b6331;padding:12px;border-radius:8px;margin:12px 0}
 @media(max-width:420px){.ops-wrapper{padding:16px 10px}.ops-panel{padding:15px}.ops-inline>*{width:100%}}
+
+/* Company → store → settings navigation (responsive, business-agnostic). */
+.ops-workspace{margin:20px 0 30px}
+.ops-workspace-head{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 18px}
+.ops-workspace-head h2{font-size:clamp(20px,2.4vw,26px);letter-spacing:-.025em;margin:0 0 5px}
+.ops-workspace-head p{color:#647080;font-size:13px;line-height:1.55;margin:0}
+.ops-workspace-head .eyebrow{color:#bd252b;font-weight:750;letter-spacing:.12em;font-size:10px;margin:0 0 6px}
+.ops-local-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,265px),1fr));gap:16px}
+.ops-local-card,.ops-module-card{appearance:none;font:inherit;color:#1e2936;text-align:left;cursor:pointer;position:relative;display:flex;flex-direction:column;align-items:flex-start;border:1px solid #dce3e9;background:#fff;border-radius:19px;padding:22px;box-shadow:0 7px 26px rgba(20,39,60,.06);transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+.ops-local-card{min-height:238px}
+.ops-local-card:hover,.ops-module-card:hover{transform:translateY(-3px);border-color:#d55b5f;box-shadow:0 15px 34px rgba(20,39,60,.11)}
+.ops-local-card:focus-visible,.ops-module-card:focus-visible,.ops-back:focus-visible{outline:3px solid #db3b41;outline-offset:3px}
+.ops-card-icon{width:46px;height:46px;border-radius:14px;background:#fff0f0;color:#be292e;display:inline-flex;align-items:center;justify-content:center;margin-bottom:15px;flex-shrink:0}
+.ops-local-card>strong{font-weight:750;font-size:19px;line-height:1.3;margin:1px 0 7px}
+.ops-card-status{font-size:11px;font-weight:750;color:#875519;background:#fff4e5;border:1px solid #f6dfb9;border-radius:999px;padding:5px 10px;display:inline-flex}
+.ops-local-card>.ops-card-status{position:absolute;top:24px;right:19px}
+.ops-card-status[data-enabled=true]{background:#e8f7ef;color:#16633b;border-color:#bfe6d1}
+.ops-card-address{display:flex;gap:6px;align-items:flex-start;color:#6d7a89;font-size:12px;line-height:1.45;min-height:30px}
+.ops-card-address svg{flex:none;margin-top:1px}
+.ops-card-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:15px}
+.ops-card-tags>span{color:#7a6670;background:#f5f5f7;border:1px solid #ebebef;font-size:11px;font-weight:650;padding:5px 8px;border-radius:7px}
+.ops-card-tags>span[data-on=true]{color:#256447;background:#edf9f3;border-color:#d2f0df}
+.ops-card-link{display:flex;align-items:center;gap:7px;color:#a62027;font-weight:750;font-size:12px;margin-top:auto;padding-top:18px}
+.ops-global-head{margin-top:34px}
+.ops-global-grid,.ops-module-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,215px),1fr));gap:14px;margin-bottom:20px}
+.ops-module-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr))}
+.ops-module-card{min-height:177px;gap:8px}
+.ops-module-card>svg:first-child{color:#bd3137;margin-bottom:6px}
+.ops-module-card>strong{font-size:15px;font-weight:750}
+.ops-module-card>span:not(.ops-module-state){font-size:12px;line-height:1.5;color:#687789;max-width:90%}
+.ops-card-arrow{position:absolute;right:19px;bottom:19px;color:#bf3036}
+.ops-module-state{color:#26764c;background:#eff9f2;border:1px solid #d8ebde;border-radius:7px;padding:5px 8px;font-size:11px;font-weight:650;margin-top:auto}
+.ops-module-state[data-enabled=false]{color:#8c641e;background:#fff7ea;border-color:#f1e1c3}
+.ops-local-head{background:linear-gradient(125deg,#fff 5%,#fff1f1 100%);border:1px solid #eadede;border-radius:19px;padding:20px 23px;margin-bottom:26px}
+.ops-back{background:transparent;border:0;display:inline-flex;align-items:center;gap:7px;color:#ae2b31;cursor:pointer;font-size:13px;font-weight:750;padding:5px 0 14px}
+.ops-local-title{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.ops-local-title>.ops-card-icon{margin:0;width:52px;height:52px}
+.ops-local-title>div{flex:1;min-width:160px}
+.ops-local-title h2{font-size:clamp(22px,3vw,30px);margin:2px 0 4px}
+.ops-local-title p{display:flex;gap:5px;align-items:center;color:#687789;margin:0;font-size:12px}
+.ops-local-title .eyebrow{font-size:10px;font-weight:750;letter-spacing:.1em;color:#b8292d}
+.ops-global-note{font-size:12px;line-height:1.6;color:#607082;background:#f6f8fb;border:1px solid #e4eaf1;padding:13px 15px;border-radius:12px;margin-bottom:19px}
+.ops-context-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid #e4e7ec;border-radius:12px;padding:7px 16px;margin-bottom:17px}
+.ops-context-bar .ops-back{padding:7px 0}
+.ops-context-bar>span{font-size:12px;font-weight:700;color:#5e6a78}
+@media (max-width:620px){.ops-local-grid,.ops-global-grid,.ops-module-grid{grid-template-columns:1fr 1fr;gap:10px}.ops-local-card,.ops-module-card{padding:15px;min-height:180px}.ops-local-card>strong{font-size:16px}.ops-card-status{padding:3px 6px;font-size:10px}.ops-local-card>.ops-card-status{right:10px;top:13px}.ops-card-tags{gap:4px}.ops-card-tags>span{font-size:10px}.ops-module-card>span:not(.ops-module-state){max-width:100%}.ops-local-head{padding:16px}.ops-workspace-head{align-items:flex-start}}
+@media (max-width:410px){.ops-local-grid,.ops-global-grid,.ops-module-grid{grid-template-columns:1fr}.ops-local-card{min-height:210px}}
+@media (prefers-reduced-motion:reduce){.ops-local-card,.ops-module-card{transition:none}.ops-local-card:hover,.ops-module-card:hover{transform:none}}
+
+/* Horarios independientes por servicio: una ficha, un formulario, sin selector de sede duplicado. */
+.ops-store-single-panel .ops-sede-editor{border:0;padding:0;margin:0;box-shadow:none}
+.ops-store-single-panel .ops-sede-editor>.ops-inline:first-child{margin-bottom:18px}
+.ops-schedule-block{margin:12px 0 22px}
+.ops-schedule-block>.ops-hint{font-size:13px!important;line-height:1.55;margin:0 0 14px}
+.ops-schedule-block>.ops-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ops-schedule-block .ops-row{display:grid;grid-template-columns:1fr auto;gap:9px 12px;padding:14px;align-items:center;background:#fafbfc;border:1px solid #e3e8ef;border-radius:12px}
+.ops-schedule-block .ops-row>strong{font-size:13px}
+.ops-schedule-block .ops-row>label:not(.ops-check){min-width:0}
+.ops-schedule-block .ops-row>label:not(.ops-check) input{width:100%;min-width:0}
+.ops-schedule-block .ops-row>label.ops-check{justify-content:flex-end;color:#586678}
+.ops-store-single-panel section[id^="ops-store-"]>h3{font-size:17px;margin:22px 0 12px}
+@media(max-width:750px){.ops-schedule-block>.ops-grid{grid-template-columns:1fr}}
+@media(max-width:380px){.ops-schedule-block .ops-row{grid-template-columns:1fr}.ops-schedule-block .ops-row>label.ops-check{justify-content:flex-start}}
+
+
+/* Pollos B3: four clear payment switches for each store and modality. */
+.ops-payment-panel .ops-payment-head{display:flex;gap:16px;align-items:end;margin:17px 0 20px}
+.ops-payment-panel .ops-payment-head>label{display:flex;flex-direction:column;gap:7px;min-width:min(100%,265px);font-weight:650}
+.ops-payment-panel .ops-payment-head select{width:100%}
+.ops-payment-panel>h3{font-size:15px;margin:18px 0 12px}
+.ops-payment-method-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0 20px;max-width:740px}
+.ops-payment-method{display:flex;gap:12px;align-items:center;cursor:pointer;background:#fff;border:1px solid #dce4eb;border-radius:13px;padding:17px 16px;transition:border-color .16s ease,background .16s ease}
+.ops-payment-method:has(input:checked){border-color:#a9d9c5;background:#f2fbf6}
+.ops-payment-method:focus-within{outline:2px solid #186d50;outline-offset:2px}
+.ops-payment-method input[type=checkbox]{width:20px;height:20px;flex-shrink:0;accent-color:#147a54}
+.ops-payment-method>span:nth-child(2){font-size:14px;font-weight:700}
+.ops-payment-status{font-size:11px;color:#63738a;margin-left:auto}
+.ops-payment-method:has(input:checked) .ops-payment-status{color:#166647;font-weight:650}
+.ops-payment-panel>button.button-primary{margin-bottom:12px}
+@media(max-width:540px){.ops-payment-method-grid{grid-template-columns:1fr}.ops-payment-method{padding:13px 14px}}
+
+
+/* Pollos B3 promotions: one date interval, one daily time interval, seven weekday switches. */
+.ops-promo-fields{display:grid;grid-template-columns:minmax(220px,1.3fr) repeat(2,minmax(150px,1fr));gap:14px;margin:20px 0 12px}
+.ops-promo-time-fields{display:grid;grid-template-columns:repeat(2,minmax(150px,220px));gap:14px;margin:0 0 23px}
+.ops-promo-fields>label,.ops-promo-time-fields>label{display:flex;flex-direction:column;gap:7px;min-width:0;font-weight:650;font-size:13px}
+.ops-promo-fields input,.ops-promo-time-fields input{width:100%;min-width:0}
+.ops-promo-weekdays{padding:0;border:0;margin:0 0 22px;min-width:0}
+.ops-promo-weekdays legend{font-size:14px;font-weight:700;margin-bottom:12px}
+.ops-promo-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.ops-promo-day{border:1px solid #dce4eb;background:#fff;border-radius:10px;padding:12px 7px;cursor:pointer;display:flex;gap:6px;align-items:center;justify-content:center;font-size:12px;font-weight:650;min-width:0}
+.ops-promo-day.is-selected{background:#f1faf5;border-color:#a4d6bc;color:#136a45}
+.ops-promo-day:focus-within{outline:2px solid #166c4b;outline-offset:2px}
+.ops-promo-day input[type=checkbox]{height:16px;width:16px;flex:none;accent-color:#16724e}
+.ops-promo-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:14px}
+@media(max-width:1000px){.ops-promo-days{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:680px){.ops-promo-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-promo-fields>label:first-child{grid-column:1/-1}.ops-promo-time-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-promo-days{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:380px){.ops-promo-fields,.ops-promo-time-fields{grid-template-columns:1fr}.ops-promo-fields>label:first-child{grid-column:auto}}
+
+
+/* Jobs: select one or more existing active business locations. */
+.ops-vacancy-stores{border:0;padding:0;margin:16px 0 22px;min-width:0}
+.ops-vacancy-stores legend{font-size:14px;font-weight:750;margin-bottom:12px}
+.ops-vacancy-store-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:11px}
+.ops-vacancy-store{display:flex;align-items:center;gap:10px;padding:15px;border:1px solid #dbe4e9;background:#fff;border-radius:12px;cursor:pointer;font-size:14px;font-weight:650}
+.ops-vacancy-store.is-selected{background:#f1faf5;border-color:#a2d8bc;color:#176548}
+.ops-vacancy-store input[type=checkbox]{accent-color:#16744d;width:18px;height:18px;flex:none}
+.ops-vacancy-store:focus-within{outline:2px solid #166f50;outline-offset:2px}
+
+
+/* Company-level marketing notifications: separate from personal order reminders. */
+.ops-marketing-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.85fr);gap:24px;margin:20px 0 28px;align-items:start}
+.ops-marketing-fields{display:grid;gap:14px}
+.ops-marketing-fields>label,.ops-marketing-time>label{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:650;min-width:0}
+.ops-marketing-fields input,.ops-marketing-fields textarea{width:100%;min-width:0}
+.ops-marketing-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ops-marketing-preview{background:#f2f5f8;padding:22px;border-radius:18px}
+.ops-marketing-phone{background:#fff;border:1px solid #dfe4eb;border-radius:19px;padding:18px;max-width:370px;margin:auto;display:grid;gap:11px;box-shadow:0 14px 32px rgba(24,43,65,.08)}
+.ops-marketing-phone-head{display:flex;align-items:center;gap:7px;font-size:12px;color:#667489}
+.ops-marketing-phone>strong{font-size:16px}
+.ops-marketing-phone>p{font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.ops-marketing-phone>img{width:100%;max-height:240px;object-fit:contain;border-radius:12px}
+.ops-marketing-phone>small{font-size:11px;color:#788496}
+.ops-marketing-preview>.ops-hint{margin:12px 0 0;text-align:center}
+.ops-marketing-list{display:grid;gap:11px;margin:13px 0 22px}
+.ops-marketing-list-item{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:1px solid #e0e5ea;padding:15px;border-radius:13px}
+.ops-marketing-list-item>div:first-child{min-width:0;display:grid;gap:5px}
+.ops-marketing-list-item p{font-size:12px;color:#677489;margin:0}
+.ops-marketing-list-item small{font-size:11px;color:#778396}
+@media(max-width:880px){.ops-marketing-layout{grid-template-columns:1fr}.ops-marketing-preview{max-width:490px;width:100%}}
+@media(max-width:570px){.ops-marketing-time{grid-template-columns:1fr}.ops-marketing-list-item{flex-direction:column;align-items:start}}
+
+
+/* Products: catalog first; show editor only for new or selected existing product. */
+.ops-products-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:20px}
+.ops-products-heading>div{min-width:0}
+.ops-products-heading>button{flex:none}
+.ops-products-panel .ops-record-list{margin-top:12px}
+.ops-products-panel .ops-product-row{display:grid;grid-template-columns:minmax(130px,1fr) minmax(80px,.4fr) auto auto;align-items:center;gap:12px}
+.ops-product-info{display:flex;flex-direction:column;gap:5px;min-width:0}
+.ops-product-info strong{overflow-wrap:anywhere}
+.ops-product-info small{font-size:12px;color:#6a7890}
+.ops-products-editor-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:22px 0 16px}
+.ops-products-editor-head h3{font-size:19px;margin:0}
+.ops-product-image{display:flex;align-items:center;gap:14px;margin:12px 0 18px}
+.ops-product-image img{max-width:150px;max-height:130px;object-fit:contain;border-radius:12px;border:1px solid #d9e4ea;background:white}
+@media(max-width:780px){
+ .ops-products-panel .ops-product-row{grid-template-columns:minmax(0,1fr) auto;gap:10px}
+ .ops-products-panel .ops-product-row>.ops-state{justify-self:start}
+ .ops-products-panel .ops-product-row>button{justify-self:end}
+}
+@media(max-width:520px){
+ .ops-products-heading,.ops-products-editor-head{align-items:stretch;flex-direction:column}
+ .ops-products-panel .ops-product-row{grid-template-columns:1fr}
+ .ops-products-panel .ops-product-row>button{justify-self:stretch}
+}
+
+
+/* Weekly frequency: exactly seven simple day checkboxes and one Peru-local send time. */
+.ops-notice-weekdays{border:0;margin:8px 0 0;padding:0;min-width:0}
+.ops-notice-weekdays legend{font-size:13px;font-weight:700;margin-bottom:9px}
+.ops-notice-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px}
+.ops-notice-day{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;cursor:pointer;border:1px solid #dce4eb;border-radius:11px;background:#fff;padding:12px 5px;font-size:12px;font-weight:650}
+.ops-notice-day:has(input:checked){background:#edf9f1;border-color:#8ccbaa;color:#116348}
+.ops-notice-day:focus-within{outline:2px solid #15714f;outline-offset:2px}
+.ops-notice-day input[type=checkbox]{width:18px;height:18px;accent-color:#15714f}
+@media(max-width:650px){.ops-notice-days{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:390px){.ops-notice-days{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+
+/* Individual checkout reminders: one card per configured message. */
+.ops-reminder-editors{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:18px;margin:16px 0 22px}
+.ops-reminder-editor{border:1px solid #dfe5eb;border-radius:16px;padding:18px;background:#fff;min-width:0}
+.ops-reminder-editor h4{font-size:16px;font-weight:750;margin:0 0 14px}
+.ops-reminder-editor .ops-grid{grid-template-columns:1fr;gap:12px}
+.ops-reminder-editor .ops-marketing-preview{margin-top:16px}
+@media(max-width:760px){.ops-reminder-editors{grid-template-columns:1fr}}
+
+
+/* All save/publish confirmations: subtle fixed toast (<2s total including fade). */
+.ops-floating-toast{
+ position:fixed;top:22px;right:24px;z-index:10000;
+ display:flex;align-items:flex-start;gap:10px;
+ width:max-content;max-width:min(420px,calc(100vw - 32px));
+ padding:13px 16px;border:1px solid #d9e7df;border-radius:12px;
+ background:#fff;box-shadow:0 8px 26px rgba(22,40,35,.12);
+ color:#23352e;font-size:13px;line-height:1.45;font-weight:550;
+ pointer-events:none;opacity:1;transform:translateY(0);
+ animation:ops-toast-enter .2s ease-out both;
+ transition:opacity .35s ease,transform .35s ease;
+}
+.ops-floating-toast svg{flex:none;color:#17845b;margin-top:1px}
+.ops-floating-toast span{min-width:0;overflow-wrap:anywhere}
+.ops-floating-toast--leaving{opacity:0;transform:translateY(-6px)}
+@keyframes ops-toast-enter{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.ops-floating-toast{top:12px;left:16px;right:16px;width:auto;max-width:none}}
+@media(prefers-reduced-motion:reduce){.ops-floating-toast{animation:none;transition:none}}
+
+
+/* Payment options — all three modes visible, four options per mode. */
+.ops-payment-matrix{display:flex;flex-direction:column;gap:14px;margin:18px 0 22px}
+.ops-payment-mode-row{border:1px solid #dfe5ed;border-radius:16px;padding:18px;background:#fff;min-width:0}
+.ops-payment-mode-row h3{font-size:18px;font-weight:750;margin:0 0 14px}
+.ops-payment-four{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.ops-payment-mini-card{min-width:0;border:1px solid #e2e9f0;border-radius:12px;padding:12px;background:#fafbfc;display:flex;flex-direction:column;gap:8px}
+.ops-payment-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;min-height:24px}
+.ops-payment-check input{width:18px;height:18px;accent-color:#087759;flex:none}
+.ops-payment-mini-card small{color:#64748b;font-size:12px}
+.ops-payment-image-preview{width:100%;height:102px;object-fit:contain;border:1px solid #dfe5eb;background:white;border-radius:10px}
+.ops-payment-upload{position:relative;display:flex;align-items:center;justify-content:center;border:1px solid #c9d5e1;border-radius:9px;min-height:36px;padding:8px;text-align:center;font-size:12px;font-weight:650;background:#fff;cursor:pointer;overflow:hidden}
+.ops-payment-upload input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.ops-payment-upload:focus-within{outline:2px solid #087759;outline-offset:2px}
+.ops-payment-remove{border:0;background:transparent;color:#a42525;font-size:12px;cursor:pointer;align-self:center}
+.ops-payment-cash-note{color:#768396;font-size:12px;margin:auto 0}
+.ops-payment-shared-time{background:#f8fafc;border:1px solid #dfe6ef;border-radius:15px;padding:18px;margin:18px 0}
+.ops-payment-shared-time h3{font-size:17px;margin:0 0 8px}
+.ops-payment-shared-time label{display:flex;flex-direction:column;gap:6px;max-width:320px;font-weight:650}
+@media(max-width:1000px){.ops-payment-four{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.ops-payment-four{grid-template-columns:1fr}.ops-payment-mode-row{padding:13px}}
+
+/* Catalog — image-first product cards with explicit active status. */
+.ops-product-catalog{margin-top:20px}
+.ops-product-catalog>h3{font-size:17px;margin:0 0 15px}
+.ops-product-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:17px}
+.ops-product-card{border:1px solid #dfe6ed;border-radius:16px;background:#fff;overflow:hidden;min-width:0;display:flex;flex-direction:column;transition:box-shadow .18s ease,transform .18s ease}
+.ops-product-card:hover{box-shadow:0 8px 25px rgba(23,38,60,.08);transform:translateY(-2px)}
+.ops-product-card-image{height:180px;position:relative;background:#f5f7fa}
+.ops-product-card-image>img{width:100%;height:100%;object-fit:contain;padding:9px;box-sizing:border-box}
+.ops-product-card-placeholder{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:#92a1b2;font-size:12px}
+.ops-product-card-status{position:absolute;top:12px;right:12px;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:750;border:1px solid}
+.ops-product-card-status.is-active{background:#e9f8ef;color:#0b7051;border-color:#a6e8c2}
+.ops-product-card-status.is-inactive{background:#f1f3f6;color:#586477;border-color:#dce2e8}
+.ops-product-card-content{padding:16px;display:flex;flex-direction:column;gap:7px;flex:1;min-width:0}
+.ops-product-card-content>small{font-size:12px;color:#758296}
+.ops-product-card-content>strong{font-size:16px;overflow-wrap:anywhere}
+.ops-product-card-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;padding-top:9px}
+.ops-product-card-price{font-size:17px;font-weight:800;color:#16243b}
+.ops-product-card-footer>.button{min-height:36px;padding:7px 12px}
+@media(max-width:940px){.ops-product-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:580px){.ops-product-cards{grid-template-columns:1fr}.ops-product-card-image{height:200px}}
+@media(prefers-reduced-motion:reduce){.ops-product-card{transition:none}.ops-product-card:hover{transform:none}}

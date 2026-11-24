@@ -5,31 +5,29 @@ import pg from 'pg';
 import {DEFAULT_RESERVATION_SETTINGS,normalizeReservationSettings,mapReservationSettings,
  publishedReservationSettings,readStoreReservationSettings,saveStoreReservationSettings} from './mobile-reservation-settings.mjs';
 
-const valid={enabled:true,minAdvanceMinutes:45,maxAdvanceDays:7,firstTime:'12:00',
- lastTime:'22:30',slotMinutes:30,maxOrdersPerSlot:8,preparationMinutes:40};
+const valid={enabled:true,preparationMinutes:40};
 
-test('reservation settings remain OFF by default; never mark future slots bookable',()=>{
+test('reservation defaults remain disabled until configured',()=>{
  assert.deepEqual(mapReservationSettings(null),DEFAULT_RESERVATION_SETTINGS);
  assert.equal(publishedReservationSettings(null).acceptingRequests,false);
- assert.equal(publishedReservationSettings({enabled:true,min_advance_minutes:45}).acceptingRequests,false);
+ assert.equal(publishedReservationSettings({enabled:true,preparation_minutes:30}).acceptingRequests,false);
 });
-test('validate complete enabled configuration and limit values',()=>{
+test('enabled reservations require only a valid preparation time',()=>{
  assert.deepEqual(normalizeReservationSettings(valid),valid);
- for(const patch of [{slotMinutes:10},{maxOrdersPerSlot:0},{preparationMinutes:0},
-  {minAdvanceMinutes:10080},{maxAdvanceDays:0},{firstTime:'25:00'},
-  {lastTime:'11:00'},{minAdvanceMinutes:10080,maxAdvanceDays:7},
-  {maxOrdersPerSlot:'8'},{unexpected:true}]){
+ for(const patch of [{preparationMinutes:0},{preparationMinutes:241},{preparationMinutes:1.5},
+  {preparationMinutes:'40'},{firstTime:'12:00'},{maxAdvanceDays:7},
+  {minAdvanceMinutes:15},{lastTime:'23:00'},{slotMinutes:30},
+  {maxOrdersPerSlot:8},{unexpected:true}]){
   assert.throws(()=>normalizeReservationSettings({...valid,...patch}),{code:400});
  }
  assert.throws(()=>normalizeReservationSettings({enabled:true}),{code:400});
  assert.throws(()=>normalizeReservationSettings({enabled:'true'}),{code:400});
  assert.throws(()=>normalizeReservationSettings([]),{code:400});
 });
-test('disabled policies may be incomplete but never become a reservation',()=>{
- const config=normalizeReservationSettings({enabled:false,preparationMinutes:40});
+test('disabled reservations allow an empty preparation value',()=>{
+ const config=normalizeReservationSettings({enabled:false,preparationMinutes:null});
  assert.equal(config.enabled,false);
- assert.equal(config.preparationMinutes,40);
- assert.equal(config.maxOrdersPerSlot,null);
+ assert.equal(config.preparationMinutes,null);
 });
 
 // Runs exclusively on the disposable GitHub Actions PostgreSQL database.
