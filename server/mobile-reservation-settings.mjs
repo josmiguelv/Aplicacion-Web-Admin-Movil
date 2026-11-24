@@ -1,56 +1,23 @@
-// Pollos B3 — commercial scheduling configuration, isolated from TU VERSO.
-// A published configuration is NOT a booking or proof of agent availability.
-const TIME=/^([01]\d|2[0-3]):[0-5]\d$/;
-const own=(v,k)=>Object.prototype.hasOwnProperty.call(v,k);
+// Pollos B3 — reservations are enabled per store; agent availability comes from TU VERSO.
+// Only preparation time is configured. A reservation date/time is supplied by the customer.
 const error=(code,message)=>Object.assign(new Error(message),{code});
-export const DEFAULT_RESERVATION_SETTINGS=Object.freeze({
- enabled:false,minAdvanceMinutes:null,maxAdvanceDays:null,firstTime:null,lastTime:null,
- preparationMinutes:null
-});
-const numeric={
- minAdvanceMinutes:[0,10080],maxAdvanceDays:[1,60],preparationMinutes:[1,240]
-};
-const allowed=new Set(Object.keys(DEFAULT_RESERVATION_SETTINGS));
+export const DEFAULT_RESERVATION_SETTINGS=Object.freeze({enabled:false,preparationMinutes:null});
 export function normalizeReservationSettings(input){
  if(!input||typeof input!=='object'||Array.isArray(input)||
-    Object.keys(input).some(k=>!allowed.has(k))||
+    Object.keys(input).some(k=>!['enabled','preparationMinutes'].includes(k))||
     typeof input.enabled!=='boolean')throw error(400,'Configuración de reservas inválida');
- const result={...DEFAULT_RESERVATION_SETTINGS,enabled:input.enabled};
- for(const [key,[min,max]] of Object.entries(numeric)){
-  const value=own(input,key)?input[key]:null;
-  if(value!==null&&(!Number.isInteger(value)||value<min||value>max))
-   throw error(400,'Parámetro de reservas inválido: '+key);
-  result[key]=value;
- }
- for(const key of ['firstTime','lastTime']){
-  const value=own(input,key)?input[key]:null;
-  if(value!==null&&(typeof value!=='string'||!TIME.test(value)))
-   throw error(400,'Hora de reserva inválida: '+key);
-  result[key]=value;
- }
- if(result.enabled&&Object.entries(result).some(([key,value])=>key!=='enabled'&&value===null))
-  throw error(400,'Completa el rango horario, la anticipación y la preparación antes de habilitar reservas');
- if(result.firstTime!==null&&result.lastTime!==null&&result.firstTime>=result.lastTime)
-  throw error(400,'El horario final debe ser posterior al horario inicial en el mismo día');
- if(result.minAdvanceMinutes!==null&&result.maxAdvanceDays!==null&&
-    result.minAdvanceMinutes>=result.maxAdvanceDays*1440)
-  throw error(400,'La anticipación mínima debe ser inferior a la máxima');
- return result;
+ const value=input.preparationMinutes??null;
+ if(value!==null&&(!Number.isInteger(value)||value<1||value>240))
+  throw error(400,'Tiempo de preparación inválido (1 a 240 minutos)');
+ if(input.enabled&&value===null)throw error(400,'Configura el tiempo de preparación para habilitar reservas');
+ return {enabled:input.enabled,preparationMinutes:value};
 }
 export function mapReservationSettings(row){
  if(!row)return {...DEFAULT_RESERVATION_SETTINGS};
- return {
-  enabled:row.enabled===true,
-  minAdvanceMinutes:row.min_advance_minutes??null,
-  maxAdvanceDays:row.max_advance_days??null,
-  firstTime:row.first_time??null,
-  lastTime:row.last_time??null,
-  preparationMinutes:row.preparation_minutes??null
- };
+ return {enabled:row.enabled===true,preparationMinutes:row.preparation_minutes??null};
 }
 export function publishedReservationSettings(row){
- const config=mapReservationSettings(row);
- return {...config,acceptingRequests:false};
+ return {...mapReservationSettings(row),acceptingRequests:false};
 }
 export async function readStoreReservationSettings(pool,tenantId,storeId){
  const owned=await pool.query('SELECT id FROM stores WHERE tenant_id=$1 AND id=$2',[tenantId,storeId]);
@@ -66,15 +33,13 @@ export async function saveStoreReservationSettings(pool,tenantId,storeId,actorId
   const owned=await client.query('SELECT id FROM stores WHERE tenant_id=$1 AND id=$2 FOR UPDATE',[tenantId,storeId]);
   if(!owned.rowCount)throw error(404,'Sede no encontrada para esta empresa');
   const q=await client.query(`INSERT INTO store_reservation_settings
-   (tenant_id,store_id,enabled,min_advance_minutes,max_advance_days,first_time,last_time,preparation_minutes)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+   (tenant_id,store_id,enabled,preparation_minutes)
+   VALUES($1,$2,$3,$4)
    ON CONFLICT(tenant_id,store_id) DO UPDATE SET
-    enabled=EXCLUDED.enabled,min_advance_minutes=EXCLUDED.min_advance_minutes,
-    max_advance_days=EXCLUDED.max_advance_days,first_time=EXCLUDED.first_time,
-    last_time=EXCLUDED.last_time,preparation_minutes=EXCLUDED.preparation_minutes,
+    enabled=EXCLUDED.enabled,preparation_minutes=EXCLUDED.preparation_minutes,
+    min_advance_minutes=NULL,max_advance_days=NULL,first_time=NULL,last_time=NULL,
     slot_minutes=NULL,max_orders_per_slot=NULL,updated_at=now()
-   RETURNING *`,[tenantId,storeId,config.enabled,config.minAdvanceMinutes,config.maxAdvanceDays,
-    config.firstTime,config.lastTime,config.preparationMinutes]);
+   RETURNING *`,[tenantId,storeId,config.enabled,config.preparationMinutes]);
   await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',
    [tenantId,actorId,'STORE_RESERVATION_SETTINGS_UPDATED',storeId]);
   await client.query('COMMIT');
