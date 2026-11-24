@@ -746,9 +746,9 @@ test('TU VERSO explicit OPEN is recognized while absence remains UNKNOWN',async(
 })
 
 
-test('payment receipt sends exactly one image FORM for an accepted authorized order',async()=>{
+test('payment receipt sends exactly one image FORM for an active authorized order',async()=>{
  const access=randomUUID(),id=randomUUID(),messageKey=randomUUID()
- const h=harness({remoteStatus:'ACCEPTED'})
+ const h=harness({remoteStatus:'PENDING'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
  const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
   subtitle:'Comprobante de pago Yape',imageUrl:'https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999',
@@ -762,7 +762,7 @@ test('payment receipt sends exactly one image FORM for an accepted authorized or
  assert.equal(h.remote[1].value.idempotencyKey,messageKey)
  assert.equal(h.remote[1].value.form.imageUrl,payload.form.imageUrl)
 })
-test('payment receipt rejects invalid image, missing idempotency, wrong access and unaccepted order',async()=>{
+test('payment receipt rejects invalid image, missing idempotency and wrong access',async()=>{
  const access=randomUUID(),id=randomUUID(),key=randomUUID()
  const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
   imageUrl:'https://127.0.0.1/private.png',fields:[{variable:'Método',value:'Yape'}]}}
@@ -775,18 +775,13 @@ test('payment receipt rejects invalid image, missing idempotency, wrong access a
  payload.form.imageUrl='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
  const noKey=await h.call('POST',path,{headers:{'x-order-access-key':access},payload})
  assert.equal(noKey.code,400)
- const rejected=harness({remoteStatus:'PENDING'})
- rejected.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
- const pending=await rejected.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},payload})
- assert.equal(pending.code,409)
- assert.deepEqual(rejected.remote.map(x=>x.operation),['read'])
  const forbidden=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID(),'idempotency-key':key},payload})
  assert.equal(forbidden.code,403)
  assert.deepEqual(h.remote.map(x=>x.operation),['read'])
 })
 
-test('receipt upload stores image for the authorized accepted order and returns a public URL',async()=>{
- const access=randomUUID(),interactionId=randomUUID(),h=harness({remoteStatus:'ACCEPTED'})
+test('receipt upload stores image for the authorized technical PENDING order and returns a public URL',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),h=harness({remoteStatus:'PENDING'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
  const url='/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA
  const result=await h.call('POST',url,{headers:{'x-order-access-key':access,'content-type':'image/jpeg'}})
@@ -796,14 +791,47 @@ test('receipt upload stores image for the authorized accepted order and returns 
  assert.deepEqual(h.remote.map(x=>x.operation),['read'])
  assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO mobile_payment_receipt_images')),true)
 })
-test('receipt upload never persists a non-accepted order or mismatched access key',async()=>{
+test('receipt upload rejects mismatched access key before storage',async()=>{
  const access=randomUUID(),id=randomUUID(),h=harness({remoteStatus:'PENDING'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
  const path='/api/v1/mobile/interactions/'+id+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA
- const pending=await h.call('POST',path,{headers:{'x-order-access-key':access}})
- assert.equal(pending.code,409)
- assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO product_images')),false)
  const other=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID()}})
  assert.equal(other.code,403)
  assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO product_images')),false)
+})
+
+test('both receipt routes block rejected, expired and closed chats without storage or relay',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),idempotencyKey=randomUUID()
+ const reference='mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48)
+ const media='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ for(const settings of [
+  {remoteStatus:'REJECTED'},
+  {remoteStatus:'EXPIRED'},
+  {remoteStatus:'PENDING',operationalConversationStatus:'CLOSED'},
+  {remoteStatus:'ACCEPTED',operationalConversationStatus:'RESOLVED'}
+ ]){
+  const h=harness(settings)
+  h.setReference(reference)
+  const headers={'x-order-access-key':access,'idempotency-key':idempotencyKey}
+  const upload=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA,
+   {headers})
+  assert.equal(upload.code,409,JSON.stringify(settings))
+  const form=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt',
+   {headers,payload:{appId:appA,storeId:storeA,form:{title:'Comprobante',imageUrl:media,fields:[{variable:'Método',value:'Yape'}]}}})
+  assert.equal(form.code,409,JSON.stringify(settings))
+  assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO product_images')),false)
+  assert.deepEqual(h.remote.map(x=>x.operation),['read','read'])
+ }
+})
+test('technical ACCEPTED remains compatible with both receipt routes',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),idempotencyKey=randomUUID(),h=harness({remoteStatus:'ACCEPTED'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const headers={'x-order-access-key':access,'idempotency-key':idempotencyKey}
+ const upload=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA,{headers})
+ assert.equal(upload.code,201)
+ const form=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt',{
+  headers,payload:{appId:appA,storeId:storeA,form:{title:'Comprobante',imageUrl:upload.payload.imageUrl,fields:[{variable:'Método',value:'Yape'}]}}
+ })
+ assert.equal(form.code,200)
+ assert.equal(form.payload.paymentStatus,'PENDING_VALIDATION')
 })
