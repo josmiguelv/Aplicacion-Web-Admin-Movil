@@ -143,6 +143,12 @@ CREATE TABLE IF NOT EXISTS payment_methods (
   mode TEXT NOT NULL CHECK(mode IN ('delivery','pickup','dine_in','reservation')),
   method TEXT NOT NULL CHECK(method IN ('yape','plin','card','cash')),
   enabled BOOLEAN NOT NULL DEFAULT false,
+  image_url TEXT,
+  CONSTRAINT payment_methods_image_guard CHECK (method='cash' AND image_url IS NULL OR method<>'cash' AND (image_url IS NULL OR image_url ~ '^/api/v1/mobile/images/[0-9a-f-]{36}
+  PRIMARY KEY (tenant_id,store_id,mode,method),
+  FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
+);
+)),
   PRIMARY KEY (tenant_id,store_id,mode,method),
   FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
 );
