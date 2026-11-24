@@ -4,6 +4,19 @@ import {createSign} from 'node:crypto'
 
 const fail=(code,message)=>Object.assign(new Error(message),{code});
 const dateTime=/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/;
+const WEEKDAYS=[1,2,3,4,5,6,7];
+const timePattern=/^(?:[01]\\d|2[0-3]):[0-5]\\d$/;
+const datePattern=/^\\d{4}-\\d{2}-\\d{2}$/;
+const localDay=(d)=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+const limaParts=d=>Object.fromEntries(new Intl.DateTimeFormat('en-US',{
+ timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',
+ hour:'2-digit',minute:'2-digit',hourCycle:'h23',weekday:'short'
+}).formatToParts(d).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+const limaDate=p=>p.year+'-'+p.month+'-'+p.day;
+const weekdayIndex=p=>({Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6,Sun:7})[p.weekday];
+const safeDate=value=>typeof value==='string'&&datePattern.test(value)&&
+ !Number.isNaN(new Date(value+'T12:00:00Z').getTime())&&
+ new Date(value+'T12:00:00Z').toISOString().slice(0,10)===value;
 const marketingTopic='pollosb3_promotions';
 const mobileAppId='com.integrab2g.pollosb3';
 
@@ -25,16 +38,29 @@ export function validateCommercialNotice(value){
     typeof value.message!=='string'||!value.message.trim()||value.message.trim().length>1000)
   throw fail(400,'Completa título (máximo 120) y mensaje (máximo 1000)');
  if(value.imageUrl!==''&&value.imageUrl!=null&&
-    (typeof value.imageUrl!=='string'||!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/i.test(value.imageUrl)))
+    (typeof value.imageUrl!=='string'||!/^\\/api\\/v1\\/mobile\\/images\\/[0-9a-f-]{36}$/i.test(value.imageUrl)))
   throw fail(400,'Usa una imagen cargada en este Administrador');
- const scheduled=parseLimaDatetime(value.scheduledAt),expires=parseLimaDatetime(value.expiresAt);
- if(expires<=scheduled)throw fail(400,'El vencimiento debe ser posterior al inicio');
- return {title:value.title.trim(),message:value.message.trim(),imageUrl:value.imageUrl||null,scheduledAt:scheduled,expiresAt:expires};
+ if(!safeDate(value.startDate)||!safeDate(value.endDate)||value.startDate>value.endDate)
+  throw fail(400,'Selecciona fechas de inicio y fin válidas');
+ if(!timePattern.test(value.runTime||'')||!Array.isArray(value.weekdays)||
+  !value.weekdays.length||value.weekdays.length>7||
+  new Set(value.weekdays).size!==value.weekdays.length||
+  !value.weekdays.every(n=>Number.isInteger(n)&&WEEKDAYS.includes(n)))
+  throw fail(400,'Selecciona una hora y al menos un día de ejecución');
+ // The start date and end date are inclusive, and stored as UTC timestamps
+ // bounding the entire Peru-local day.
+ const scheduled=parseLimaDatetime(value.startDate+'T00:00');
+ const expires=new Date(parseLimaDatetime(value.endDate+'T00:00').getTime()+86400000);
+ return {title:value.title.trim(),message:value.message.trim(),imageUrl:value.imageUrl||null,
+  scheduledAt:scheduled,expiresAt:expires,weekdays:value.weekdays.slice().sort(),runTime:value.runTime};
 }
 const serialize=row=>({
  id:row.id,title:row.title,message:row.message,imageUrl:row.image_url||null,
  scheduledAt:row.scheduled_at,expiresAt:row.expires_at,status:row.status,
- publishedAt:row.published_at,pushSentAt:row.push_sent_at,pushError:row.push_error||null
+ publishedAt:row.published_at,pushSentAt:row.push_sent_at,pushError:row.push_error||null,
+ startDate:limaDate(limaParts(new Date(row.scheduled_at))),
+ endDate:limaDate(limaParts(new Date(new Date(row.expires_at).getTime()-60000))),
+ weekdays:row.weekdays||null,runTime:row.run_time?String(row.run_time).slice(0,5):null
 });
 const validUuid=v=>typeof v==='string'&&/^[0-9a-f-]{36}$/i.test(v);
 
@@ -64,14 +90,17 @@ export async function commercialNotificationsAdmin(pool,tenantId,input,method='G
     [tenantId,notice.imageUrl.split('/').pop()]);
    if(!owned.rowCount)throw fail(400,'La imagen no pertenece a la empresa');
   }
-  const args=[tenantId,notice.title,notice.message,notice.imageUrl,notice.scheduledAt,notice.expiresAt];
+  if(input.id&&!validUuid(input.id))throw fail(400,'Identificador de aviso inválido');
+  const args=[tenantId,notice.title,notice.message,notice.imageUrl,notice.scheduledAt,notice.expiresAt,
+   notice.weekdays,notice.runTime];
   const q=input.id?await client.query(`UPDATE company_mobile_notifications
-    SET title=$2,message=$3,image_url=$4,scheduled_at=$5,expires_at=$6,updated_at=now()
-    WHERE tenant_id=$1 AND id=$7 AND status='DRAFT' RETURNING *`,[...args,input.id]):
+    SET title=$2,message=$3,image_url=$4,scheduled_at=$5,expires_at=$6,
+        weekdays=$7,run_time=$8,updated_at=now()
+    WHERE tenant_id=$1 AND id=$9 AND status IN ('DRAFT','PUBLISHED') RETURNING *`,[...args,input.id]):
    await client.query(`INSERT INTO company_mobile_notifications
-    (tenant_id,title,message,image_url,scheduled_at,expires_at)
-    VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,args);
-  if(!q.rowCount)throw fail(409,'Solo puedes modificar avisos en borrador');
+    (tenant_id,title,message,image_url,scheduled_at,expires_at,weekdays,run_time)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,args);
+  if(!q.rowCount)throw fail(409,'El aviso no existe o está desactivado');
   await client.query('COMMIT');
   return serialize(q.rows[0]);
  }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
@@ -126,29 +155,47 @@ export async function sendCompanyPush(row){
  if(!response.ok)throw Error('FCM envío HTTP '+response.status);
  return true;
 }
-export async function dispatchCommercialNotifications(pool,{send=sendCompanyPush}={}){
- // A single worker must be enabled for the Pollos B3 app. Never broadcast other tenants to its topic.
- const claimed=await pool.query(`UPDATE company_mobile_notifications n
-   SET push_claimed_at=now(),push_error=NULL
-   WHERE n.id IN(
-    SELECT pending.id FROM company_mobile_notifications pending
-    WHERE pending.status='PUBLISHED' AND pending.push_sent_at IS NULL
-      AND pending.scheduled_at<=now() AND pending.expires_at>now()
-      AND (pending.push_claimed_at IS NULL OR pending.push_claimed_at<now()-interval '2 minutes')
-      AND EXISTS(SELECT 1 FROM mobile_apps a WHERE a.tenant_id=pending.tenant_id
-       AND a.app_id=$1 AND a.enabled=true)
-    ORDER BY pending.scheduled_at LIMIT 20 FOR UPDATE SKIP LOCKED
-   ) RETURNING n.*`,[mobileAppId]);
- for(const row of claimed.rows){
+export async function dispatchCommercialNotifications(pool,{send=sendCompanyPush,now=new Date()}={}){
+ // One attempt per selected Lima-local day. Previous single-shot notices retain
+ // their legacy behavior until they are edited with recurring frequency.
+ const p=limaParts(now),today=limaDate(p),weekday=weekdayIndex(p),
+  clock=p.hour+':'+p.minute;
+ const candidates=await pool.query(`SELECT n.*
+  FROM company_mobile_notifications n
+  WHERE n.status='PUBLISHED' AND n.scheduled_at<=$1 AND n.expires_at>$1
+    AND (n.weekdays IS NULL OR ($2=ANY(n.weekdays) AND n.run_time<=$3::time))
+    AND (n.weekdays IS NOT NULL OR n.push_sent_at IS NULL)
+    AND EXISTS(SELECT 1 FROM mobile_apps a WHERE a.tenant_id=n.tenant_id
+       AND a.app_id=$4 AND a.enabled=true)
+  ORDER BY n.scheduled_at,n.id LIMIT 100`,[now,weekday,clock,mobileAppId]);
+ let claimedCount=0;
+ for(const row of candidates.rows){
+  // Claim is atomic per (notification, Peru date), retryable after lease expiry;
+  // a successful send is never intentionally repeated for that local day.
+  const claimed=await pool.query(`INSERT INTO company_mobile_notification_runs
+    (notification_id,run_date,claim_at)
+    VALUES($1,$2::date,now())
+    ON CONFLICT(notification_id,run_date) DO UPDATE SET
+     claim_at=EXCLUDED.claim_at,error=NULL
+    WHERE company_mobile_notification_runs.sent_at IS NULL
+     AND company_mobile_notification_runs.claim_at<now()-interval '2 minutes'
+    RETURNING notification_id`,[row.id,today]);
+  if(!claimed.rowCount)continue;
+  claimedCount++;
   try{
    await send(row);
-   await pool.query(`UPDATE company_mobile_notifications SET push_sent_at=now(),push_claimed_at=NULL,
-    push_error=NULL WHERE id=$1 AND push_sent_at IS NULL`,[row.id]);
+   await pool.query(`UPDATE company_mobile_notification_runs SET sent_at=now(),error=NULL
+    WHERE notification_id=$1 AND run_date=$2::date`,[row.id,today]);
+   await pool.query(`UPDATE company_mobile_notifications SET push_sent_at=now(),
+    push_error=NULL WHERE id=$1`,[row.id]);
   }catch(e){
-   await pool.query(`UPDATE company_mobile_notifications SET push_claimed_at=NULL,
-    push_error=$2 WHERE id=$1`,[row.id,String(e?.message||'Error FCM').slice(0,500)]);
-   console.error('Pollos B3 aviso comercial:',e?.message);
+   const error=String(e?.message||'Error FCM').slice(0,500);
+   await pool.query(`UPDATE company_mobile_notification_runs SET error=$3,
+     claim_at=now()-interval '3 minutes'
+    WHERE notification_id=$1 AND run_date=$2::date AND sent_at IS NULL`,[row.id,today,error]);
+   await pool.query('UPDATE company_mobile_notifications SET push_error=$2 WHERE id=$1',[row.id,error]);
+   console.error('Pollos B3 aviso comercial:',error);
   }
  }
- return claimed.rowCount;
+ return claimedCount;
 }
