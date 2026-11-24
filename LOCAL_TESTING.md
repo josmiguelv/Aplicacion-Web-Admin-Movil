@@ -212,3 +212,24 @@ Se elimina exclusivamente la tarjeta **Notificaciones** del panel de configuraci
 No usar GitHub Actions, no ejecutar respaldos ni pruebas de la base de datos, no cambiar Android ni TU VERSO.
 
 Actualizar en local con `git fetch`, `git merge --ff-only FETCH_HEAD` y `pnpm build`; reiniciar `pnpm start` y `pnpm dev` en sus terminales.
+
+
+## Productos: catálogo primero, editor bajo demanda
+
+En la tarjeta Productos se muestra inicialmente la lista de productos existentes, con nombre, categoría, precio, disponibilidad y botón **Editar producto**. El formulario permanece oculto por defecto.
+
+- **+ Nuevo producto:** abre el formulario vacío para crear, con opción de Cancelar.
+- **Editar producto:** abre el mismo formulario con los datos guardados (nombre, descripción, categoría, precio, imagen y disponibilidad); **Guardar cambios** envía su `id` para actualizar el registro, sin duplicarlo.
+- Guardar vuelve al catálogo actualizado y mantiene el paso independiente de **Publicar cambios** para reflejarlo en la aplicación móvil.
+- No se necesita migración de base de datos ni cambio de API: el endpoint POST de productos ya soporta actualización por `id`.
+- No usar GitHub Actions, no ejecutar backups ni pruebas de BD. Solo validar mediante `pnpm build` y revisión visual local.
+
+Actualizar código local:
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+git status
+git fetch https://github.com/josmiguelv/Aplicacion-Web-Admin-Movil.git refs/heads/feat/b3-admin-reservation-transactional-20261123
+git merge --ff-only FETCH_HEAD
+pnpm build
+```
