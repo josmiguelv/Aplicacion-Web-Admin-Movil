@@ -49,7 +49,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
  }
  async function storeLive(ctx,storeId,client=pool){
   const result=await client.query(`SELECT s.id,s.name,s.active,s.delivery_enabled,s.pickup_enabled,s.opening_hours,
-   t.time_zone,r.enabled,r.min_advance_minutes,r.max_advance_days,r.first_time,r.last_time,
+   r.enabled,r.min_advance_minutes,r.max_advance_days,r.first_time,r.last_time,
    r.preparation_minutes
    FROM stores s JOIN tenants t ON t.id=s.tenant_id
    LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id
@@ -86,7 +86,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
   const candidateStores=q.mode==='delivery'
    ?await deliveryQuotes(ctx.payload,{...q,useGps:true},ctx.revision,false,
       // Iterate future opening hours, never the current isOpen flag.
-      new Date(localDateTimeEpoch(q.date,q.time,ctx.payload.timeZone||'America/Lima')))
+      new Date(localDateTimeEpoch(q.date,q.time,'America/Lima')))
    :[{storeId:q.storeId,deliveryFee:0,routeDistanceKm:null}];
   for(const candidate of candidateStores){
    if(q.storeId&&candidate.storeId!==q.storeId)continue;
@@ -98,7 +98,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
     store:{...old,serviceMode:q.mode,active:row.active,delivery_enabled:row.delivery_enabled,
      pickup_enabled:row.pickup_enabled,openingHours:row.opening_hours},
     settings:{...settings,enabled:settings.enabled&&old.reservationSettings.enabled},
-    timeZone:row.time_zone||'America/Lima',now:now(),
+    timeZone:'America/Lima',now:now(),
     isOpenAt:(store,at,zone)=>{
      const h=storeHours(store,at,zone);
      return h.hoursConfigured===true&&h.isOpen===true;
