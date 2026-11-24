@@ -417,8 +417,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       {area:'vacancies',title:'Empleo',subtitle:'Vacantes de la empresa · compartidas',icon:Store},
       {area:'settings',title:'Datos de la empresa',subtitle:'Configuración general · compartida',icon:Settings2},
       {area:'publish',title:'Publicar cambios',subtitle:'Publicación del catálogo de la empresa',icon:Send}
-     ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={false}>Compartida</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}</div>
-    <div className="ops-module-grid ops-survey-access">
+     ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={false}>Compartida</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}
      <button type="button" className="ops-module-card" onClick={()=>chooseArea('surveys')}>
       <Star size={24}/><strong>Encuestas de satisfacción</strong>
       <span>Respuestas de clientes, detalle y filtros de esta sede</span>
