@@ -26,7 +26,7 @@ if(prod){
 }
 const secure=process.env.COOKIE_SECURE!== 'false' && prod
 const allowedOrigins=(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean)
-const corsHeaders={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization, Idempotency-Key','Cache-Control':'no-store'}
+const corsHeaders={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization, Idempotency-Key, X-Order-Access-Key','Cache-Control':'no-store'}
 const json=(res,status,body,publicRead=false)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8',...(publicRead?corsHeaders:{'Cache-Control':'no-store'})});res.end(JSON.stringify(body))}
 const bad=(code,message)=>Object.assign(new Error(message),{code})
 const uuid=x=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(x)
