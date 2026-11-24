@@ -43,3 +43,15 @@ node --test scripts/order-availability-api.test.mjs scripts/order-availability-f
 ```
 
 Pruebas E2E necesarias antes de GO: acceso directo del push correcto, denegación de permisos, token rotado, 503 después de crear sin duplicados, aceptación/rechazo con agente real, cancelar, modificar, vencimiento, 2 recordatorios personales, reinicio Android y cotización sin Google Routes.
+
+## Imágenes y configuración pública de pagos (23/11/2026)
+
+**Solo Administrador Web.** Ejecutar `server/migrations/008-payment-provider-images.sql` exclusivamente en PostgreSQL del Administrador, después de `007`. No ejecutar en TU VERSO ni automáticamente en arranque. Esta migración crea `tenant_payment_images`, que asocia por empresa una sola imagen de Yape, Plin e Izipay (`card`) a los activos de imagen existentes; efectivo (`cash`) no tiene imagen.
+
+En **Formas de pago** del Administrador se pueden subir y quitar estas tres imágenes. Usar el uploader existente de `/api/admin/tenants/:tenantId/images` y `GET/POST /api/admin/tenants/:tenantId/payment-images`; POST acepta `{method:'yape'|'plin'|'card',imageId:'UUID'|null}` y exige que el activo pertenezca a la empresa autenticada. No permite URL ni imagen de otro tenant.
+
+Al pulsar **Publicar cambios**, `GET /api/v1/mobile/config?appId=...` conserva `stores[].paymentMethods` y añade `paymentWaitMinutes`, `reminderCount`, `paymentImages` (mapa `yape`/`plin`/`card` de URLs públicas) y `stores[].paymentOptions` (mapa de modalidades a `[{method,imageUrl}]`). La modalidad solo incluye medios habilitados en esa sede, con `imageUrl:null` cuando aún no se configuró imagen o para `cash`. `POST /api/v1/mobile/fulfillment/resolve` conserva `paymentMethods` y devuelve `paymentOptions` de la modalidad elegida y `paymentWaitMinutes`. Las imágenes se sirven a través de la ruta existente `/api/v1/mobile/images/:id`, accesible una vez publicada la revisión. No se envían números de cuenta, credenciales de cobro, confirmaciones de pago ni QR generados.
+
+El plazo se guarda por empresa usando la configuración ya existente de `mobile_checkout_policies` (5–30 minutos); cambiarlo requiere **Publicar** para actualizar el catálogo consumido por Android. Esta adición no cambia la lógica del `POST/GET .../payment`, ni procesa transacciones. Se mantiene compatibilidad del formato histórico de `paymentMethods`.
+
+Prueba focal sin base de datos: `node --test server/payment-public-config.test.mjs`. Para verificar en local con base migrada, configurar imágenes en Formas de pago, publicar y consultar el catálogo y una cotización, sin crear pedidos.
