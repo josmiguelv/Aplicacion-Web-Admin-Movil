@@ -10,10 +10,12 @@ const mobileAppId='com.integrab2g.pollosb3';
 export function parseLimaDatetime(value){
  if(typeof value!=='string'||!dateTime.test(value))throw fail(400,'Ingresa fecha y hora válidas de Perú');
  const parsed=new Date(value+':00-05:00');
- if(Number.isNaN(parsed.getTime())||
-  new Intl.DateTimeFormat('en-CA',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',
-   hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(parsed).filter(p=>p.type!=='literal')
-   .reduce((o,p)=>(o[p.type]=p.value,o),{}).year!==value.slice(0,4))
+ if(Number.isNaN(parsed.getTime()))throw fail(400,'Fecha y hora inválidas');
+ const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{
+  timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',
+  minute:'2-digit',hourCycle:'h23'
+ }).formatToParts(parsed).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+ if(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`!==value)
   throw fail(400,'Fecha y hora inválidas');
  return parsed;
 }
