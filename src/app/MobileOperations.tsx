@@ -112,7 +112,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   setModuleWarnings(warnings)
  }
 
- useEffect(()=>{if(session&&tenantId)void refresh(tenantId).catch(e=>setError(e.message))},[tenantId,session])
+ useEffect(()=>{if(session&&tenantId){setStoresLoaded(false);setModuleWarnings([]);setError('');void refresh(tenantId).catch(e=>setError(e.message))}},[tenantId,session])
  useEffect(()=>{
     if(activeArea!=='reservations'||!tenantId||!reservationStoreId)return
     let active=true
