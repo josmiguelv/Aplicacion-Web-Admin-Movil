@@ -46,6 +46,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    const state=terminalSessions.get(args.join('|'))
    return {rowCount:state?1:0,rows:state?[{state}]:[]}
   }
+  if(sql.includes('FROM mobile_payment_receipt_images'))return {rowCount:1,rows:[{'?column?':1}]}
   if(sql.startsWith('SELECT payment_wait_minutes'))return {rowCount:0,rows:[]}
   if(sql.startsWith('INSERT INTO mobile_checkout_followups')){
    if(sql.includes('state,agent_notice_sent,expiry_notice_sent')){
@@ -750,7 +751,7 @@ test('payment receipt sends exactly one image FORM for an accepted authorized or
  const h=harness({remoteStatus:'ACCEPTED'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
  const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
-  subtitle:'Comprobante de pago Yape',imageUrl:'https://cdn.example.com/comprobante.jpg',
+  subtitle:'Comprobante de pago Yape',imageUrl:'https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999',
   fields:[{variable:'Pedido',value:'B3-1025'},{variable:'Método',value:'Yape'}]}}
  const result=await h.call('POST','/api/v1/mobile/interactions/'+id+'/payment-receipt',{
   headers:{'x-order-access-key':access,'idempotency-key':messageKey},payload})
@@ -771,7 +772,7 @@ test('payment receipt rejects invalid image, missing idempotency, wrong access a
  const bad=await h.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},payload})
  assert.equal(bad.code,400)
  assert.equal(h.remote.length,0)
- payload.form.imageUrl='https://cdn.example.com/receipt.png'
+ payload.form.imageUrl='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
  const noKey=await h.call('POST',path,{headers:{'x-order-access-key':access},payload})
  assert.equal(noKey.code,400)
  const rejected=harness({remoteStatus:'PENDING'})
