@@ -30,7 +30,7 @@ export function promotionVisible(promo,timeZone='America/Lima',now=new Date()){
  }
  try{
   const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{
-   timeZone,year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',
+   timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',
    hour:'2-digit',minute:'2-digit',hourCycle:'h23'
   }).formatToParts(now).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
   const day=parts.year+'-'+parts.month+'-'+parts.day;
