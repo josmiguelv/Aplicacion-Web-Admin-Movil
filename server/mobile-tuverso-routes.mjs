@@ -366,6 +366,23 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      appId:input.appId,storeId:input.storeId,accessKey:access})
     if(['CANCELLED','EXPIRED','FINISHED'].includes(session))
      throw fail(409,'La solicitud ya está cerrada; no se enviarán más mensajes')
+    if(receiptMatch){
+     // Only an image uploaded for this specific interaction can be relayed.
+     let expectedOrigin
+     try{
+      const base=new URL(receiptBaseUrl())
+      if(!validReceiptImageUrl(base.origin+'/check')||base.pathname!=='/'||base.search||base.hash)throw Error('BAD_BASE')
+      expectedOrigin=base.origin
+     }catch{throw fail(503,'Configura PUBLIC_API_BASE_URL con la URL HTTPS pública del Administrador')}
+     const expectedPrefix=expectedOrigin+'/api/v1/mobile/payment-receipts/images/'
+     const imageUrl=input.form.imageUrl
+     if(!imageUrl.startsWith(expectedPrefix)||!VALID_UUID.test(imageUrl.slice(expectedPrefix.length)))
+      throw fail(400,'El comprobante debe utilizar la URL generada por el Administrador')
+     const stored=await pool.query(`SELECT 1 FROM mobile_payment_receipt_images
+      WHERE image_id=$1 AND tenant_id=$2 AND app_id=$3 AND store_id=$4 AND interaction_id=$5`,
+      [imageUrl.slice(expectedPrefix.length),ctx.tenantId,input.appId,input.storeId,interactionId])
+     if(stored.rowCount!==1)throw fail(403,'Comprobante no asociado a este pedido')
+    }
     let text,form,legacyText
     if(freeText){
      text=input.text
