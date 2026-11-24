@@ -84,7 +84,7 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
   to_char(active_until,'HH24:MI') AS "endTime",
   active_weekdays AS weekdays
  FROM promotions WHERE tenant_id=$1 AND active=true ORDER BY id`,[tenantId]),
- tx.query('SELECT store_id,mode,method FROM payment_methods WHERE tenant_id=$1 AND enabled=true',[tenantId]),
+ tx.query('SELECT store_id,mode,method,image_url FROM payment_methods WHERE tenant_id=$1 AND enabled=true',[tenantId]),
  tx.query(`SELECT j.id,j.title,j.summary,j.description,j.requirements,
    j.employment_type AS "employmentType",j.image_url AS "imageUrl",j.whatsapp_phone AS "whatsappPhone",
    COALESCE((SELECT array_agg(vs.store_id ORDER BY st.name)
@@ -99,7 +99,12 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
     WHERE vs.tenant_id=j.tenant_id AND vs.vacancy_id=j.id AND st.active=true)
    ORDER BY j.updated_at DESC,j.id`,[tenantId]),
  tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId])
- ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),
+ paymentMethodImages:payments.rows.filter(p=>p.store_id===s.id&&p.image_url&&p.method!=='cash').reduce((a,p)=>{
+  if(!a[p.mode])a[p.mode]={};
+  a[p.mode][p.method]=p.image_url;
+  return a;
+ },{delivery:{},pickup:{},reservation:{}})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[],notifications:[]},true);const commercial=await publicCommercialNotifications(pool,appId).catch(error=>{if(error.code==='42P01')return {items:[]};throw error});return json(res,200,{ready:true,revision:q.rows[0].revision,notifications:commercial.items,...q.rows[0].payload,timeZone:DEFAULT_TENANT_TZ,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
  ...withLiveHours(s,DEFAULT_TENANT_TZ),
@@ -403,13 +408,28 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    if(!b.methods||typeof b.methods!=='object'||Array.isArray(b.methods)||
       Object.keys(b.methods).length!==keys.length||
       !keys.every(key=>Object.prototype.hasOwnProperty.call(b.methods,key)&&bool(b.methods[key])))
-     throw bad(400,'Selecciona el estado de los cuatro métodos de pago');
-   result=await client.query(`INSERT INTO payment_methods(tenant_id,store_id,mode,method,enabled)
-    SELECT $1,$2,$3,p.method,p.enabled
-    FROM unnest($4::text[],$5::boolean[]) AS p(method,enabled)
+    throw bad(400,'Selecciona el estado de los cuatro métodos de pago');
+   const images=b.images??{};
+   if(!images||typeof images!=='object'||Array.isArray(images)||
+      Object.keys(images).some(key=>!['yape','plin','card'].includes(key))||
+      Object.values(images).some(value=>value!==null&&
+       (typeof value!=='string'||!/^\\/api\\/v1\\/mobile\\/images\\/[0-9a-f-]{36}$/i.test(value))))
+    throw bad(400,'Imagen de medio de pago inválida');
+   const urls=keys.map(key=>key==='cash'?null:images[key]??null);
+   const owned=urls.filter(Boolean).map(value=>value.split('/').pop());
+   if(owned.length){
+    const photos=await client.query(
+     'SELECT id::text FROM product_images WHERE tenant_id=$1 AND id::text=ANY($2::text[])',
+     [tenantId,owned]);
+    if(new Set(photos.rows.map(x=>x.id)).size!==new Set(owned).size)
+     throw bad(400,'Una imagen no pertenece a esta empresa');
+   }
+   result=await client.query(`INSERT INTO payment_methods(tenant_id,store_id,mode,method,enabled,image_url)
+    SELECT $1,$2,$3,p.method,p.enabled,p.image_url
+    FROM unnest($4::text[],$5::boolean[],$6::text[]) AS p(method,enabled,image_url)
     ON CONFLICT(tenant_id,store_id,mode,method)
-    DO UPDATE SET enabled=EXCLUDED.enabled RETURNING *`,
-    [tenantId,b.storeId,b.mode,keys,keys.map(key=>b.methods[key])]);
+    DO UPDATE SET enabled=EXCLUDED.enabled,image_url=EXCLUDED.image_url RETURNING *`,
+    [tenantId,b.storeId,b.mode,keys,keys.map(key=>b.methods[key]),urls]);
   }else{
    if(!method(b.method)||!bool(b.enabled))throw bad(400,'Pago inválido');
    result=await client.query(`INSERT INTO payment_methods(tenant_id,store_id,mode,method,enabled)
