@@ -9,7 +9,7 @@ const weekdays = [{id:'mon',label:'Lunes'},{id:'tue',label:'Martes'},{id:'wed',l
 type StoreRow = { delivery_preparation_minutes:number|null;pickup_preparation_minutes:number|null;code: string; opening_hours: OpeningHours|null; consult_order_availability: boolean; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
 type ReservationSettings = {enabled:boolean;preparationMinutes:number|null}
 const blankReservation = ():ReservationSettings => ({enabled:false,preparationMinutes:null})
-type ProductRow = {id:string;name:string;price_pen:number;active:boolean}
+type ProductRow = {id:string;name:string;description:string;category:string;price_pen:number;image_url:string|null;active:boolean}
 type CompanyNotice = {id:string;title:string;message:string;imageUrl:string|null;scheduledAt:string;expiresAt:string;status:'DRAFT'|'PUBLISHED'|'DISABLED';pushSentAt:string|null;pushError:string|null}
 const limaDatetime=(iso:string)=>{const date=new Date(iso);if(Number.isNaN(date.getTime()))return '';const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`}
 type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;employment_type:string;location_label:string;store_ids:string[];image_url:string|null;whatsapp_phone:string;active:boolean}
@@ -43,7 +43,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   if(hasUnsavedStoreChanges&&!window.confirm('Hay cambios sin guardar en esta sede. ¿Quieres descartarlos y continuar?'))return
   setStore(next);setStoreBaseline(JSON.stringify(next));setStoreEditorOpen(true);setStoreSavedNotice(false);setError('');setMessage('')
  }
- const [product,setProduct]=useState({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false})
+ const blankProduct=()=>({id:'',name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false})
+ const [product,setProduct]=useState(blankProduct)
+ const [productEditorOpen,setProductEditorOpen]=useState(false)
  const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',employmentType:'Tiempo completo',storeIds:[] as string[],imageUrl:'',whatsappPhone:'',active:false})
  const [vacancy,setVacancy]=useState(emptyVacancy)
  const [paymentStore,setPaymentStore]=useState(''),[paymentMode,setPaymentMode]=useState('delivery')
@@ -363,7 +365,79 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      {savedNext('reservations')}
     </>)}
    </section>)}
-  {activeArea==='products'&&(<section className="ops-panel"><p className="ops-global-note" role="status">Catálogo compartido de la empresa. Los productos que guardes aquí todavía afectan a todas las sedes. La disponibilidad y los precios por sede requieren una configuración adicional.</p><h2><Package size={19}/> Catálogo de productos y fotografías</h2><div className="ops-grid"><label>Nombre<input value={product.name} onChange={e=>setProduct({...product,name:e.target.value})}/></label><label>Categoría<input value={product.category} onChange={e=>setProduct({...product,category:e.target.value})}/></label><label>Precio S/<input type="number" step="0.01" min="0" value={product.pricePen} onChange={e=>setProduct({...product,pricePen:e.target.value})}/></label><label>Descripción<input value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label><label>Imagen <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{const res=await fetch(`/api/admin/tenants/${tenantId}/images`,{method:'POST',credentials:'include',body:file});const data=await res.json();if(!res.ok)throw new Error(data.error||'No se pudo subir');setProduct(v=>({...v,imageUrl:data.url}));setMessage('Foto cargada. Guarda y publica el producto para mostrarla en Android.')})}}/></label><label>URL de imagen cargada<input readOnly value={product.imageUrl}/></label></div><label className="ops-check"><input type="checkbox" checked={product.active} onChange={e=>setProduct({...product,active:e.target.checked})}/>Producto disponible</label><button className="button button-primary" disabled={loading} onClick={()=>void act(async()=>{if(!product.name||product.pricePen==='')throw new Error('Completa el nombre y precio');await api(`/api/admin/tenants/${tenantId}/products`,'POST',{...product,pricePen:Number(product.pricePen)});setProduct({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false});await refresh();setSavedArea('products')})}>Guardar producto</button>{savedNext('products')}<div className="ops-record-list"><h3>Productos registrados ({products.length})</h3>{products.length===0?<p className="ops-hint">Todavía no hay productos registrados.</p>:products.map(item=><div key={item.id} className="ops-record-row"><strong>{item.name}</strong><span>S/ {Number(item.price_pen).toFixed(2)}</span><span className={item.active?"ops-state ops-state--yes":"ops-state ops-state--no"}>{item.active?"Disponible":"No disponible"}</span></div>)}</div></section>)}
+  {activeArea==='products'&&(<section className="ops-panel ops-products-panel">
+   <p className="ops-global-note" role="status">Catálogo compartido de la empresa. Los cambios afectan a todas las sedes; los precios y la disponibilidad por sede requieren configuración adicional.</p>
+   <div className="ops-products-heading">
+    <div><h2><Package size={19}/> Catálogo de productos y fotografías</h2>
+     <p className="ops-hint">Consulta primero los productos registrados. Abre uno para editarlo o crea uno nuevo cuando lo necesites.</p></div>
+    <button type="button" className="button button-primary" disabled={loading}
+     onClick={()=>{setProduct(blankProduct());setProductEditorOpen(true);setSavedArea('')}}>
+     + Nuevo producto</button>
+   </div>
+   {!productEditorOpen?<>
+    <div className="ops-record-list"><h3>Productos registrados ({products.length})</h3>
+     {products.length===0?<p className="ops-hint">Todavía no hay productos registrados. Selecciona «Nuevo producto» para agregar el primero.</p>:
+      products.map(item=><div key={item.id} className="ops-record-row ops-product-row">
+       <div className="ops-product-info"><strong>{item.name}</strong>
+        <small>{item.category||'Sin categoría'}</small></div>
+       <span>S/ {Number(item.price_pen).toFixed(2)}</span>
+       <span className={item.active?"ops-state ops-state--yes":"ops-state ops-state--no"}>{item.active?"Disponible":"No disponible"}</span>
+       <button type="button" className="button button-secondary" disabled={loading} onClick={()=>{
+        setProduct({id:item.id,name:item.name,description:item.description||'',category:item.category||'',
+         pricePen:String(item.price_pen),imageUrl:item.image_url||'',active:item.active})
+        setProductEditorOpen(true);setSavedArea('')
+       }}>Editar producto</button>
+      </div>)}
+    </div>
+   </>:<>
+    <div className="ops-products-editor-head">
+     <h3>{product.id?'Editar producto':'Nuevo producto'}</h3>
+     <button type="button" className="button button-secondary" disabled={loading}
+      onClick={()=>{setProductEditorOpen(false);setProduct(blankProduct())}}>Volver al catálogo</button>
+    </div>
+    <div className="ops-grid">
+     <label>Nombre<input maxLength={180} value={product.name} onChange={e=>setProduct({...product,name:e.target.value})}/></label>
+     <label>Categoría<input value={product.category} onChange={e=>setProduct({...product,category:e.target.value})}/></label>
+     <label>Precio S/<input type="number" step="0.01" min="0" value={product.pricePen}
+      onChange={e=>setProduct({...product,pricePen:e.target.value})}/></label>
+     <label>Descripción<textarea rows={3} value={product.description}
+      onChange={e=>setProduct({...product,description:e.target.value})}/></label>
+     <label>Imagen (opcional)<input type="file" accept="image/png,image/jpeg,image/webp"
+      onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{
+       const response=await fetch(`/api/admin/tenants/${tenantId}/images`,{
+        method:'POST',credentials:'include',body:file
+       })
+       const data=await response.json()
+       if(!response.ok)throw new Error(data.error||'No se pudo subir la imagen')
+       setProduct(previous=>({...previous,imageUrl:data.url}))
+       setMessage('Imagen cargada. Guarda y publica el producto para mostrar el cambio en la aplicación.')
+      })}}/></label>
+    </div>
+    {product.imageUrl&&<div className="ops-product-image">
+     <img src={product.imageUrl.startsWith('/api/v1/mobile/images/')?
+      product.imageUrl.replace('/api/v1/mobile/images/',`/api/admin/tenants/${tenantId}/images/`):
+      product.imageUrl} alt={`Imagen de ${product.name||'producto'}`} />
+     <button type="button" className="button button-secondary" disabled={loading}
+      onClick={()=>setProduct({...product,imageUrl:''})}>Quitar imagen</button>
+    </div>}
+    <label className="ops-check"><input type="checkbox" checked={product.active}
+     onChange={e=>setProduct({...product,active:e.target.checked})}/>Producto disponible</label>
+    <div className="ops-inline">
+     <button type="button" className="button button-primary" disabled={loading||!product.name.trim()||
+      product.pricePen===''||!Number.isFinite(Number(product.pricePen))||Number(product.pricePen)<0}
+      onClick={()=>void act(async()=>{
+       await api(`/api/admin/tenants/${tenantId}/products`,'POST',{
+        ...product,pricePen:Number(product.pricePen)
+       })
+       await refresh()
+       setProduct(blankProduct());setProductEditorOpen(false);setSavedArea('products')
+      })}>{product.id?'Guardar cambios':'Crear producto'}</button>
+     <button type="button" className="button button-secondary" disabled={loading}
+      onClick={()=>{setProduct(blankProduct());setProductEditorOpen(false)}}>Cancelar</button>
+    </div>
+   </>}
+   {!productEditorOpen&&savedNext('products')}
+  </section>)}
   {activeArea==='vacancies'&&(<section className="ops-panel ops-vacancy-panel">
    <h2><Store size={19}/> Trabaja con nosotros · Vacantes</h2>
    <p className="ops-hint">Selecciona una o varias sedes activas para esta vacante. La publicación mostrará las sedes seleccionadas; no se podrán asignar locales inactivos.</p>
