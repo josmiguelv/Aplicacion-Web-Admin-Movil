@@ -3,6 +3,7 @@ import {decryptCredential} from './integration-crypto.mjs'
 import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
+import {validReceiptImageUrl} from './payment-receipt-validation.mjs'
 import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -102,8 +103,9 @@ function orderForm(cart,store,customer){
 // A client-authored FORM is informational only: it never supplies authoritative prices,
 // store availability, fulfillment status or an approval decision.
 function validClientForm(value){
- if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','fields'].includes(key))||
+ if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','imageUrl','fields'].includes(key))||
     !validText(value.title,180)||
+    (value.imageUrl!==undefined&&!validReceiptImageUrl(value.imageUrl))||
     value.subtitle!==undefined&&(typeof value.subtitle!=='string'||value.subtitle.length>350||
      /[\x00-\x1f\x7f]/.test(value.subtitle))||
     !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>5)return false
@@ -181,7 +183,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   const creating=url.pathname==='/api/v1/mobile/interactions'
   const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
-  if(!match&&!creating&&!statusMatch&&!messageMatch)return false
+  const receiptMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt$/i)
+  if(!match&&!creating&&!statusMatch&&!messageMatch&&!receiptMatch)return false
   try{
    rateLimit(req)
    if(match){
@@ -275,13 +278,14 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      ...(['OPEN','CLOSED','RESOLVED'].includes(operationalConversationStatus)?
       {operationalConversationStatus}:{})})
    }
-   if(messageMatch){
+   if(messageMatch||receiptMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
     if(interactionMode()!=='LIVE')throw fail(503,'Mensajes de TU VERSO no habilitados')
-    const interactionId=messageMatch[1],access=req.headers['x-order-access-key']
+    const interactionId=(receiptMatch||messageMatch)[1],access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
     const input=await body(req)
-    const requestedType=input?.type
+    // Dedicated receipt route requires a FORM with an image, never text or a payment decision.
+    const requestedType=receiptMatch?'FORM':input?.type
     // Pre-existing Android clients sent an order body without type. They remain
     // TEXT for backward compatibility; new clients must select TEXT or FORM.
     const type=requestedType===undefined?'TEXT':requestedType
@@ -298,7 +302,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        !APP.test(input.appId)||!VALID_UUID.test(input.storeId)||
        Object.keys(input).some(k=>!(directForm?formKeys:freeText?textKeys:orderKeys).includes(k))||
        (directForm?(
-         requestedType!=='FORM'||!independentKeyValid||!validClientForm(input.form)
+         (receiptMatch?input.type!==undefined:requestedType!=='FORM')||!independentKeyValid||
+         !validClientForm(input.form)||(receiptMatch&&!validReceiptImageUrl(input.form.imageUrl))
        ):freeText?(
          requestedType!=='TEXT'||typeof input.text!=='string'||!input.text.trim()||
          input.text.length>8000||/[\x00-\x09\x0b-\x1f]/.test(input.text)||
@@ -324,6 +329,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      form={
       title:input.form.title.trim(),
       ...(input.form.subtitle!==undefined?{subtitle:input.form.subtitle.trim()}:{}),
+      ...(input.form.imageUrl?{imageUrl:input.form.imageUrl}:{}),
       fields:input.form.fields.map(row=>({variable:row.variable.trim(),value:row.value.trim()})),
      }
     }else{
@@ -344,7 +350,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')
       throw fail(403,'Interacción no autorizada para esta aplicación y sede')
-    if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED')
+    if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED'||
+       (receiptMatch&&remote.data.status!=='ACCEPTED'))
       throw fail(409,'La solicitud ya no permite enviar mensajes')
     const delivered=await sendMessage(integration.token,interactionId,
      type==='FORM'?{
@@ -365,7 +372,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     }
     if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||''))
       throw fail(delivered.httpStatus===409?409:remoteAuthStatus(delivered),'TU VERSO no confirmó el mensaje '+type)
-    return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId,type})
+    return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId,type,
+     ...(receiptMatch?{paymentStatus:'PENDING_VALIDATION'}:{})})
    }
    if(req.method!=='POST')throw fail(405,'Método no permitido')
    if(interactionMode()!=='LIVE'||checkMode()==='DISABLED')throw fail(503,'Interacciones TU VERSO no habilitadas')
