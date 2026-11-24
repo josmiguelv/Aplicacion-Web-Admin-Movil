@@ -6,9 +6,9 @@ type Tenant = { id: string; name: string; active: boolean }
 type DayHours = {open:string;close:string}|{closed:true}
 type OpeningHours = Partial<Record<'sun'|'mon'|'tue'|'wed'|'thu'|'fri'|'sat',DayHours>>
 const weekdays = [{id:'mon',label:'Lunes'},{id:'tue',label:'Martes'},{id:'wed',label:'Miércoles'},{id:'thu',label:'Jueves'},{id:'fri',label:'Viernes'},{id:'sat',label:'Sábado'},{id:'sun',label:'Domingo'}] as const
-type StoreRow = { code: string; opening_hours: OpeningHours|null; consult_order_availability: boolean; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
-type ReservationSettings = {enabled:boolean;minAdvanceMinutes:number|null;maxAdvanceDays:number|null;firstTime:string|null;lastTime:string|null;preparationMinutes:number|null}
-const blankReservation = ():ReservationSettings => ({enabled:false,minAdvanceMinutes:null,maxAdvanceDays:null,firstTime:null,lastTime:null,preparationMinutes:null})
+type StoreRow = { delivery_preparation_minutes:number|null;pickup_preparation_minutes:number|null;code: string; opening_hours: OpeningHours|null; consult_order_availability: boolean; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
+type ReservationSettings = {enabled:boolean;preparationMinutes:number|null}
+const blankReservation = ():ReservationSettings => ({enabled:false,preparationMinutes:null})
 type ProductRow = {id:string;name:string;price_pen:number;active:boolean}
 type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;schedule:string;employment_type:string;location_label:string;image_url:string|null;whatsapp_phone:string;active:boolean}
 const modes = [{key:'delivery',name:'Delivery'},{key:'pickup',name:'Recojo en tienda'}]
@@ -25,7 +25,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('')
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
  const [stores,setStores]=useState<StoreRow[]>([]),[products,setProducts]=useState<ProductRow[]>([]),[vacancies,setVacancies]=useState<VacancyRow[]>([])
- const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,consultOrderAvailability:false,openingHours:{} as OpeningHours})
+ const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPreparationMinutes:'',pickupPreparationMinutes:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,consultOrderAvailability:false,openingHours:{} as OpeningHours})
  const [store,setStore]=useState(emptyStore)
  const [storeBaseline,setStoreBaseline]=useState(()=>JSON.stringify(emptyStore()))
  const [storeEditorOpen,setStoreEditorOpen]=useState(false)
@@ -98,7 +98,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   return ()=>{alive=false}
  },[tenantId,stores])
  const selectedStore=stores.find(s=>s.id===selectedStoreId)
- const storeEditorValue=(s:StoreRow)=>({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM' as 'PER_KM'|'FIXED',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,consultOrderAvailability:s.consult_order_availability===true,openingHours:s.opening_hours||{}})
+ const storeEditorValue=(s:StoreRow)=>({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPreparationMinutes:s.delivery_preparation_minutes==null?'':String(s.delivery_preparation_minutes),pickupPreparationMinutes:s.pickup_preparation_minutes==null?'':String(s.pickup_preparation_minutes),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM' as 'PER_KM'|'FIXED',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,consultOrderAvailability:s.consult_order_availability===true,openingHours:s.opening_hours||{}})
  const enterLocal=(s:StoreRow)=>{
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Hay cambios sin guardar. ¿Quieres salir sin guardarlos?'))return
   setSelectedStoreId(s.id);setReservationStoreId(s.id);setPaymentStore(s.id);setPaymentMode('delivery');chooseArea('local')
@@ -147,7 +147,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    longitude:store.longitude?Number(store.longitude):null,
    radiusKm:store.radiusKm===''?null:Number(store.radiusKm),
    deliveryRatePerKmPen:store.deliveryPricingMode==='PER_KM'&&store.deliveryRatePerKmPen!==''?Number(store.deliveryRatePerKmPen):null,
-   deliveryFeePen:store.deliveryPricingMode==='FIXED'&&store.deliveryFeePen!==''?Number(store.deliveryFeePen):null
+   deliveryFeePen:store.deliveryPricingMode==='FIXED'&&store.deliveryFeePen!==''?Number(store.deliveryFeePen):null,
+   deliveryPreparationMinutes:store.deliveryPreparationMinutes===''?null:Number(store.deliveryPreparationMinutes),
+   pickupPreparationMinutes:store.pickupPreparationMinutes===''?null:Number(store.pickupPreparationMinutes)
   })
   const next={...store,id:saved.id,code:saved.code}
   setStore(next);setStoreBaseline(JSON.stringify(next))
@@ -198,11 +200,15 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      <label>Tarifa por km (S/)<input type="number" min="0" step="0.01" value={store.deliveryRatePerKmPen}
       onChange={e=>setStore({...store,deliveryRatePerKmPen:e.target.value})}/></label>}
    </div>
+   <label>Tiempo de preparación (minutos)<input type="number" min="1" max="240" step="1"
+    value={store.deliveryPreparationMinutes} onChange={e=>setStore({...store,deliveryPreparationMinutes:e.target.value})}/></label>
    <p className="ops-hint">No hay horarios adicionales de Delivery. Podrá recibir solicitudes cuando esta opción esté habilitada y TU VERSO confirme un agente disponible, incluso fuera del horario físico.</p>
   </section>}
   {storeFocus==='pickup'&&<section id="ops-store-pickup">
    <label className="ops-check"><input type="checkbox" checked={store.pickup_enabled}
     onChange={e=>setStore({...store,pickup_enabled:e.target.checked})}/> Habilitar Recojo en tienda</label>
+   <label>Tiempo de preparación (minutos)<input type="number" min="1" max="240" step="1"
+    value={store.pickupPreparationMinutes} onChange={e=>setStore({...store,pickupPreparationMinutes:e.target.value})}/></label>
    <p className="ops-hint">No hay horarios adicionales para Recojo. Podrá recibir solicitudes cuando esté habilitado y TU VERSO confirme un agente disponible.</p>
   </section>}
   <button className="button button-primary" disabled={loading||!hasUnsavedStoreChanges} onClick={saveStore}>
