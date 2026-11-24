@@ -28,6 +28,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('')
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
  const [stores,setStores]=useState<StoreRow[]>([]),[products,setProducts]=useState<ProductRow[]>([]),[vacancies,setVacancies]=useState<VacancyRow[]>([])
+ const [storesLoaded,setStoresLoaded]=useState(false)
+ const [moduleWarnings,setModuleWarnings]=useState<string[]>([])
  const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPreparationMinutes:'',pickupPreparationMinutes:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,consultOrderAvailability:false,openingHours:{} as OpeningHours})
  const [store,setStore]=useState(emptyStore)
  const [storeBaseline,setStoreBaseline]=useState(()=>JSON.stringify(emptyStore()))
@@ -76,7 +78,40 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const act=async(fn:()=>Promise<void>)=>{setLoading(true);setError('');setMessage('');try{await fn()}catch(e){setError(e instanceof Error?e.message:'Error inesperado')}finally{setLoading(false)}}
  useEffect(()=>{if(embeddedSession){setSession(embeddedSession);setTenantId(scopedTenantId??embeddedSession.tenantId??'');return}void api<Session>('/api/admin/me').then(s=>{setSession(s);setTenantId(s.tenantId||'')}).catch(()=>{})},[embeddedSession,scopedTenantId])
  useEffect(()=>{if(!session)return;if(session.role==='SUPER_ADMIN'&&!embeddedSession)void api<{tenants:Tenant[]}>('/api/admin/tenants').then(r=>setTenants(r.tenants)).catch(e=>setError(e.message))},[session])
- const refresh=async(id=tenantId)=>{if(!id)return;const [st,pr,jobs,apps,checkout]=await Promise.all([api<{items:StoreRow[]}>(`/api/admin/tenants/${id}/stores`),api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`),api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${id}/checkout-settings`)]);setPaymentWaitMinutes(checkout.paymentWaitMinutes);setReminderCount(checkout.reminderCount);setStores(st.items);setReservationStoreId(previous=>st.items.some(s=>s.id===previous)?previous:st.items[0]?.id||'');setSelectedStoreId(previous=>st.items.some(s=>s.id===previous)?previous:'');setProducts(pr.items);setVacancies(jobs.items);const current=apps.items.find(x=>x.app_id===appId)??(appId===''&&apps.items.length===1?apps.items[0]:undefined);if(current&&appId==='')setAppId(current.app_id);setComplaintsBookUrl(current?.complaints_book_url||'')}
+ const refresh=async(id=tenantId)=>{
+  if(!id)return
+  const [st,pr,jobs,apps,checkout]=await Promise.allSettled([
+   api<{items:StoreRow[]}>(`/api/admin/tenants/${id}/stores`),
+   api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),
+   api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),
+   api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`),
+   api<{paymentWaitMinutes:number;reminderCount:number}>(`/api/admin/tenants/${id}/checkout-settings`)
+  ])
+  const warnings:string[]=[]
+  if(st.status==='fulfilled'){
+   setStores(st.value.items);setStoresLoaded(true)
+   setReservationStoreId(previous=>st.value.items.some(local=>local.id===previous)?previous:st.value.items[0]?.id||'')
+   setSelectedStoreId(previous=>st.value.items.some(local=>local.id===previous)?previous:'')
+  }else{
+   setStoresLoaded(false)
+   setError('No se pudieron cargar los locales. '+(st.reason instanceof Error?st.reason.message:'Revisa el servidor del Administrador.'))
+  }
+  if(pr.status==='fulfilled')setProducts(pr.value.items)
+  else warnings.push('Productos')
+  if(jobs.status==='fulfilled')setVacancies(jobs.value.items)
+  else warnings.push('Empleo / Vacantes (revisar migración 015)')
+  if(apps.status==='fulfilled'){
+   const current=apps.value.items.find(x=>x.app_id===appId)??(appId===''&&apps.value.items.length===1?apps.value.items[0]:undefined)
+   if(current&&appId==='')setAppId(current.app_id)
+   setComplaintsBookUrl(current?.complaints_book_url||'')
+  }else warnings.push('Aplicaciones')
+  if(checkout.status==='fulfilled'){
+   setPaymentWaitMinutes(checkout.value.paymentWaitMinutes)
+   setReminderCount(checkout.value.reminderCount)
+  }else warnings.push('Notificaciones / Seguimiento de pago (revisar migración 007)')
+  setModuleWarnings(warnings)
+ }
+
  useEffect(()=>{if(session&&tenantId)void refresh(tenantId).catch(e=>setError(e.message))},[tenantId,session])
  useEffect(()=>{
     if(activeArea!=='reservations'||!tenantId||!reservationStoreId)return
@@ -256,7 +291,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
 
   {activeArea==='overview'&&<section className="ops-workspace" aria-label="Locales de la empresa">
    <div className="ops-workspace-head"><div><p className="eyebrow">SELECCIONA UNA SEDE</p><h2>Locales de la empresa</h2><p>Las tarjetas muestran servicios habilitados por el administrador; la recepción real depende del agente disponible en TU VERSO.</p></div><button className="button button-primary" onClick={()=>{setSelectedStoreId('');setStoreFocus('details');selectStoreForEditing(emptyStore());chooseArea('stores')}}>+ Nuevo local</button></div>
-   <div className="ops-local-grid">{stores.length===0?<div className="ops-panel">Todavía no hay locales registrados.</div>:stores.map(local=><button type="button" className="ops-local-card" key={local.id} onClick={()=>enterLocal(local)}><span className="ops-card-icon"><Store size={23}/></span><span className="ops-card-status" data-enabled={local.active}>{local.active?'Activo':'Inactivo'}</span><strong>{local.name}</strong><span className="ops-card-address"><MapPin size={14}/>{local.address||'Dirección sin configurar'}</span><span className="ops-card-tags"><span data-on={local.delivery_enabled}>Delivery {local.delivery_enabled?'· Sí':'· No'}</span><span data-on={local.pickup_enabled}>Recojo {local.pickup_enabled?'· Sí':'· No'}</span><span data-on={reservationFlags[local.id]===true}>Reserva {reservationFlags[local.id]===undefined?'· Consultando':reservationFlags[local.id]===null?'· Sin datos':reservationFlags[local.id]?'· Sí':'· No'}</span></span><span className="ops-card-link">Configurar local <ArrowRight size={16}/></span></button>)}</div>
+   {moduleWarnings.length>0&&<p role="status" className="ops-global-note">Algunos módulos no pudieron cargar: {moduleWarnings.join(', ')}. Puedes consultar tus locales mientras se corrige el módulo afectado.</p>}
+   <div className="ops-local-grid">{!storesLoaded?<div className="ops-panel" role="status">No se pudo completar la carga de locales. No significa que se hayan eliminado; revisa el error del servidor.</div>:stores.length===0?<div className="ops-panel">Todavía no hay locales registrados.</div>:stores.map(local=><button type="button" className="ops-local-card" key={local.id} onClick={()=>enterLocal(local)}><span className="ops-card-icon"><Store size={23}/></span><span className="ops-card-status" data-enabled={local.active}>{local.active?'Activo':'Inactivo'}</span><strong>{local.name}</strong><span className="ops-card-address"><MapPin size={14}/>{local.address||'Dirección sin configurar'}</span><span className="ops-card-tags"><span data-on={local.delivery_enabled}>Delivery {local.delivery_enabled?'· Sí':'· No'}</span><span data-on={local.pickup_enabled}>Recojo {local.pickup_enabled?'· Sí':'· No'}</span><span data-on={reservationFlags[local.id]===true}>Reserva {reservationFlags[local.id]===undefined?'· Consultando':reservationFlags[local.id]===null?'· Sin datos':reservationFlags[local.id]?'· Sí':'· No'}</span></span><span className="ops-card-link">Configurar local <ArrowRight size={16}/></span></button>)}</div>
   </section>}
   {activeArea==='local'&&selectedStore&&<section className="ops-workspace" aria-label={'Configuración de '+selectedStore.name}>
     <div className="ops-local-head"><button type="button" className="ops-back" onClick={()=>chooseArea('overview')}><ArrowLeft size={16}/> Todos los locales</button><div className="ops-local-title"><span className="ops-card-icon"><Store size={25}/></span><div><p className="eyebrow">CONFIGURANDO LOCAL</p><h2>{selectedStore.name}</h2><p><MapPin size={14}/> {selectedStore.address||'Dirección sin configurar'}</p></div><span className="ops-card-status" data-enabled={selectedStore.active}>{selectedStore.active?'Activo':'Inactivo'}</span></div></div>
