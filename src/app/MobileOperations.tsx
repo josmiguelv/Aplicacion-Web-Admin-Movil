@@ -40,7 +40,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   setStore(next);setStoreBaseline(JSON.stringify(next));setStoreEditorOpen(true);setStoreSavedNotice(false);setError('');setMessage('')
  }
  const [product,setProduct]=useState({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false})
- const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',employmentType:'FULL_TIME',storeIds:[] as string[],imageUrl:'',whatsappPhone:'',active:false})
+ const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',employmentType:'Tiempo completo',storeIds:[] as string[],imageUrl:'',whatsappPhone:'',active:false})
  const [vacancy,setVacancy]=useState(emptyVacancy)
  const [paymentStore,setPaymentStore]=useState(''),[paymentMode,setPaymentMode]=useState('delivery')
  const [paymentSelection,setPaymentSelection]=useState<PaymentSelection>(blankPaymentSelection)
@@ -306,7 +306,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     <label>Puesto<input maxLength={150} value={vacancy.title} onChange={e=>setVacancy({...vacancy,title:e.target.value})} placeholder="Nombre del puesto"/></label>
     <label>Teléfono WhatsApp para postulaciones<input inputMode="tel" value={vacancy.whatsappPhone} onChange={e=>setVacancy({...vacancy,whatsappPhone:e.target.value})} placeholder="9XXXXXXXX"/></label>
     <label>Modalidad<select value={vacancy.employmentType} onChange={e=>setVacancy({...vacancy,employmentType:e.target.value})}>
-     <option value="FULL_TIME">Tiempo completo</option><option value="PART_TIME">Medio tiempo</option>
+     <option value="Tiempo completo">Tiempo completo</option><option value="Medio tiempo">Medio tiempo</option>
     </select></label>
    </div>
    <fieldset className="ops-vacancy-stores"><legend>Sedes donde aplica la vacante</legend>
@@ -336,7 +336,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    {savedNext('vacancies')}
    <div className="ops-list">{vacancies.map(job=><button key={job.id} className="ops-row"
     onClick={()=>setVacancy({id:job.id,title:job.title,summary:job.summary,description:job.description,
-     requirements:job.requirements,employmentType:job.employment_type==='PART_TIME'?'PART_TIME':'FULL_TIME',
+     requirements:job.requirements,employmentType:job.employment_type==='Medio tiempo'?'Medio tiempo':'Tiempo completo',
      storeIds:job.store_ids||[],imageUrl:job.image_url||'',whatsappPhone:job.whatsapp_phone,active:job.active})}>
     <strong>{job.title}</strong>
     <span className={job.active?'ops-state ops-state--yes':'ops-state ops-state--no'}>{job.active?'Activa':'Desactivada'}</span>
