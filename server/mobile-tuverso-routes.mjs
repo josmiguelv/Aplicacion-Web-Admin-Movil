@@ -14,6 +14,12 @@ const plainObject=value=>value&&typeof value==='object'&&!Array.isArray(value)
 const safeError=error=>Number.isInteger(error?.code)&&error.code>=400&&error.code<=599?error.code:503
 // Only upstream TU VERSO can confirm a scope failure. Never rely on cached scopes.
 const remoteAuthStatus=remote=>[401,403].includes(remote?.httpStatus)?remote.httpStatus:503
+// Technical PENDING may coexist with commercial acceptance already handled in Android.
+// Only reject terminal or closed conversations; never infer approval from agent text.
+function receiptCommunicationAllowed(interaction){
+ return ['PENDING','ACCEPTED'].includes(interaction?.status)&&
+  !['CLOSED','RESOLVED'].includes(interaction?.operationalConversationStatus)
+}
 const counter=new Map()
 const CANCEL_NOTICE='[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
 const CANCEL_PURCHASE_NOTICE='[Pollos B3 · Sistema] El cliente canceló su compra antes del pago. Esta solicitud queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
@@ -306,7 +312,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Comprobante no autorizado')
-    if(remote.data.status!=='ACCEPTED')throw fail(409,'El pedido no está aceptado para recibir el comprobante')
+    if(!receiptCommunicationAllowed(remote.data))throw fail(409,'La interacción no permite recibir comprobantes')
     if(typeof imageBody!=='function'||typeof imageMime!=='function')throw fail(503,'Carga de comprobantes no disponible')
     const bytes=await imageBody(req)
     const mime=imageMime(bytes)
@@ -412,7 +418,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        remote.data?.purpose!=='ORDER_REQUEST')
       throw fail(403,'Interacción no autorizada para esta aplicación y sede')
     if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED'||
-       (receiptMatch&&remote.data.status!=='ACCEPTED'))
+       (receiptMatch&&!receiptCommunicationAllowed(remote.data)))
       throw fail(409,'La solicitud ya no permite enviar mensajes')
     const delivered=await sendMessage(integration.token,interactionId,
      type==='FORM'?{
