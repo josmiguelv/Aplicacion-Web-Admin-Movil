@@ -413,7 +413,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    if(!images||typeof images!=='object'||Array.isArray(images)||
       Object.keys(images).some(key=>!['yape','plin','card'].includes(key))||
       Object.values(images).some(value=>value!==null&&
-       (typeof value!=='string'||!/^\\/api\\/v1\\/mobile\\/images\\/[0-9a-f-]{36}$/i.test(value))))
+       (typeof value!=='string'||!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/i.test(value))))
     throw bad(400,'Imagen de medio de pago inválida');
    const urls=keys.map(key=>key==='cash'?null:images[key]??null);
    const owned=urls.filter(Boolean).map(value=>value.split('/').pop());
