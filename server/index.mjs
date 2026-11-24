@@ -471,7 +471,14 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
-  const found=await sql(`SELECT i.mime,i.content FROM product_images i WHERE i.id=$1 AND EXISTS(SELECT 1 FROM published_catalogs c JOIN mobile_apps a ON a.app_id=c.app_id JOIN tenants t ON t.id=c.tenant_id WHERE c.tenant_id=i.tenant_id AND a.enabled=true AND t.active=true AND c.payload::text LIKE '%'||$2||'%') LIMIT 1`,[img[1],img[1]]);
+  const found=await sql(`SELECT i.mime,i.content FROM product_images i WHERE i.id=$1 AND EXISTS(SELECT 1 FROM published_catalogs c JOIN mobile_apps a ON a.app_id=c.app_id JOIN tenants t ON t.id=c.tenant_id WHERE c.tenant_id=i.tenant_id AND a.enabled=true AND t.active=true AND c.payload::text LIKE '%'||$2||'%')
+  OR EXISTS(SELECT 1 FROM company_mobile_notifications n
+   JOIN mobile_apps a ON a.tenant_id=n.tenant_id
+   JOIN tenants t ON t.id=n.tenant_id
+   WHERE n.tenant_id=i.tenant_id AND t.active=true AND a.enabled=true
+    AND n.status='PUBLISHED' AND n.scheduled_at<=now() AND n.expires_at>now()
+    AND n.image_url='/api/v1/mobile/images/'||i.id::text)
+  LIMIT 1`,[img[1],img[1]]);
   if(!found.rowCount)throw bad(404,'Imagen no publicada');res.writeHead(200,{'Content-Type':found.rows[0].mime,'Cache-Control':'public,max-age=300','Access-Control-Allow-Origin':'*','X-Content-Type-Options':'nosniff'});return res.end(found.rows[0].content)
  }
  if(url.pathname==='/api/v1/mobile/fulfillment/resolve'&&req.method==='POST')return await quote(req,res)
