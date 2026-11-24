@@ -198,9 +198,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      <label>Tarifa por km (S/)<input type="number" min="0" step="0.01" value={store.deliveryRatePerKmPen}
       onChange={e=>setStore({...store,deliveryRatePerKmPen:e.target.value})}/></label>}
    </div>
-   <label className="ops-check"><input type="checkbox" checked={store.consultOrderAvailability}
-    onChange={e=>setStore({...store,consultOrderAvailability:e.target.checked})}/>
-    Consultar disponibilidad del pedido con TU VERSO para esta sede</label>
    <p className="ops-hint">No hay horarios adicionales de Delivery. Podrá recibir solicitudes cuando esta opción esté habilitada y TU VERSO confirme un agente disponible, incluso fuera del horario físico.</p>
   </section>}
   {storeFocus==='pickup'&&<section id="ops-store-pickup">
