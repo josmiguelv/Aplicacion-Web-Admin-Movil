@@ -96,7 +96,7 @@ export function createMobileSurveyRoute({pool,body,json,readInteraction=readMobi
 const ISO_DAY=/^\d{4}-\d{2}-\d{2}$/
 const day=v=>typeof v==='string'&&ISO_DAY.test(v)&&!Number.isNaN(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v
 export function parseSurveyFilters(p){
- const permitted=new Set(['storeId','from','to','rating','appId','limit','offset'])
+ const permitted=new Set(['tenantId','storeId','from','to','rating','appId','limit','offset'])
  if([...p.keys()].some(k=>!permitted.has(k)||p.getAll(k).length!==1))throw fail(400,'Filtros inválidos')
  const storeId=p.get('storeId'),from=p.get('from'),to=p.get('to'),rating=p.get('rating'),appId=p.get('appId')
  const l=p.get('limit')??'20',o=p.get('offset')??'0'
@@ -108,19 +108,19 @@ export function parseSurveyFilters(p){
 }
 export async function adminSurveyList({pool,user,params}){
  const f=parseSurveyFilters(params)
- const where=['tenant_id=$1'],args=[user.tenant_id]
- // SUPER_ADMIN must supply an explicit tenantId through a separate authorized request.
- if(!user.tenant_id)throw fail(403,'Selecciona una empresa para consultar sus encuestas')
- if(f.storeId){args.push(f.storeId);where.push('store_id=$'+args.length)}
- if(f.appId){args.push(f.appId);where.push('app_id=$'+args.length)}
- if(f.rating){args.push(f.rating);where.push('rating=$'+args.length)}
- if(f.from){args.push(f.from);where.push('created_at >= $'+args.length+'::date')}
- if(f.to){args.push(f.to);where.push('created_at < ($'+args.length+'::date + interval \\'1 day\\')')}
+ const requested=params.get('tenantId')
+ const tenantId=user.role==='SUPER_ADMIN'?requested:user.tenant_id
+ if(!UUID.test(tenantId||'')||(user.role!=='SUPER_ADMIN'&&requested!==null&&requested!==tenantId))
+  throw fail(403,'Empresa no autorizada')
+ const where=['s.tenant_id=$1'],args=[tenantId]
+ if(f.storeId){args.push(f.storeId);where.push('s.store_id=$'+args.length)}
+ if(f.appId){args.push(f.appId);where.push('s.app_id=$'+args.length)}
+ if(f.rating){args.push(f.rating);where.push('s.rating=$'+args.length)}
+ if(f.from){args.push(f.from);where.push('s.created_at >= $'+args.length+'::date')}
+ if(f.to){args.push(f.to);where.push("s.created_at < ($"+args.length+"::date + interval '1 day')")}
  const predicate=where.join(' AND ')
- const count=await pool.query('SELECT count(*)::int AS total FROM mobile_order_surveys WHERE '+predicate,args)
- const records=await pool.query(`SELECT id,app_id,store_id,interaction_id,rating,tags,comment,created_at
-  FROM mobile_order_surveys WHERE \${predicate} ORDER BY created_at DESC,id DESC
-  LIMIT $\${args.length+1} OFFSET $\${args.length+2}`,[...args,f.limit,f.offset])
+ const count=await pool.query('SELECT count(*)::int AS total FROM mobile_order_surveys s JOIN tenants t ON t.id=s.tenant_id AND t.active=true WHERE '+predicate,args)
+ const records=await pool.query('SELECT s.id,s.app_id,s.store_id,s.interaction_id,s.rating,s.tags,s.comment,s.created_at FROM mobile_order_surveys s JOIN tenants t ON t.id=s.tenant_id AND t.active=true WHERE '+predicate+' ORDER BY s.created_at DESC,s.id DESC LIMIT $'+(args.length+1)+' OFFSET $'+(args.length+2),[...args,f.limit,f.offset])
  return {items:records.rows.map(x=>({surveyId:x.id,appId:x.app_id,storeId:x.store_id,interactionId:x.interaction_id,
   rating:x.rating,tags:x.tags,comment:x.comment,createdAt:new Date(x.created_at).toISOString()})),
   total:count.rows[0].total,limit:f.limit,offset:f.offset}
