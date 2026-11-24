@@ -47,7 +47,6 @@ async function tenantOf(auth,id){if(!uuid(id))throw bad(400,'Empresa inválida')
 function checkLatLng(lat,lng){return safeNumber(lat)&&safeNumber(lng)&&lat>=-90&&lat<=90&&lng>=-180&&lng<=180}
 
 const DEFAULT_TENANT_TZ='America/Lima';
-function validTimeZone(value){if(typeof value!=='string'||value.length>100)return false;try{new Intl.DateTimeFormat('en-US',{timeZone:value});return true}catch{return false}}
 const WEEKDAYS=['sun','mon','tue','wed','thu','fri','sat'];
 function validateOpeningHours(value){
  if(value===null)return true;
@@ -60,7 +59,7 @@ function validateOpeningHours(value){
 function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
  const hours=store.openingHours??store.opening_hours;
  if(!hours||typeof hours!=='object')return {hoursConfigured:false};
- const zone=validTimeZone(timeZone)?timeZone:DEFAULT_TENANT_TZ;
+ const zone=DEFAULT_TENANT_TZ;
  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).map(p=>[p.type,p.value]));
  const day=parts.weekday.toLowerCase(),cfg=hours[day],minutes=Number(parts.hour)*60+Number(parts.minute);
  const index=WEEKDAYS.indexOf(day);
@@ -74,7 +73,7 @@ function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
 }
 function withLiveHours(store,timeZone,at=new Date()){return {...store,...storeHours(store,at,timeZone)}}
 
-async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,tenantSettings]=await Promise.all([
+async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings]=await Promise.all([
  tx.query('SELECT s.id,s.name,s.address,s.latitude,s.longitude,s.radius_km,s.delivery_fee_pen,s.delivery_rate_per_km_pen,s.delivery_pricing_mode,s.delivery_preparation_minutes,s.pickup_preparation_minutes,s.active,s.delivery_enabled,s.pickup_enabled,s.dine_in_enabled,s.opening_hours,s.consult_order_availability, r.enabled AS reservation_enabled, r.preparation_minutes AS reservation_preparation_minutes FROM stores s LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id WHERE s.tenant_id=$1 AND s.active=true ORDER BY s.name',[tenantId]),
  tx.query('SELECT id,name,description,category,price_pen,image_url FROM products WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query(`SELECT id,title,starts_at,ends_at,
@@ -98,12 +97,11 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
     ON st.id=vs.store_id AND st.tenant_id=vs.tenant_id
     WHERE vs.tenant_id=j.tenant_id AND vs.vacancy_id=j.id AND st.active=true)
    ORDER BY j.updated_at DESC,j.id`,[tenantId]),
- tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]),
- tx.query('SELECT time_zone FROM tenants WHERE id=$1 AND active=true',[tenantId])
- ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId])
+ ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
-async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,q.rows[0].payload.timeZone||DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
- ...withLiveHours(s,q.rows[0].payload.timeZone),
+async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[]},true);return json(res,200,{ready:true,revision:q.rows[0].revision,...q.rows[0].payload,timeZone:DEFAULT_TENANT_TZ,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
+ ...withLiveHours(s,DEFAULT_TENANT_TZ),
  reservationSettings:{...(s.reservationSettings||{}),
   acceptingRequests:process.env.B3_RESERVATIONS_LIVE_ENABLED==='true'&&s.reservationSettings?.enabled===true}
 }))},true)}
@@ -268,16 +266,12 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
  if(url.pathname==='/api/admin/logout'&&req.method==='POST'){await sql('DELETE FROM admin_sessions WHERE token_hash=$1',[digest(cookie(req))]);res.setHeader('Set-Cookie',`b3sid=; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`);return json(res,200,{ok:true})}
  if(url.pathname==='/api/admin/tenants'&&req.method==='GET'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const x=await sql('SELECT id,name,active FROM tenants ORDER BY created_at');return json(res,200,{tenants:x.rows})}
- if(url.pathname==='/api/admin/tenants'&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const b=await body(req),timeZone=b.timeZone??DEFAULT_TENANT_TZ;if(!word(b.name,180)||!validTimeZone(timeZone))throw bad(400,'Nombre de empresa o zona horaria inválidos');const x=await sql('INSERT INTO tenants(name,time_zone) VALUES($1,$2) RETURNING id,name,active,time_zone AS "timeZone"',[b.name.trim(),timeZone]);await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[x.rows[0].id,user.id,'TENANT_CREATED',x.rows[0].id]);return json(res,201,x.rows[0])}
+ if(url.pathname==='/api/admin/tenants'&&req.method==='POST'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const b=await body(req);if(!word(b.name,180))throw bad(400,'Nombre de empresa inválido');const x=await sql('INSERT INTO tenants(name,time_zone) VALUES($1,$2) RETURNING id,name,active',[b.name.trim(),DEFAULT_TENANT_TZ]);await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[x.rows[0].id,user.id,'TENANT_CREATED',x.rows[0].id]);return json(res,201,x.rows[0])}
  const tenantSettingsMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/settings$/);
- if(tenantSettingsMatch&&['GET','PUT'].includes(req.method)){
-  const tenantId=tenantSettingsMatch[1];await tenantOf(user,tenantId);const b=await body(req);
-  if(req.method==='GET'){const current=await sql('SELECT id,time_zone AS "timeZone" FROM tenants WHERE id=$1 AND active=true',[tenantId]);if(!current.rowCount)throw bad(404,'Empresa no disponible');return json(res,200,current.rows[0])}
-  if(Object.keys(b).some(key=>key!=='timeZone')||!validTimeZone(b.timeZone))throw bad(400,'Indica una zona horaria IANA válida');
-  const x=await sql('UPDATE tenants SET time_zone=$2 WHERE id=$1 AND active=true RETURNING id,time_zone AS "timeZone"',[tenantId,b.timeZone]);
-  if(!x.rowCount)throw bad(404,'Empresa no disponible');
-  await sql('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,'TIME_ZONE_UPDATED',tenantId]);
-  return json(res,200,x.rows[0]);
+ if(tenantSettingsMatch){
+  const tenantId=tenantSettingsMatch[1];await tenantOf(user,tenantId);
+  if(req.method!=='GET')throw bad(405,'La zona horaria está fijada internamente en UTC−5');
+  return json(res,200,{id:tenantId,timeZone:DEFAULT_TENANT_TZ});
  }
  const userMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/users$/);
  if(userMatch&&req.method==='GET'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const id=userMatch[1];await tenantOf(user,id);const result=await sql('SELECT id,email,role,active,created_at FROM admin_users WHERE tenant_id=$1 ORDER BY created_at DESC,id',[id]);return json(res,200,{items:result.rows})}
