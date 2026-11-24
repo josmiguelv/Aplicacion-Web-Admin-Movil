@@ -345,3 +345,25 @@ if ($LASTEXITCODE -ne 0) { throw "La migración 020 falló" }
 En **Productos**, el catálogo muestra tarjetas con fotografía si existe, categoría, nombre, precio, estado visible **Activo/Inactivo** y botón Editar. No se abre formulario hasta pulsar Editar o Nuevo producto. El editor mantiene nombre, precio, categoría, descripción, imagen y activación. Esta vista no requiere migración.
 
 Actualizar con `git fetch` y `git merge --ff-only FETCH_HEAD`, ejecutar `pnpm build`; levantar `pnpm start` y `pnpm dev`. No GitHub Actions ni operaciones, respaldos o pruebas automáticas de BD. No modificar Android ni TU VERSO.
+
+
+## Pago: una sola imagen de Yape, Plin e Izipay para toda la empresa (migración 021)
+
+Se implementó el diseño aprobado: una única imagen por `tenant_id+method` para Yape, Plin y Tarjeta (rótulo **Izipay**). Efectivo no tiene imagen. El Administrador permite seleccionar/cambiar/quitar estas tres imágenes en un bloque común a la empresa; al seleccionar una sede, debajo aparecen las tres modalidades con los cuatro interruptores de habilitación **independientes por sede**. Se mantiene un único tiempo de espera de pago a nivel empresa.
+
+Para compatibilidad con la app actual, el identificador técnico de Izipay sigue siendo `card`: el cambio de nombre es visual; **no implica integrar una pasarela Izipay, confirmar un pago ni modificar la aplicación móvil**.
+
+La tabla nueva `company_payment_images` guarda exclusivamente las imágenes generales. Los antiguos valores de `payment_methods.image_url` **no se eliminan ni migran automáticamente** porque podrían ser diferentes por sede/modalidad. Una vez cargada la imagen general y publicado, el catálogo expone `paymentImages` global y `paymentMethodImages` derivadas de los métodos habilitados por sede, todos enlazando a la misma imagen general. Esto evita producir imágenes diferentes por modalidad. El módulo de publicación necesita 021 aplicada.
+
+**Migración 021: solo en la base del Administrador** (`integra-admin-postgres`), después de la 020 si ésta aún no se ha aplicado:
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\021-company-shared-payment-images.sql" |
+ docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "Falló la migración 021" }
+```
+
+La migración crea la tabla si no existe; no sobrescribe ni modifica las selecciones anteriores de pago. Tras actualizar Git, compilar con `pnpm build`, reiniciar backend `pnpm start` y frontend `pnpm dev`, y verificar manualmente desde el navegador la vista de una sede. No usar GitHub Actions, ni realizar backups ni pruebas o consultas sobre BD en esta sesión. No modificar TU VERSO ni Android.
