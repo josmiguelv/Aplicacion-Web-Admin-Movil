@@ -263,3 +263,36 @@ Solo hay que ejecutar la 017 una vez. Las notificaciones existentes se conservan
 El envío push permanece desactivado por defecto (`B3_MARKETING_PUSH_ENABLED`), sin tocar Android ni TU VERSO. El formulario permite configurar y editar, pero el envío físico requiere Firebase configurado y autorización del cliente para recibir avisos. No afirmar entrega a dispositivo por aceptación de FCM.
 
 **Sin GitHub Actions, pruebas de BD ni respaldos.** Compilar localmente con `pnpm build` y reiniciar backend y frontend. La compilación local no se ha ejecutado por esta sesión.
+
+
+## Notificaciones personales de pago por pedido — migración 018
+
+En «Notificaciones para el cliente» se conserva el bloque de avisos comerciales y se amplía el bloque separado «Recordatorios personales de pago». A nivel empresa ofrece:
+- Habilitar o deshabilitar los recordatorios automáticos (por defecto desactivados, no dispara envíos durante desarrollo).
+- Tiempo de pago 5–30 minutos y 0–2 recordatorios, relativos al inicio real del pago **por pedido y en cualquier horario**.
+- Edición y vista previa del **título** (1–120 caracteres) y **mensaje** (1–500 caracteres) que se envían al token Firebase exclusivo del dispositivo autorizado para la interacción.
+- Guardado inmediato por empresa con la API existente `/api/admin/tenants/{tenantId}/checkout-settings`.
+
+El worker de pagos consulta el estado de cada interacción, obtiene su configuración empresarial, verifica el plazo individual y envía exclusivamente a `message.token`, nunca a `message.topic`. Bloquea el registro del pedido durante el envío para evitar que dos procesos envíen simultáneamente el mismo recordatorio. Cancela notificaciones pendientes cuando el estado deja de ser `PAYMENT_PENDING` (por cancelación/vencimiento); el cierre por **pago confirmado** sigue pendiente de un evento de pago efectivamente verificado, y no debe inferirse de la selección de Yape/Plin/tarjeta. No activar mensajes a clientes reales antes de cerrar ese contrato.
+
+**Migración 018 necesaria solo en la base de datos local del Administrador**, después de actualizar el código. Las migraciones 007 y anteriores ya son preexistentes; no ejecutarlas nuevamente.
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+git status
+git fetch https://github.com/josmiguelv/Aplicacion-Web-Admin-Movil.git refs/heads/feat/b3-admin-reservation-transactional-20261123
+git merge --ff-only FETCH_HEAD
+
+$pgUser = (docker exec integra-admin-postgres printenv POSTGRES_USER).Trim()
+$pgDb = (docker exec integra-admin-postgres printenv POSTGRES_DB).Trim()
+Get-Content -Raw "server\migrations\018-company-personal-payment-reminders.sql" |
+  docker exec -i integra-admin-postgres psql -X -v ON_ERROR_STOP=1 -U $pgUser -d $pgDb
+if ($LASTEXITCODE -ne 0) { throw "La migración 018 falló" }
+
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+Después reiniciar `pnpm start` y `pnpm dev` en terminales separadas. La habilitación efectiva del trabajador requiere `B3_CHECKOUT_WORKER_ENABLED=true` y `B3_FCM_SERVICE_ACCOUNT_JSON` en el backend; **no habilitar todavía para clientes reales** sin cerrar la confirmación del pago y verificar permisos de notificaciones y token en Android. Las credenciales Firebase nunca deben ir en frontend ni Git.
+
+No GitHub Actions, pruebas ni respaldos de BD, cambios de TU VERSO o cambios de Android.
