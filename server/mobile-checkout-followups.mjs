@@ -10,33 +10,40 @@ let oauth=null
 
 export const DEFAULT_REMINDER_TITLE='Tu compra está pendiente';
 export const DEFAULT_REMINDER_MESSAGE='Continúa con el pago o cancela tu solicitud de Pollos B3.';
+export const DEFAULT_REMINDER2_TITLE='⏰ Tu pedido sigue pendiente';
+export const DEFAULT_REMINDER2_MESSAGE='Aún tienes un pago pendiente en Pollos B3. Entra a la app y completa tu pedido antes de que termine el plazo.';
 export async function checkoutPolicy(pool,tenantId) {
- const r=await pool.query(`SELECT payment_wait_minutes,reminder_count,reminders_enabled,reminder_title,reminder_message
+ const r=await pool.query(`SELECT payment_wait_minutes,reminder_count,reminders_enabled,reminder_title,reminder_message,reminder2_title,reminder2_message
   FROM mobile_checkout_policies WHERE tenant_id=$1`,[tenantId]);
  const row=r.rows[0];
  return {paymentWaitMinutes:row?.payment_wait_minutes??10,
   reminderCount:row?.reminder_count??2,remindersEnabled:row?.reminders_enabled===true,
   reminderTitle:row?.reminder_title??DEFAULT_REMINDER_TITLE,
-  reminderMessage:row?.reminder_message??DEFAULT_REMINDER_MESSAGE};
+  reminderMessage:row?.reminder_message??DEFAULT_REMINDER_MESSAGE,
+  reminder2Title:row?.reminder2_title??DEFAULT_REMINDER2_TITLE,
+  reminder2Message:row?.reminder2_message??DEFAULT_REMINDER2_MESSAGE};
 }
 export async function updateCheckoutPolicy(pool,tenantId,input) {
- const {paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage}=input||{};
+ const {paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage,reminder2Title,reminder2Message}=input||{};
  if(!Number.isInteger(paymentWaitMinutes)||paymentWaitMinutes<5||paymentWaitMinutes>30||
    !Number.isInteger(reminderCount)||reminderCount<0||reminderCount>2||
    typeof remindersEnabled!=='boolean'||
    typeof reminderTitle!=='string'||reminderTitle.trim().length<1||reminderTitle.trim().length>120||
-   typeof reminderMessage!=='string'||reminderMessage.trim().length<1||reminderMessage.trim().length>500)
-  throw FAIL(400,'Revisa el plazo (5–30), avisos (0–2), habilitación y el título/mensaje');
+   typeof reminderMessage!=='string'||reminderMessage.trim().length<1||reminderMessage.trim().length>500||
+   typeof reminder2Title!=='string'||reminder2Title.trim().length<1||reminder2Title.trim().length>120||
+   typeof reminder2Message!=='string'||reminder2Message.trim().length<1||reminder2Message.trim().length>500)
+  throw FAIL(400,'Revisa plazo (5–30), avisos (0–2) y los títulos/mensajes de ambos recordatorios');
  await pool.query(`INSERT INTO mobile_checkout_policies
-  (tenant_id,payment_wait_minutes,reminder_count,reminders_enabled,reminder_title,reminder_message)
-  VALUES($1,$2,$3,$4,$5,$6)
+  (tenant_id,payment_wait_minutes,reminder_count,reminders_enabled,reminder_title,reminder_message,reminder2_title,reminder2_message)
+  VALUES($1,$2,$3,$4,$5,$6,$7,$8)
   ON CONFLICT(tenant_id) DO UPDATE SET
    payment_wait_minutes=excluded.payment_wait_minutes,
    reminder_count=excluded.reminder_count,
    reminders_enabled=excluded.reminders_enabled,
    reminder_title=excluded.reminder_title,reminder_message=excluded.reminder_message,
+   reminder2_title=excluded.reminder2_title,reminder2_message=excluded.reminder2_message,
    updated_at=now()`,[tenantId,paymentWaitMinutes,reminderCount,remindersEnabled,
-   reminderTitle.trim(),reminderMessage.trim()]);
+   reminderTitle.trim(),reminderMessage.trim(),reminder2Title.trim(),reminder2Message.trim()]);
  return checkoutPolicy(pool,tenantId);
 }
 const keyHash=key=>hash('b3-checkout:'+key)
@@ -142,7 +149,9 @@ export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,r
   COALESCE(p.reminder_count,2) AS reminder_count,
   COALESCE(p.reminders_enabled,false) AS reminders_enabled,
   COALESCE(p.reminder_title,$1) AS reminder_title,
-  COALESCE(p.reminder_message,$2) AS reminder_message
+  COALESCE(p.reminder_message,$2) AS reminder_message,
+  COALESCE(p.reminder2_title,$3) AS reminder2_title,
+  COALESCE(p.reminder2_message,$4) AS reminder2_message
  FROM mobile_checkout_followups f LEFT JOIN mobile_checkout_policies p ON p.tenant_id=f.tenant_id
  WHERE f.state='PAYMENT_PENDING' AND f.checkout_expires_at IS NOT NULL
   AND (f.checkout_expires_at<=now() OR
@@ -152,7 +161,7 @@ export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,r
        (f.checkout_expires_at-f.checkout_started_at)*
        ((f.reminder_sent_count+1.0)/(COALESCE(p.reminder_count,2)+1))))
  ORDER BY f.checkout_expires_at LIMIT ${MAX_BATCH}`,
- [DEFAULT_REMINDER_TITLE,DEFAULT_REMINDER_MESSAGE]);
+ [DEFAULT_REMINDER_TITLE,DEFAULT_REMINDER_MESSAGE,DEFAULT_REMINDER2_TITLE,DEFAULT_REMINDER2_MESSAGE]);
  for(const row of due.rows){
   try{
    const expired=new Date(row.checkout_expires_at)<=new Date()
@@ -171,11 +180,14 @@ export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,r
       COALESCE(p.reminders_enabled,false) AS enabled,
       COALESCE(p.reminder_count,2) AS reminder_count,
       COALESCE(p.reminder_title,$2) AS title,
-      COALESCE(p.reminder_message,$3) AS message
+      COALESCE(p.reminder_message,$3) AS message,
+      COALESCE(p.reminder2_title,$4) AS second_title,
+      COALESCE(p.reminder2_message,$5) AS second_message
      FROM mobile_checkout_followups f
      LEFT JOIN mobile_checkout_policies p ON p.tenant_id=f.tenant_id
      WHERE f.interaction_id=$1 FOR UPDATE OF f SKIP LOCKED`,
-     [row.interaction_id,DEFAULT_REMINDER_TITLE,DEFAULT_REMINDER_MESSAGE]);
+     [row.interaction_id,DEFAULT_REMINDER_TITLE,DEFAULT_REMINDER_MESSAGE,
+      DEFAULT_REMINDER2_TITLE,DEFAULT_REMINDER2_MESSAGE]);
     if(!current.rowCount){await client.query('COMMIT');continue}
     const entry=current.rows[0],count=Number(entry.reminder_count),
      sent=Number(entry.reminder_sent_count);
@@ -188,7 +200,8 @@ export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,r
     const threshold=start+(end-start)*(sent+1)/(count+1);
     if(now<threshold||now>=end){await client.query('COMMIT');continue}
     const success=await sendPush(entry.fcm_token,'order_reminder',row.interaction_id,
-     entry.title,entry.message);
+     sent===0?entry.title:entry.second_title,
+     sent===0?entry.message:entry.second_message);
     if(success)await client.query(`UPDATE mobile_checkout_followups
       SET reminder_sent_count=reminder_sent_count+1,updated_at=now()
       WHERE interaction_id=$1 AND state='PAYMENT_PENDING'
