@@ -482,7 +482,19 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   if(!valid)throw bad(400,'La dirección del Libro debe ser HTTPS público, sin credenciales');
   result=await client.query('UPDATE mobile_apps SET complaints_book_url=$3 WHERE tenant_id=$1 AND app_id=$2 RETURNING *',[tenantId,b.appId,b.url||null]);
  }else if(resource==='publish'){
-  if(!word(b.appId,150))throw bad(400,'Aplicación inválida');const published=await publish(client,tenantId,b.appId);result={rows:[{revision:published.revision}]};
+  if(!word(b.appId,150))throw bad(400,'Aplicación inválida');
+  let published;
+  try{published=await publish(client,tenantId,b.appId)}
+  catch(err){
+   // A schema mismatch should be actionable, never bypassed with an empty
+   // catalog or a partial publication. The outer transaction rolls back.
+   if(err?.code==='42P01'&&String(err?.message||'').includes('company_payment_images'))
+    throw bad(409,'Falta la migración 021 de imágenes generales de pagos en la base de datos del Administrador. Aplícala y vuelve a publicar.');
+   if(err?.code==='42703'&&String(err?.message||'').includes('image_url'))
+    throw bad(409,'Falta la migración 020 de imágenes de medios de pago en la base de datos del Administrador. Aplícala y vuelve a publicar.');
+   throw err;
+  }
+  result={rows:[{revision:published.revision}]};
  }else throw bad(404,'Ruta no encontrada');
  if(!result.rowCount&&resource!=='publish')throw bad(404,'Registro no encontrado');await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,resource.toUpperCase()+'_WRITE',result.rows[0]?.id||b.appId||null]);await client.query('COMMIT');return json(res,200,result.rows[0]);
  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
