@@ -102,8 +102,9 @@ function orderForm(cart,store,customer){
 // A client-authored FORM is informational only: it never supplies authoritative prices,
 // store availability, fulfillment status or an approval decision.
 function validClientForm(value){
- if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','fields'].includes(key))||
+ if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','imageUrl','fields'].includes(key))||
     !validText(value.title,180)||
+    value.imageUrl!==undefined&&(typeof value.imageUrl!=='string'||value.imageUrl.length>1500||!/^https:\/\/[^\\s<>"']+$/i.test(value.imageUrl))||
     value.subtitle!==undefined&&(typeof value.subtitle!=='string'||value.subtitle.length>350||
      /[\x00-\x1f\x7f]/.test(value.subtitle))||
     !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>5)return false
@@ -320,6 +321,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      form={
       title:input.form.title.trim(),
       ...(input.form.subtitle!==undefined?{subtitle:input.form.subtitle.trim()}:{}),
+      ...(input.form.imageUrl!==undefined?{imageUrl:input.form.imageUrl}:{}),
       fields:input.form.fields.map(row=>({variable:row.variable.trim(),value:row.value.trim()})),
      }
     }else{
