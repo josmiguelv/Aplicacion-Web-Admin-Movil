@@ -189,7 +189,7 @@ async function isOrderCandidateLive(tenantId,candidate){
  return hours.hoursConfigured===true&&hours.isOpen===true
 }
 const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
-const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:(store,zone)=>{const hours=storeHours(store,new Date(),zone||DEFAULT_TENANT_TZ);return hours.hoursConfigured===true&&hours.isOpen===true}});
+const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,imageBody,imageMime,json:(res,status,value)=>json(res,status,value,true),storeOpen:(store,zone)=>{const hours=storeHours(store,new Date(),zone||DEFAULT_TENANT_TZ);return hours.hoursConfigured===true&&hours.isOpen===true}});
 async function quote(req,res){
  const b=await body(req);
  if(!word(b.appId,150)||!mode(b.mode))throw bad(400,'Modalidad y aplicación obligatorias');
@@ -361,6 +361,17 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
  if(await mobileTuVersoRoutes({req,res,url}))return
  if(await mobileOrderAvailabilityRoutes({req,res,url}))return
+ const receiptImage=url.pathname.match(/^\/api\/v1\/mobile\/payment-receipts\/([0-9a-f-]{36})$/i)
+ if(receiptImage&&req.method==='GET'){
+  // This is an unlisted capability URL shared only with TU VERSO and the
+  // requesting customer; never published in the general mobile catalog.
+  const found=await sql('SELECT mime,content FROM product_images WHERE id=$1 LIMIT 1',[receiptImage[1]])
+  if(!found.rowCount)throw bad(404,'Comprobante no disponible')
+  res.writeHead(200,{'Content-Type':found.rows[0].mime,
+   'Cache-Control':'private,no-store','X-Content-Type-Options':'nosniff',
+   'Content-Security-Policy':"default-src 'none'"})
+  return res.end(found.rows[0].content)
+ }
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
