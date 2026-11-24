@@ -85,7 +85,15 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
   active_weekdays AS weekdays
  FROM promotions WHERE tenant_id=$1 AND active=true ORDER BY id`,[tenantId]),
  tx.query('SELECT store_id,mode,method FROM payment_methods WHERE tenant_id=$1 AND enabled=true',[tenantId]),
- tx.query('SELECT id,title,summary,description,requirements,schedule,employment_type AS "employmentType",location_label AS "locationLabel",image_url AS "imageUrl",whatsapp_phone AS "whatsappPhone" FROM job_vacancies WHERE tenant_id=$1 AND active=true ORDER BY updated_at DESC,id',[tenantId]),
+ tx.query(`SELECT j.id,j.title,j.summary,j.description,j.requirements,
+   j.employment_type AS "employmentType",j.image_url AS "imageUrl",j.whatsapp_phone AS "whatsappPhone",
+   COALESCE((SELECT array_agg(vs.store_id ORDER BY st.name)
+     FROM job_vacancy_stores vs JOIN stores st ON st.id=vs.store_id AND st.tenant_id=vs.tenant_id
+     WHERE vs.vacancy_id=j.id AND vs.tenant_id=j.tenant_id AND st.active=true),ARRAY[]::uuid[]) AS "storeIds",
+   COALESCE((SELECT string_agg(st.name, ', ' ORDER BY st.name)
+     FROM job_vacancy_stores vs JOIN stores st ON st.id=vs.store_id AND st.tenant_id=vs.tenant_id
+     WHERE vs.vacancy_id=j.id AND vs.tenant_id=j.tenant_id AND st.active=true),'') AS "locationLabel"
+  FROM job_vacancies j WHERE j.tenant_id=$1 AND j.active=true ORDER BY j.updated_at DESC,j.id`,[tenantId]),
  tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]),
  tx.query('SELECT time_zone FROM tenants WHERE id=$1 AND active=true',[tenantId])
  ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:tenantSettings.rows[0]?.time_zone||DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
@@ -300,21 +308,43 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  }else if(resource==='vacancies'){
   const title=b.title?.trim(),phone=String(b.whatsappPhone||'').replace(/\D/g,'');
   const normalized=phone.length===9?'51'+phone:phone;
-  const validText=(v,max)=>v==null||typeof v==='string'&&v.length<=max;
-  const image=String(b.imageUrl||'');
-  if(!word(title,150)||!/^519\d{8}$/.test(normalized)||
-   !['summary','description','requirements','schedule','employmentType','locationLabel'].every(k=>validText(b[k],k==='description'||k==='requirements'?5000:500))||
-   !bool(b.active)||image.length>1024||
-   image!==''&&!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/.test(image))
-   throw bad(400,'Datos de la vacante inválidos');
-  if(image){
-   const imageId=image.split('/').pop();
+  const storeIds=b.storeIds;
+  if(!word(title,150)||!/^519\d{8}$/.test(normalized)||!bool(b.active)||
+     typeof b.summary!=='string'||b.summary.length>500||
+     typeof b.description!=='string'||b.description.length>5000||
+     typeof b.requirements!=='string'||b.requirements.length>5000||
+     !['FULL_TIME','PART_TIME'].includes(b.employmentType)||
+     !Array.isArray(storeIds)||storeIds.length===0||
+     storeIds.length>100||new Set(storeIds).size!==storeIds.length||
+     !storeIds.every(uuid)||
+     typeof b.imageUrl!=='string'||b.imageUrl.length>1024||
+     b.imageUrl!==''&&!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/.test(b.imageUrl))
+    throw bad(400,'Completa puesto, sedes activas, modalidad y teléfono de postulaciones');
+  const matching=await client.query(`SELECT id,name FROM stores
+    WHERE tenant_id=$1 AND active=true AND id=ANY($2::uuid[])`,[tenantId,storeIds]);
+  if(matching.rowCount!==storeIds.length)throw bad(409,'Selecciona únicamente sedes activas de la empresa');
+  if(b.imageUrl){
+   const imageId=b.imageUrl.split('/').pop();
    const owned=await client.query('SELECT id FROM product_images WHERE id=$1 AND tenant_id=$2',[imageId,tenantId]);
    if(!owned.rowCount)throw bad(400,'La imagen no pertenece a esta empresa');
   }
-  const args=[tenantId,title,b.summary||'',b.description||'',b.requirements||'',b.schedule||'',b.employmentType||'',b.locationLabel||'',image||null,normalized,b.active];
-  result=b.id&&uuid(b.id)?await client.query(`UPDATE job_vacancies SET title=$2,summary=$3,description=$4,requirements=$5,schedule=$6,employment_type=$7,location_label=$8,image_url=$9,whatsapp_phone=$10,active=$11,updated_at=now() WHERE tenant_id=$1 AND id=$12 RETURNING *`,[...args,b.id]):
-   await client.query(`INSERT INTO job_vacancies(tenant_id,title,summary,description,requirements,schedule,employment_type,location_label,image_url,whatsapp_phone,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,args);
+  const locationLabel=matching.rows.map(row=>row.name).sort().join(', ');
+  const args=[tenantId,title,b.summary,b.description,b.requirements,'',b.employmentType,
+    locationLabel,b.imageUrl||null,normalized,b.active];
+  result=b.id&&uuid(b.id)?await client.query(`UPDATE job_vacancies
+    SET title=$2,summary=$3,description=$4,requirements=$5,schedule=$6,
+      employment_type=$7,location_label=$8,image_url=$9,whatsapp_phone=$10,
+      active=$11,updated_at=now()
+    WHERE tenant_id=$1 AND id=$12 RETURNING *`,[...args,b.id]):
+   await client.query(`INSERT INTO job_vacancies
+    (tenant_id,title,summary,description,requirements,schedule,employment_type,
+     location_label,image_url,whatsapp_phone,active)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,args);
+  if(result.rowCount===1){
+   await client.query('DELETE FROM job_vacancy_stores WHERE tenant_id=$1 AND vacancy_id=$2',[tenantId,result.rows[0].id]);
+   await client.query(`INSERT INTO job_vacancy_stores(tenant_id,vacancy_id,store_id)
+      SELECT $1,$2,unnest($3::uuid[])`,[tenantId,result.rows[0].id,storeIds]);
+  }
  }else if(resource==='products'){
   if(!word(b.name,180)||!safeNumber(b.pricePen)||b.pricePen<0||!bool(b.active)||b.imageUrl&&(!/^https:\/\//.test(b.imageUrl)&&!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/.test(b.imageUrl)||b.imageUrl.length>1024))throw bad(400,'Producto inválido');const args=[tenantId,b.name,b.description||'',b.category||'',b.pricePen,b.imageUrl||null,b.active];
   result=b.id&&uuid(b.id)?await client.query(`UPDATE products SET name=$2,description=$3,category=$4,price_pen=$5,image_url=$6,active=$7,updated_at=now() WHERE tenant_id=$1 AND id=$8 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO products(tenant_id,name,description,category,price_pen,image_url,active) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,args)
