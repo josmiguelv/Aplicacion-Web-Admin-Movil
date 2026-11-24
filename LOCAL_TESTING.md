@@ -75,7 +75,7 @@ Actualizar y comprobar compilación local con los comandos del apartado 1 y `pnp
 ## Promociones: fechas, horas y siete días de actividad — migración 014
 
 - La edición muestra **Fecha de inicio**, **Fecha de fin**, **Hora de inicio**, **Hora de fin**, y exactamente siete casillas (**Lunes a Domingo**). No configura horarios individuales por día.
-- Debe seleccionarse al menos un día. La hora final debe ser mayor que la inicial, dentro del mismo día. El horario usa la zona horaria configurada para la empresa (Pollos B3: America/Lima, salvo configuración distinta).
+- Debe seleccionarse al menos un día. La hora final debe ser mayor que la inicial, dentro del mismo día. El horario siempre se interpreta internamente en la zona fija America/Lima (UTC−5), independientemente de la ubicación del usuario o el servidor. No hay control de zona horaria en la interfaz.
 - La publicación almacena las reglas, y la respuesta pública filtra dinámicamente las promociones según fecha, hora y días; así pueden empezar o terminar sin volver a publicar cada día. **No sustituye la publicación inicial**.
 - Por ahora las promociones siguen siendo generales de la empresa y no se restringen a una sede.
 - Las promociones históricas conservan su comportamiento previo basado en `starts_at` y `ends_at`.
@@ -114,3 +114,25 @@ if ($LASTEXITCODE -ne 0) { throw "Falló la migración 015" }
 La migración 014, referente a promociones, debe aplicarse antes de levantar este código **solo si todavía está pendiente**; se explica en el apartado anterior. No repetir ninguna migración ya ejecutada.
 
 Compilar localmente con `pnpm install --frozen-lockfile` y `pnpm build`, iniciar con `pnpm start` y `pnpm dev`. No utilizar GitHub Actions, respaldos ni pruebas de BD.
+
+
+## Zona horaria interna UTC−5 — sin campo visible
+
+- Eliminado el formulario «Zona horaria de la empresa» y la consulta innecesaria del frontend.
+- El Administrador fija `America/Lima` (UTC−5, sin horario de verano) para horarios físicos, promociones, reservas y catálogos públicos, independientemente de dónde se use la aplicación.
+- Las nuevas empresas usan el mismo valor. La API de ajustes devuelve UTC−5 y ya no admite modificar la zona horaria.
+- Se preserva la columna histórica `tenants.time_zone` en PostgreSQL, pero el código no la utiliza para calcular horarios. **No se necesita migración de base de datos para este cambio.**
+- No modificar Android, TU VERSO ni otros repositorios; no usar GitHub Actions ni ejecutar pruebas o respaldos de BD.
+
+Actualizar localmente:
+
+```powershell
+cd "C:\Integra-B2G\Administrador Negocios"
+git status
+git fetch https://github.com/josmiguelv/Aplicacion-Web-Admin-Movil.git refs/heads/feat/b3-admin-reservation-transactional-20261123
+git merge --ff-only FETCH_HEAD
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+Después iniciar `pnpm start` y `pnpm dev` en terminales distintas. No aplicar migraciones nuevas para el ajuste de zona horaria; las migraciones 014/015 de cambios anteriores deben estar aplicadas si aún estaban pendientes.
