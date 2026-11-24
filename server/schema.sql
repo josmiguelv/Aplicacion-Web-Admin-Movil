@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS stores (
   dine_in_enabled BOOLEAN NOT NULL DEFAULT false,
   opening_hours JSONB,
   service_hours JSONB NOT NULL DEFAULT '{}'::jsonb,
+  delivery_preparation_minutes INTEGER CHECK(delivery_preparation_minutes BETWEEN 1 AND 240),
+  pickup_preparation_minutes INTEGER CHECK(pickup_preparation_minutes BETWEEN 1 AND 240),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (id,tenant_id)
 );
@@ -109,6 +111,8 @@ CREATE TABLE IF NOT EXISTS product_images (
 CREATE INDEX IF NOT EXISTS idx_product_images_tenant ON product_images(tenant_id);
 -- Additive migration for existing admin databases; null means NOT CONFIGURED.
 ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_hours JSONB;
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS delivery_preparation_minutes INTEGER CHECK(delivery_preparation_minutes BETWEEN 1 AND 240);
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS pickup_preparation_minutes INTEGER CHECK(pickup_preparation_minutes BETWEEN 1 AND 240);
 
 -- Safe additive upgrade of already provisioned databases; run as a reviewed migration before deployment.
 -- Historical radius 0 signified unconfigured coverage: convert it to NULL (unlimited).
@@ -403,9 +407,7 @@ CREATE TABLE IF NOT EXISTS store_reservation_settings(
  FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE,
  CONSTRAINT b3_reservation_complete_when_enabled CHECK(
   NOT enabled OR
-  min_advance_minutes IS NOT NULL AND max_advance_days IS NOT NULL AND
-  first_time IS NOT NULL AND last_time IS NOT NULL AND
-  slot_minutes IS NOT NULL AND max_orders_per_slot IS NOT NULL AND preparation_minutes IS NOT NULL
+  preparation_minutes IS NOT NULL
  ),
  CONSTRAINT b3_reservation_window_valid CHECK(first_time IS NULL OR last_time IS NULL OR first_time < last_time),
  CONSTRAINT b3_reservation_advance_valid CHECK(min_advance_minutes IS NULL OR max_advance_days IS NULL OR min_advance_minutes < max_advance_days*1440)
