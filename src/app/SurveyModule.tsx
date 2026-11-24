@@ -58,11 +58,9 @@ export function SurveyModule({tenantId,isSuperAdmin,stores,initialStoreId}:Props
     <p className="ops-hint">Valoraciones recibidas desde Pollos B3. Las encuestas se consultan sin modificar pedidos ni contactar a TU VERSO.</p></div>
    <button className="button button-secondary" onClick={()=>setRevision(x=>x+1)} type="button" disabled={loading}><RefreshCw size={15}/> Actualizar</button>
   </div>
+  <p className="ops-survey-context">Sede: <strong>{stores.find(store=>store.id===storeId)?.name||'Local seleccionado'}</strong></p>
   <div className="ops-survey-filters" aria-label="Filtrar encuestas">
-   <label>Sede<select value={storeId} onChange={e=>changeFilter(()=>setStoreId(e.target.value))}>
-    <option value="">Todas las sedes</option>
-    {stores.map(store=><option key={store.id} value={store.id}>{store.name}</option>)}
-   </select></label>
+
    <label>Calificación<select value={rating} onChange={e=>changeFilter(()=>setRating(e.target.value))}>
     <option value="">Todas</option>
     {[5,4,3,2,1].map(n=><option key={n} value={n}>{n} {n===1?'estrella':'estrellas'}</option>)}
