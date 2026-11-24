@@ -96,3 +96,20 @@
 .ops-store-single-panel section[id^="ops-store-"]>h3{font-size:17px;margin:22px 0 12px}
 @media(max-width:750px){.ops-schedule-block>.ops-grid{grid-template-columns:1fr}}
 @media(max-width:380px){.ops-schedule-block .ops-row{grid-template-columns:1fr}.ops-schedule-block .ops-row>label.ops-check{justify-content:flex-start}}
+
+
+/* Pollos B3: four clear payment switches for each store and modality. */
+.ops-payment-panel .ops-payment-head{display:flex;gap:16px;align-items:end;margin:17px 0 20px}
+.ops-payment-panel .ops-payment-head>label{display:flex;flex-direction:column;gap:7px;min-width:min(100%,265px);font-weight:650}
+.ops-payment-panel .ops-payment-head select{width:100%}
+.ops-payment-panel>h3{font-size:15px;margin:18px 0 12px}
+.ops-payment-method-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0 20px;max-width:740px}
+.ops-payment-method{display:flex;gap:12px;align-items:center;cursor:pointer;background:#fff;border:1px solid #dce4eb;border-radius:13px;padding:17px 16px;transition:border-color .16s ease,background .16s ease}
+.ops-payment-method:has(input:checked){border-color:#a9d9c5;background:#f2fbf6}
+.ops-payment-method:focus-within{outline:2px solid #186d50;outline-offset:2px}
+.ops-payment-method input[type=checkbox]{width:20px;height:20px;flex-shrink:0;accent-color:#147a54}
+.ops-payment-method>span:nth-child(2){font-size:14px;font-weight:700}
+.ops-payment-status{font-size:11px;color:#63738a;margin-left:auto}
+.ops-payment-method:has(input:checked) .ops-payment-status{color:#166647;font-weight:650}
+.ops-payment-panel>button.button-primary{margin-bottom:12px}
+@media(max-width:540px){.ops-payment-method-grid{grid-template-columns:1fr}.ops-payment-method{padding:13px 14px}}
