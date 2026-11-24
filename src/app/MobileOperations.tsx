@@ -529,7 +529,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      <div className="ops-marketing-phone-head"><Bell size={15}/> Pollos B3 · Vista previa</div>
      <strong>{noticeTitle||'Título del aviso'}</strong>
      <p>{noticeMessage||'Aquí aparecerá la descripción que recibirá el cliente.'}</p>
-     {noticeImage&&<img src={noticeImage} alt="Imagen del aviso"/>}
+     {noticeImage&&<img src={noticeImage.replace("/api/v1/mobile/images/",`/api/admin/tenants/${tenantId}/images/`)} alt="Imagen del aviso"/>}
      <small>Detalle disponible en la aplicación mientras esté vigente</small>
     </div>
     <p className="ops-hint">Esta vista previa no envía notificaciones.</p>
