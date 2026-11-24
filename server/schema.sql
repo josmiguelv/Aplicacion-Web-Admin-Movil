@@ -438,6 +438,10 @@ CREATE TABLE IF NOT EXISTS mobile_checkout_policies(
  tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
  payment_wait_minutes INT NOT NULL DEFAULT 10 CHECK(payment_wait_minutes BETWEEN 5 AND 30),
  reminder_count INT NOT NULL DEFAULT 2 CHECK(reminder_count BETWEEN 0 AND 2),
+ reminders_enabled BOOLEAN NOT NULL DEFAULT false,
+ reminder_title TEXT NOT NULL DEFAULT 'Tu compra está pendiente',
+ reminder_message TEXT NOT NULL DEFAULT 'Continúa con el pago o cancela tu solicitud de Pollos B3.',
+ CONSTRAINT mobile_checkout_policies_reminder_content_check CHECK (length(trim(reminder_title)) BETWEEN 1 AND 120 AND length(trim(reminder_message)) BETWEEN 1 AND 500),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS mobile_checkout_followups(
