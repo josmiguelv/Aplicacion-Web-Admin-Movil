@@ -10,7 +10,6 @@ export type SurveyRecord={
 type SurveyResponse={items:SurveyRecord[];total:number;limit:number;offset:number}
 type Props={tenantId:string;isSuperAdmin:boolean;stores:SurveyStore[];initialStoreId:string}
 const PAGE_SIZE=10
-const queryBase=(tenantId:string,isSuperAdmin:boolean)=>isSuperAdmin?{tenantId}:{}
 const stars=(rating:number)=>'★'.repeat(Math.max(0,Math.min(5,Math.round(rating))))+
  '☆'.repeat(Math.max(0,5-Math.round(rating)))
 const niceDate=(date:string)=>new Intl.DateTimeFormat('es-PE',{
@@ -32,7 +31,8 @@ export function SurveyModule({tenantId,isSuperAdmin,stores,initialStoreId}:Props
  useEffect(()=>{
   if(!tenantId)return
   const controller=new AbortController()
-  const params=new URLSearchParams({...queryBase(tenantId,isSuperAdmin),limit:String(PAGE_SIZE),offset:String(page*PAGE_SIZE)})
+  const params=new URLSearchParams({limit:String(PAGE_SIZE),offset:String(page*PAGE_SIZE)})
+  if(isSuperAdmin)params.set('tenantId',tenantId)
   if(storeId)params.set('storeId',storeId)
   if(rating)params.set('rating',rating)
   if(from)params.set('from',from)
