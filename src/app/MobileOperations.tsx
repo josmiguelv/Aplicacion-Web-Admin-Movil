@@ -63,7 +63,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [paymentLoadError,setPaymentLoadError]=useState('')
  const [paymentReload,setPaymentReload]=useState(0)
  const [paymentUploading,setPaymentUploading]=useState('')
- const paymentDirty=JSON.stringify(paymentConfigs)!==JSON.stringify(paymentBaseline)
  const updatePaymentMethod=(mode:PaymentMode,method:PaymentMethod,enabled:boolean)=>
   setPaymentConfigs(current=>({...current,[mode]:{...current[mode],
    methods:{...current[mode].methods,[method]:enabled}}}))
