@@ -74,7 +74,7 @@ function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
 }
 function withLiveHours(store,timeZone,at=new Date()){return {...store,...storeHours(store,at,timeZone)}}
 
-async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings]=await Promise.all([
+async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,sharedPaymentImages]=await Promise.all([
  tx.query('SELECT s.id,s.name,s.address,s.latitude,s.longitude,s.radius_km,s.delivery_fee_pen,s.delivery_rate_per_km_pen,s.delivery_pricing_mode,s.delivery_preparation_minutes,s.pickup_preparation_minutes,s.active,s.delivery_enabled,s.pickup_enabled,s.dine_in_enabled,s.opening_hours,s.consult_order_availability, r.enabled AS reservation_enabled, r.preparation_minutes AS reservation_preparation_minutes FROM stores s LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id WHERE s.tenant_id=$1 AND s.active=true ORDER BY s.name',[tenantId]),
  tx.query('SELECT id,name,description,category,price_pen,image_url FROM products WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query(`SELECT id,title,starts_at,ends_at,
@@ -98,13 +98,15 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
     ON st.id=vs.store_id AND st.tenant_id=vs.tenant_id
     WHERE vs.tenant_id=j.tenant_id AND vs.vacancy_id=j.id AND st.active=true)
    ORDER BY j.updated_at DESC,j.id`,[tenantId]),
- tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId])
- ]);const payload={schemaVersion:1,appId,currency:'PEN',timeZone:DEFAULT_TENANT_TZ,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),
- paymentMethodImages:payments.rows.filter(p=>p.store_id===s.id&&p.image_url&&p.method!=='cash').reduce((a,p)=>{
-  if(!a[p.mode])a[p.mode]={};
-  a[p.mode][p.method]=p.image_url;
-  return a;
- },{delivery:{},pickup:{},reservation:{}})})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]),
+ tx.query('SELECT method,image_url FROM company_payment_images WHERE tenant_id=$1',[tenantId])
+ ]);const sharedPaymentImageMap=Object.fromEntries(sharedPaymentImages.rows.filter(p=>p.image_url).map(p=>[p.method,p.image_url]));
+ const payload={schemaVersion:1,appId,currency:'PEN',timeZone:DEFAULT_TENANT_TZ,paymentImages:sharedPaymentImageMap,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),
+ paymentMethodImages:{
+  delivery:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='delivery'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]])),
+  pickup:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='pickup'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]])),
+  reservation:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='reservation'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]]))
+ }})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[],notifications:[]},true);const commercial=await publicCommercialNotifications(pool,appId).catch(error=>{if(error.code==='42P01')return {items:[]};throw error});return json(res,200,{ready:true,revision:q.rows[0].revision,notifications:commercial.items,...q.rows[0].payload,timeZone:DEFAULT_TENANT_TZ,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
  ...withLiveHours(s,DEFAULT_TENANT_TZ),
@@ -311,6 +313,38 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   res.writeHead(200,{'Content-Type':found.rows[0].mime,
    'Cache-Control':'private,no-store','X-Content-Type-Options':'nosniff'});
   return res.end(found.rows[0].content);
+ }
+ const sharedPaymentRoute=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/payment-images$/i);
+ if(sharedPaymentRoute){
+  const tenantId=sharedPaymentRoute[1];await tenantOf(user,tenantId);
+  if(req.method==='GET'){
+   const images=await sql('SELECT method,image_url FROM company_payment_images WHERE tenant_id=$1',[tenantId]);
+   return json(res,200,{images:Object.fromEntries(images.rows.map(x=>[x.method,x.image_url||'']))});
+  }
+  if(req.method!=='POST')throw bad(405,'Método no permitido');
+  const input=await body(req),methods=['yape','plin','card'];
+  if(!input||typeof input!=='object'||Array.isArray(input)||
+   Object.keys(input).length!==3||Object.keys(input).some(key=>!methods.includes(key))||
+   methods.some(key=>!Object.prototype.hasOwnProperty.call(input,key)||
+    typeof input[key]!=='string'||input[key]!==''&&!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/i.test(input[key])))
+   throw bad(400,'Selecciona solo imágenes válidas para Yape, Plin e Izipay');
+  const imageIds=methods.map(key=>input[key]).filter(Boolean).map(value=>value.split('/').pop());
+  const client=await pool.connect();
+  try{
+   await client.query('BEGIN');
+   if(imageIds.length){
+    const ownership=await client.query('SELECT id::text FROM product_images WHERE tenant_id=$1 AND id::text=ANY($2::text[])',[tenantId,imageIds]);
+    if(new Set(ownership.rows.map(x=>x.id)).size!==new Set(imageIds).size)throw bad(400,'Hay imágenes que no pertenecen a esta empresa');
+   }
+   await client.query(`INSERT INTO company_payment_images(tenant_id,method,image_url)
+    SELECT $1,a.method,a.url FROM unnest($2::text[],$3::text[]) AS a(method,url)
+    ON CONFLICT(tenant_id,method) DO UPDATE SET image_url=EXCLUDED.image_url,updated_at=now()`,
+    [tenantId,methods,methods.map(key=>input[key]||null)]);
+   await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',
+    [tenantId,user.id,'PAYMENT_IMAGES_UPDATED',tenantId]);
+   await client.query('COMMIT');
+   return json(res,200,{images:input});
+  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
  }
  const m=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/(stores|products|promotions|payments|apps|publish|vacancies|complaints)$/);
  if(!m)throw bad(404,'Ruta no encontrada');const tenantId=m[1],resource=m[2];await tenantOf(user,tenantId);
