@@ -170,6 +170,17 @@ CREATE TABLE IF NOT EXISTS job_vacancies (
  UNIQUE(id,tenant_id)
 );
 CREATE INDEX IF NOT EXISTS idx_job_vacancies_tenant ON job_vacancies(tenant_id);
+-- A vacancy may target one or many stores in the same company.
+CREATE TABLE IF NOT EXISTS job_vacancy_stores (
+ tenant_id UUID NOT NULL,
+ vacancy_id UUID NOT NULL,
+ store_id UUID NOT NULL,
+ PRIMARY KEY (tenant_id,vacancy_id,store_id),
+ FOREIGN KEY(vacancy_id,tenant_id) REFERENCES job_vacancies(id,tenant_id) ON DELETE CASCADE,
+ FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_job_vacancy_stores_store
+ ON job_vacancy_stores(tenant_id,store_id);
 
 -- Official complaints-book URL is configured by the tenant, never guessed by the app.
 ALTER TABLE mobile_apps ADD COLUMN IF NOT EXISTS complaints_book_url TEXT;
