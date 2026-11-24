@@ -161,13 +161,41 @@ export async function runCheckoutNotifications(pool,{sendPush=sendPersonalPush,r
     if(x.rowCount&&row.fcm_token)await sendPush(row.fcm_token,'order_expired',row.interaction_id,'Tiempo de pago terminado','Tu solicitud venció. Puedes iniciar una nueva compra.')
     continue
    }
-   const count=Number(row.reminder_count),sent=row.reminder_sent_count
-   if(!row.reminders_enabled||sent>=count||!row.fcm_token)continue
-   const start=new Date(row.checkout_started_at).getTime(),end=new Date(row.checkout_expires_at).getTime()
-   const threshold=start+(end-start)*(sent+1)/(count+1)
-   if(Date.now()<threshold)continue
-   const success=await sendPush(row.fcm_token,'order_reminder',row.interaction_id,row.reminder_title,row.reminder_message)
-   if(success)await pool.query('UPDATE mobile_checkout_followups SET reminder_sent_count=reminder_sent_count+1,updated_at=now() WHERE interaction_id=$1 AND state=\'PAYMENT_PENDING\' AND reminder_sent_count=$2',[row.interaction_id,sent])
+   // Lock this particular order across workers while verifying its current
+   // state and submitting one personal push; never use a shared FCM topic.
+   const client=await pool.connect();
+   try{
+    await client.query('BEGIN');
+    const current=await client.query(`SELECT f.state,f.fcm_token,f.checkout_started_at,
+      f.checkout_expires_at,f.reminder_sent_count,
+      COALESCE(p.reminders_enabled,false) AS enabled,
+      COALESCE(p.reminder_count,2) AS reminder_count,
+      COALESCE(p.reminder_title,$2) AS title,
+      COALESCE(p.reminder_message,$3) AS message
+     FROM mobile_checkout_followups f
+     LEFT JOIN mobile_checkout_policies p ON p.tenant_id=f.tenant_id
+     WHERE f.interaction_id=$1 FOR UPDATE OF f SKIP LOCKED`,
+     [row.interaction_id,DEFAULT_REMINDER_TITLE,DEFAULT_REMINDER_MESSAGE]);
+    if(!current.rowCount){await client.query('COMMIT');continue}
+    const entry=current.rows[0],count=Number(entry.reminder_count),
+     sent=Number(entry.reminder_sent_count);
+    if(entry.state!=='PAYMENT_PENDING'||!entry.enabled||!entry.fcm_token||sent>=count||
+      !entry.checkout_started_at||!entry.checkout_expires_at){
+     await client.query('COMMIT');continue;
+    }
+    const start=new Date(entry.checkout_started_at).getTime(),
+      end=new Date(entry.checkout_expires_at).getTime(),now=Date.now();
+    const threshold=start+(end-start)*(sent+1)/(count+1);
+    if(now<threshold||now>=end){await client.query('COMMIT');continue}
+    const success=await sendPush(entry.fcm_token,'order_reminder',row.interaction_id,
+     entry.title,entry.message);
+    if(success)await client.query(`UPDATE mobile_checkout_followups
+      SET reminder_sent_count=reminder_sent_count+1,updated_at=now()
+      WHERE interaction_id=$1 AND state='PAYMENT_PENDING'
+        AND reminder_sent_count=$2`,[row.interaction_id,sent]);
+    await client.query('COMMIT');
+   }catch(error){await client.query('ROLLBACK');throw error}
+   finally{client.release()}
   }catch(error){console.error('Pollos B3 checkout reminder:',error.message)}
  }
  // Generic notification only: Android interprets agent text; the admin never decides.
