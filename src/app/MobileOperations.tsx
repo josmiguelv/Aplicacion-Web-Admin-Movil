@@ -10,7 +10,7 @@ type StoreRow = { delivery_preparation_minutes:number|null;pickup_preparation_mi
 type ReservationSettings = {enabled:boolean;preparationMinutes:number|null}
 const blankReservation = ():ReservationSettings => ({enabled:false,preparationMinutes:null})
 type ProductRow = {id:string;name:string;price_pen:number;active:boolean}
-type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;schedule:string;employment_type:string;location_label:string;image_url:string|null;whatsapp_phone:string;active:boolean}
+type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;employment_type:string;location_label:string;store_ids:string[];image_url:string|null;whatsapp_phone:string;active:boolean}
 const modes = [{key:'delivery',name:'Delivery'},{key:'reservation',name:'Reservación'},{key:'pickup',name:'Recojo en tienda'}]
 const payments = [{key:'yape',name:'Yape'},{key:'plin',name:'Plin'},{key:'card',name:'Tarjeta'},{key:'cash',name:'Efectivo'}] as const
 type PaymentMethod = typeof payments[number]['key']
@@ -40,7 +40,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   setStore(next);setStoreBaseline(JSON.stringify(next));setStoreEditorOpen(true);setStoreSavedNotice(false);setError('');setMessage('')
  }
  const [product,setProduct]=useState({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false})
- const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',schedule:'',employmentType:'',locationLabel:'',imageUrl:'',whatsappPhone:'',active:false})
+ const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',employmentType:'FULL_TIME',storeIds:[] as string[],imageUrl:'',whatsappPhone:'',active:false})
  const [vacancy,setVacancy]=useState(emptyVacancy)
  const [paymentStore,setPaymentStore]=useState(''),[paymentMode,setPaymentMode]=useState('delivery')
  const [paymentSelection,setPaymentSelection]=useState<PaymentSelection>(blankPaymentSelection)
@@ -299,26 +299,49 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     </>)}
    </section>)}
   {activeArea==='products'&&(<section className="ops-panel"><p className="ops-global-note" role="status">Catálogo compartido de la empresa. Los productos que guardes aquí todavía afectan a todas las sedes. La disponibilidad y los precios por sede requieren una configuración adicional.</p><h2><Package size={19}/> Catálogo de productos y fotografías</h2><div className="ops-grid"><label>Nombre<input value={product.name} onChange={e=>setProduct({...product,name:e.target.value})}/></label><label>Categoría<input value={product.category} onChange={e=>setProduct({...product,category:e.target.value})}/></label><label>Precio S/<input type="number" step="0.01" min="0" value={product.pricePen} onChange={e=>setProduct({...product,pricePen:e.target.value})}/></label><label>Descripción<input value={product.description} onChange={e=>setProduct({...product,description:e.target.value})}/></label><label>Imagen <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{const res=await fetch(`/api/admin/tenants/${tenantId}/images`,{method:'POST',credentials:'include',body:file});const data=await res.json();if(!res.ok)throw new Error(data.error||'No se pudo subir');setProduct(v=>({...v,imageUrl:data.url}));setMessage('Foto cargada. Guarda y publica el producto para mostrarla en Android.')})}}/></label><label>URL de imagen cargada<input readOnly value={product.imageUrl}/></label></div><label className="ops-check"><input type="checkbox" checked={product.active} onChange={e=>setProduct({...product,active:e.target.checked})}/>Producto disponible</label><button className="button button-primary" disabled={loading} onClick={()=>void act(async()=>{if(!product.name||product.pricePen==='')throw new Error('Completa el nombre y precio');await api(`/api/admin/tenants/${tenantId}/products`,'POST',{...product,pricePen:Number(product.pricePen)});setProduct({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false});await refresh();setSavedArea('products')})}>Guardar producto</button>{savedNext('products')}<div className="ops-record-list"><h3>Productos registrados ({products.length})</h3>{products.length===0?<p className="ops-hint">Todavía no hay productos registrados.</p>:products.map(item=><div key={item.id} className="ops-record-row"><strong>{item.name}</strong><span>S/ {Number(item.price_pen).toFixed(2)}</span><span className={item.active?"ops-state ops-state--yes":"ops-state ops-state--no"}>{item.active?"Disponible":"No disponible"}</span></div>)}</div></section>)}
-  {activeArea==='vacancies'&&(<section className="ops-panel"><p className="ops-global-note" role="status">Vacantes compartidas de la empresa. El campo «Sede o zona» es descriptivo y todavía no limita su publicación a una sede.</p><h2><Store size={19}/> Trabaja con nosotros · Vacantes</h2>
-   <p>Administra imágenes, puestos, requisitos y teléfono de postulaciones. Solo las vacantes activas aparecerán en Android después de publicar el catálogo. Desactiva una vacante para retirarla de la aplicación.</p>
+  {activeArea==='vacancies'&&(<section className="ops-panel ops-vacancy-panel">
+   <h2><Store size={19}/> Trabaja con nosotros · Vacantes</h2>
+   <p className="ops-hint">Selecciona una o varias sedes activas para esta vacante. La publicación mostrará las sedes seleccionadas; no se podrán asignar locales inactivos.</p>
    <div className="ops-grid">
-    <label>Puesto<input maxLength={150} value={vacancy.title} onChange={e=>setVacancy({...vacancy,title:e.target.value})} placeholder="Ej. Horneros con experiencia"/></label>
-    <label>Sede o zona<input maxLength={150} value={vacancy.locationLabel} onChange={e=>setVacancy({...vacancy,locationLabel:e.target.value})} placeholder="Ej. Santa Anita"/></label>
+    <label>Puesto<input maxLength={150} value={vacancy.title} onChange={e=>setVacancy({...vacancy,title:e.target.value})} placeholder="Nombre del puesto"/></label>
     <label>Teléfono WhatsApp para postulaciones<input inputMode="tel" value={vacancy.whatsappPhone} onChange={e=>setVacancy({...vacancy,whatsappPhone:e.target.value})} placeholder="9XXXXXXXX"/></label>
-    <label>Modalidad<input maxLength={150} value={vacancy.employmentType} onChange={e=>setVacancy({...vacancy,employmentType:e.target.value})} placeholder="Ej. Full time"/></label>
-    <label>Horario<input maxLength={200} value={vacancy.schedule} onChange={e=>setVacancy({...vacancy,schedule:e.target.value})}/></label>
-    <label>Imagen de la vacante<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{const response=await fetch(`/api/admin/tenants/${tenantId}/images`,{method:'POST',credentials:'include',body:file});const data=await response.json();if(!response.ok)throw new Error(data.error||'No se pudo subir la imagen');setVacancy(v=>({...v,imageUrl:data.url}));setMessage('Imagen cargada. Guarda la vacante y publica el catálogo.')})}}/></label>
-    <label>Imagen cargada<input value={vacancy.imageUrl} readOnly/></label>
+    <label>Modalidad<select value={vacancy.employmentType} onChange={e=>setVacancy({...vacancy,employmentType:e.target.value})}>
+     <option value="FULL_TIME">Tiempo completo</option><option value="PART_TIME">Medio tiempo</option>
+    </select></label>
+   </div>
+   <fieldset className="ops-vacancy-stores"><legend>Sedes donde aplica la vacante</legend>
+    <div className="ops-vacancy-store-grid">
+     {stores.filter(s=>s.active).map(local=><label key={local.id} className={vacancy.storeIds.includes(local.id)?'ops-vacancy-store is-selected':'ops-vacancy-store'}>
+      <input type="checkbox" checked={vacancy.storeIds.includes(local.id)}
+       onChange={e=>setVacancy(previous=>({...previous,storeIds:e.target.checked?
+        [...previous.storeIds,local.id]:previous.storeIds.filter(id=>id!==local.id)}))}/>
+      <span>{local.name}</span>
+     </label>)}
+    </div>
+    {stores.every(s=>!s.active)&&<p className="ops-hint">No hay sedes activas. Habilita al menos una sede para crear una vacante.</p>}
+   </fieldset>
+   <div className="ops-grid">
+    <label>Imagen de la vacante (opcional)<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{const file=e.target.files?.[0];if(!file)return;void act(async()=>{const response=await fetch(`/api/admin/tenants/${tenantId}/images`,{method:'POST',credentials:'include',body:file});const data=await response.json();if(!response.ok)throw new Error(data.error||'No se pudo subir la imagen');setVacancy(v=>({...v,imageUrl:data.url}));setMessage('Imagen cargada. Guarda la vacante y publica el catálogo.')})}}/></label>
     <label>Descripción breve<textarea maxLength={500} value={vacancy.summary} onChange={e=>setVacancy({...vacancy,summary:e.target.value})}/></label>
     <label>Descripción del puesto<textarea maxLength={5000} value={vacancy.description} onChange={e=>setVacancy({...vacancy,description:e.target.value})}/></label>
     <label>Requisitos (uno por línea)<textarea maxLength={5000} value={vacancy.requirements} onChange={e=>setVacancy({...vacancy,requirements:e.target.value})}/></label>
    </div>
    {vacancy.imageUrl&&<img src={vacancy.imageUrl} alt="Vista previa de la vacante" style={{width:150,maxHeight:180,objectFit:'contain',borderRadius:12}}/>}
    <label className="ops-check"><input type="checkbox" checked={vacancy.active} onChange={e=>setVacancy({...vacancy,active:e.target.checked})}/>Vacante activa (visible al publicar)</label>
-   <div className="ops-inline"><button className="button button-primary" disabled={loading||!vacancy.title.trim()||!vacancy.whatsappPhone.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/vacancies`,'POST',vacancy);await refresh();setSavedArea('vacancies')})}>Guardar vacante</button>
+   <div className="ops-inline">
+    <button className="button button-primary" disabled={loading||!vacancy.title.trim()||!vacancy.whatsappPhone.trim()||vacancy.storeIds.length===0}
+     onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/vacancies`,'POST',vacancy);await refresh();setSavedArea('vacancies')})}>Guardar vacante</button>
     <button className="button button-secondary" onClick={()=>setVacancy(emptyVacancy())}>Nueva vacante</button>
    </div>
-   {savedNext('vacancies')}<div className="ops-list">{vacancies.map(job=><button key={job.id} className="ops-row" onClick={()=>setVacancy({id:job.id,title:job.title,summary:job.summary,description:job.description,requirements:job.requirements,schedule:job.schedule,employmentType:job.employment_type,locationLabel:job.location_label,imageUrl:job.image_url||'',whatsappPhone:job.whatsapp_phone,active:job.active})}><strong>{job.title}</strong><span className={job.active?'ops-state ops-state--yes':'ops-state ops-state--no'}>{job.active?'Activa':'Desactivada'}</span><small>{job.location_label||'Sin sede definida'}</small></button>)}</div>
+   {savedNext('vacancies')}
+   <div className="ops-list">{vacancies.map(job=><button key={job.id} className="ops-row"
+    onClick={()=>setVacancy({id:job.id,title:job.title,summary:job.summary,description:job.description,
+     requirements:job.requirements,employmentType:job.employment_type==='PART_TIME'?'PART_TIME':'FULL_TIME',
+     storeIds:job.store_ids||[],imageUrl:job.image_url||'',whatsappPhone:job.whatsapp_phone,active:job.active})}>
+    <strong>{job.title}</strong>
+    <span className={job.active?'ops-state ops-state--yes':'ops-state ops-state--no'}>{job.active?'Activa':'Desactivada'}</span>
+    <small>{(job.store_ids||[]).map(id=>stores.find(s=>s.id===id)?.name).filter(Boolean).join(', ')||'Sin sedes asignadas'}</small>
+   </button>)}</div>
   </section>)}
   {activeArea==='promotions'&&(<section className="ops-panel ops-promo-panel">
     <p className="ops-global-note" role="status">Promociones compartidas de la empresa. No se restringen automáticamente a la sede desde la que accediste.</p>
