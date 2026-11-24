@@ -5,8 +5,8 @@ import {createSign} from 'node:crypto'
 const fail=(code,message)=>Object.assign(new Error(message),{code});
 const dateTime=/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d$/;
 const WEEKDAYS=[1,2,3,4,5,6,7];
-const timePattern=/^(?:[01]\\d|2[0-3]):[0-5]\\d$/;
-const datePattern=/^\\d{4}-\\d{2}-\\d{2}$/;
+const timePattern=/^(?:[01]\d|2[0-3]):[0-5]\d$/;
+const datePattern=/^\d{4}-\d{2}-\d{2}$/;
 const localDay=(d)=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
 const limaParts=d=>Object.fromEntries(new Intl.DateTimeFormat('en-US',{
  timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',
@@ -38,7 +38,7 @@ export function validateCommercialNotice(value){
     typeof value.message!=='string'||!value.message.trim()||value.message.trim().length>1000)
   throw fail(400,'Completa título (máximo 120) y mensaje (máximo 1000)');
  if(value.imageUrl!==''&&value.imageUrl!=null&&
-    (typeof value.imageUrl!=='string'||!/^\\/api\\/v1\\/mobile\\/images\\/[0-9a-f-]{36}$/i.test(value.imageUrl)))
+    (typeof value.imageUrl!=='string'||!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/i.test(value.imageUrl)))
   throw fail(400,'Usa una imagen cargada en este Administrador');
  if(!safeDate(value.startDate)||!safeDate(value.endDate)||value.startDate>value.endDate)
   throw fail(400,'Selecciona fechas de inicio y fin válidas');
