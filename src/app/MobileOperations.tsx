@@ -5,9 +5,8 @@ type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
 type DayHours = {open:string;close:string}|{closed:true}
 type OpeningHours = Partial<Record<'sun'|'mon'|'tue'|'wed'|'thu'|'fri'|'sat',DayHours>>
-type ServiceHours = Partial<Record<'delivery'|'pickup',{orders?:OpeningHours;fulfillment?:OpeningHours}>>
 const weekdays = [{id:'mon',label:'Lunes'},{id:'tue',label:'Martes'},{id:'wed',label:'Miércoles'},{id:'thu',label:'Jueves'},{id:'fri',label:'Viernes'},{id:'sat',label:'Sábado'},{id:'sun',label:'Domingo'}] as const
-type StoreRow = { code: string; opening_hours: OpeningHours|null; service_hours: ServiceHours|null; consult_order_availability: boolean; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
+type StoreRow = { code: string; opening_hours: OpeningHours|null; consult_order_availability: boolean; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
 type ReservationSettings = {enabled:boolean;minAdvanceMinutes:number|null;maxAdvanceDays:number|null;firstTime:string|null;lastTime:string|null;preparationMinutes:number|null}
 const blankReservation = ():ReservationSettings => ({enabled:false,minAdvanceMinutes:null,maxAdvanceDays:null,firstTime:null,lastTime:null,preparationMinutes:null})
 type ProductRow = {id:string;name:string;price_pen:number;active:boolean}
@@ -26,7 +25,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('')
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
  const [stores,setStores]=useState<StoreRow[]>([]),[products,setProducts]=useState<ProductRow[]>([]),[vacancies,setVacancies]=useState<VacancyRow[]>([])
- const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,consultOrderAvailability:false,openingHours:{} as OpeningHours,serviceHours:{} as ServiceHours})
+ const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,consultOrderAvailability:false,openingHours:{} as OpeningHours})
  const [store,setStore]=useState(emptyStore)
  const [storeBaseline,setStoreBaseline]=useState(()=>JSON.stringify(emptyStore()))
  const [storeEditorOpen,setStoreEditorOpen]=useState(false)
@@ -99,7 +98,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   return ()=>{alive=false}
  },[tenantId,stores])
  const selectedStore=stores.find(s=>s.id===selectedStoreId)
- const storeEditorValue=(s:StoreRow)=>({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM' as 'PER_KM'|'FIXED',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,consultOrderAvailability:s.consult_order_availability===true,openingHours:s.opening_hours||{},serviceHours:s.service_hours||{}})
+ const storeEditorValue=(s:StoreRow)=>({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM' as 'PER_KM'|'FIXED',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,consultOrderAvailability:s.consult_order_availability===true,openingHours:s.opening_hours||{}})
  const enterLocal=(s:StoreRow)=>{
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Hay cambios sin guardar. ¿Quieres salir sin guardarlos?'))return
   setSelectedStoreId(s.id);setReservationStoreId(s.id);setPaymentStore(s.id);setPaymentMode('delivery');chooseArea('local')
@@ -123,11 +122,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  }
  const login=async(e:FormEvent)=>{e.preventDefault();await act(async()=>{const r=await api<{role:Session['role'];tenantId:string|null}>('/api/admin/login','POST',{email,password});setSession(r);setTenantId(r.tenantId||'');setPassword('')})}
 
- const updateServiceSchedule=(service:'delivery'|'pickup',kind:'orders'|'fulfillment',next:OpeningHours)=>{
-  setStore(prev=>({...prev,serviceHours:{...prev.serviceHours,[service]:{
-   ...prev.serviceHours[service],[kind]:next
-  }}}))
- }
  const weeklySchedule=(value:OpeningHours,apply:(next:OpeningHours)=>void,description:string)=><div className="ops-schedule-block">
   <p className="ops-hint">{description}</p>
   <div className="ops-grid">{weekdays.map(day=>{
@@ -149,7 +143,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   const saved=await api<StoreRow>(`/api/admin/tenants/${tenantId}/stores`,'POST',{
    ...store,
    openingHours:Object.keys(store.openingHours).length?store.openingHours:null,
-   serviceHours:store.serviceHours,
    latitude:store.latitude?Number(store.latitude):null,
    longitude:store.longitude?Number(store.longitude):null,
    radiusKm:store.radiusKm===''?null:Number(store.radiusKm),
@@ -183,14 +176,13 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    </div>
    <div className="ops-switches">
     <label><input type="checkbox" checked={store.active} onChange={e=>setStore({...store,active:e.target.checked})}/> Local activo</label>
-    <label><input type="checkbox" checked={store.dine_in_enabled} onChange={e=>setStore({...store,dine_in_enabled:e.target.checked})}/> Comer en tienda</label>
    </div>
-   <p className="ops-hint">Este bloque define la identidad y la apertura física del local. Los horarios de recepción de pedidos se configuran por servicio.</p>
+   <p className="ops-hint">El horario físico del local es informativo. Delivery, Recojo y Reservas se habilitan desde sus propias tarjetas; la recepción depende del agente disponible en TU VERSO.</p>
   </section>}
   {storeFocus==='hours'&&<section id="ops-store-hours">
    <h3>Horario de apertura al público</h3>
    {weeklySchedule(store.openingHours,next=>setStore(prev=>({...prev,openingHours:next})),
-    'Estos horarios describen la apertura física. No limitan automáticamente cuándo Delivery o Recojo pueden recibir pedidos.')}
+    'Este horario se muestra como información del local. No decide si se pueden recibir pedidos: esa disponibilidad depende de TU VERSO y de los servicios habilitados.')}
   </section>}
   {storeFocus==='delivery'&&<section id="ops-store-delivery">
    <label className="ops-check"><input type="checkbox" checked={store.delivery_enabled}
@@ -209,22 +201,12 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    <label className="ops-check"><input type="checkbox" checked={store.consultOrderAvailability}
     onChange={e=>setStore({...store,consultOrderAvailability:e.target.checked})}/>
     Consultar disponibilidad del pedido con TU VERSO para esta sede</label>
-   <h3>Horario para recibir pedidos Delivery</h3>
-   {weeklySchedule(store.serviceHours.delivery?.orders||{},next=>updateServiceSchedule('delivery','orders',next),
-     'El cliente puede solicitar el pedido en este horario, aunque el local todavía no esté abierto al público. Si no se configura, se conserva el horario general anterior.')}
-   <h3>Horario de entregas Delivery</h3>
-   {weeklySchedule(store.serviceHours.delivery?.fulfillment||{},next=>updateServiceSchedule('delivery','fulfillment',next),
-     'Indica cuándo se pueden entregar pedidos. Es independiente del horario de recepción y del horario físico.')}
+   <p className="ops-hint">No hay horarios adicionales de Delivery. Podrá recibir solicitudes cuando esta opción esté habilitada y TU VERSO confirme un agente disponible, incluso fuera del horario físico.</p>
   </section>}
   {storeFocus==='pickup'&&<section id="ops-store-pickup">
    <label className="ops-check"><input type="checkbox" checked={store.pickup_enabled}
     onChange={e=>setStore({...store,pickup_enabled:e.target.checked})}/> Habilitar Recojo en tienda</label>
-   <h3>Horario para recibir pedidos de Recojo</h3>
-   {weeklySchedule(store.serviceHours.pickup?.orders||{},next=>updateServiceSchedule('pickup','orders',next),
-     'El cliente puede solicitar su pedido en este horario, antes de que empiece el horario de recojo. Si no se configura, se conserva el horario general anterior.')}
-   <h3>Horario disponible para recoger</h3>
-   {weeklySchedule(store.serviceHours.pickup?.fulfillment||{},next=>updateServiceSchedule('pickup','fulfillment',next),
-     'Define desde cuándo pueden entregarse los pedidos de recojo, independientemente de la hora de recepción.')}
+   <p className="ops-hint">No hay horarios adicionales para Recojo. Podrá recibir solicitudes cuando esté habilitado y TU VERSO confirme un agente disponible.</p>
   </section>}
   <button className="button button-primary" disabled={loading||!hasUnsavedStoreChanges} onClick={saveStore}>
    Guardar {store.id?'configuración':'nuevo local'}
