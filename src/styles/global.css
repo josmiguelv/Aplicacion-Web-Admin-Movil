@@ -141,3 +141,26 @@
 .ops-vacancy-store.is-selected{background:#f1faf5;border-color:#a2d8bc;color:#176548}
 .ops-vacancy-store input[type=checkbox]{accent-color:#16744d;width:18px;height:18px;flex:none}
 .ops-vacancy-store:focus-within{outline:2px solid #166f50;outline-offset:2px}
+
+
+/* Company-level marketing notifications: separate from personal order reminders. */
+.ops-marketing-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.85fr);gap:24px;margin:20px 0 28px;align-items:start}
+.ops-marketing-fields{display:grid;gap:14px}
+.ops-marketing-fields>label,.ops-marketing-time>label{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:650;min-width:0}
+.ops-marketing-fields input,.ops-marketing-fields textarea{width:100%;min-width:0}
+.ops-marketing-time{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ops-marketing-preview{background:#f2f5f8;padding:22px;border-radius:18px}
+.ops-marketing-phone{background:#fff;border:1px solid #dfe4eb;border-radius:19px;padding:18px;max-width:370px;margin:auto;display:grid;gap:11px;box-shadow:0 14px 32px rgba(24,43,65,.08)}
+.ops-marketing-phone-head{display:flex;align-items:center;gap:7px;font-size:12px;color:#667489}
+.ops-marketing-phone>strong{font-size:16px}
+.ops-marketing-phone>p{font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.ops-marketing-phone>img{width:100%;max-height:240px;object-fit:contain;border-radius:12px}
+.ops-marketing-phone>small{font-size:11px;color:#788496}
+.ops-marketing-preview>.ops-hint{margin:12px 0 0;text-align:center}
+.ops-marketing-list{display:grid;gap:11px;margin:13px 0 22px}
+.ops-marketing-list-item{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#fff;border:1px solid #e0e5ea;padding:15px;border-radius:13px}
+.ops-marketing-list-item>div:first-child{min-width:0;display:grid;gap:5px}
+.ops-marketing-list-item p{font-size:12px;color:#677489;margin:0}
+.ops-marketing-list-item small{font-size:11px;color:#778396}
+@media(max-width:880px){.ops-marketing-layout{grid-template-columns:1fr}.ops-marketing-preview{max-width:490px;width:100%}}
+@media(max-width:570px){.ops-marketing-time{grid-template-columns:1fr}.ops-marketing-list-item{flex-direction:column;align-items:start}}
