@@ -12,7 +12,10 @@ const blankReservation = ():ReservationSettings => ({enabled:false,preparationMi
 type ProductRow = {id:string;name:string;price_pen:number;active:boolean}
 type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;schedule:string;employment_type:string;location_label:string;image_url:string|null;whatsapp_phone:string;active:boolean}
 const modes = [{key:'delivery',name:'Delivery'},{key:'reservation',name:'Reservación'},{key:'pickup',name:'Recojo en tienda'}]
-const payments = [{key:'yape',name:'Yape'},{key:'plin',name:'Plin'},{key:'card',name:'Tarjeta'},{key:'cash',name:'Efectivo'}]
+const payments = [{key:'yape',name:'Yape'},{key:'plin',name:'Plin'},{key:'card',name:'Tarjeta'},{key:'cash',name:'Efectivo'}] as const
+type PaymentMethod = typeof payments[number]['key']
+type PaymentSelection = Record<PaymentMethod,boolean>
+const blankPaymentSelection=():PaymentSelection=>({yape:false,plin:false,card:false,cash:false})
 async function api<T>(path: string, method: 'GET'|'POST'|'PUT'='GET', data?:unknown): Promise<T> {
  const res=await fetch(path,{method,credentials:'include',headers:data?{'Content-Type':'application/json'}:undefined,body:data?JSON.stringify(data):undefined,cache:'no-store'})
  const result=await res.json().catch(()=>({error:'Respuesta inválida'}))
@@ -39,7 +42,13 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [product,setProduct]=useState({name:'',description:'',category:'',pricePen:'',imageUrl:'',active:false})
  const emptyVacancy=()=>({id:'',title:'',summary:'',description:'',requirements:'',schedule:'',employmentType:'',locationLabel:'',imageUrl:'',whatsappPhone:'',active:false})
  const [vacancy,setVacancy]=useState(emptyVacancy)
- const [paymentStore,setPaymentStore]=useState(''),[paymentMode,setPaymentMode]=useState('delivery'),[paymentMethod,setPaymentMethod]=useState('yape'),[paymentEnabled,setPaymentEnabled]=useState(true)
+ const [paymentStore,setPaymentStore]=useState(''),[paymentMode,setPaymentMode]=useState('delivery')
+ const [paymentSelection,setPaymentSelection]=useState<PaymentSelection>(blankPaymentSelection)
+ const [paymentBaseline,setPaymentBaseline]=useState<PaymentSelection>(blankPaymentSelection)
+ const [paymentLoading,setPaymentLoading]=useState(false)
+ const [paymentLoadError,setPaymentLoadError]=useState('')
+ const [paymentReload,setPaymentReload]=useState(0)
+ const paymentDirty=payments.some(p=>paymentSelection[p.key]!==paymentBaseline[p.key])
  const [newTenantEmail,setNewTenantEmail]=useState(''),[newTenantPassword,setNewTenantPassword]=useState('')
  const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false),[promoStarts,setPromoStarts]=useState(''),[promoEnds,setPromoEnds]=useState('')
  const [appId,setAppId]=useState('')
@@ -77,6 +86,29 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       .finally(()=>{if(active)setReservationLoading(false)})
     return ()=>{active=false}
   },[activeArea,tenantId,reservationStoreId])
+ useEffect(()=>{
+  if(activeArea!=='payments'||!tenantId||!paymentStore){
+   setPaymentLoading(false);setPaymentSelection(blankPaymentSelection());setPaymentBaseline(blankPaymentSelection());setPaymentLoadError('');return
+  }
+  let active=true
+  setPaymentLoading(true);setPaymentLoadError('')
+  setPaymentSelection(blankPaymentSelection());setPaymentBaseline(blankPaymentSelection())
+  void api<{items:{store_id:string;mode:string;method:string;enabled:boolean}[]}>(`/api/admin/tenants/${tenantId}/payments`)
+   .then(response=>{
+    if(!active)return
+    const next=blankPaymentSelection()
+    for(const entry of response.items){
+     if(entry.store_id===paymentStore&&entry.mode===paymentMode&&
+      payments.some(item=>item.key===entry.method)){
+      next[entry.method as PaymentMethod]=entry.enabled===true
+     }
+    }
+    setPaymentSelection(next);setPaymentBaseline({...next})
+   })
+   .catch(error=>{if(active)setPaymentLoadError(error instanceof Error?error.message:'No se pudieron consultar los medios de pago')})
+   .finally(()=>{if(active)setPaymentLoading(false)})
+  return ()=>{active=false}
+ },[activeArea,tenantId,paymentStore,paymentMode,paymentReload])
  useEffect(()=>{
   if(!tenantId||!stores.length){setReservationFlags({});return}
   let alive=true
@@ -286,7 +318,37 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    {savedNext('vacancies')}<div className="ops-list">{vacancies.map(job=><button key={job.id} className="ops-row" onClick={()=>setVacancy({id:job.id,title:job.title,summary:job.summary,description:job.description,requirements:job.requirements,schedule:job.schedule,employmentType:job.employment_type,locationLabel:job.location_label,imageUrl:job.image_url||'',whatsappPhone:job.whatsapp_phone,active:job.active})}><strong>{job.title}</strong><span className={job.active?'ops-state ops-state--yes':'ops-state ops-state--no'}>{job.active?'Activa':'Desactivada'}</span><small>{job.location_label||'Sin sede definida'}</small></button>)}</div>
   </section>)}
   {activeArea==='promotions'&&(<section className="ops-panel"><p className="ops-global-note" role="status">Promociones compartidas de la empresa. No se restringen automáticamente a la sede desde la que accediste.</p><h2>Promociones de la aplicación</h2><p>La promoción no estará visible hasta publicar. Solo se muestra el título aprobado; no se inventan precios ni descuentos.</p><div className="ops-inline"><label>Nombre de la promoción<input placeholder="Ej. Promoción del fin de semana" value={promotionTitle} onChange={e=>setPromotionTitle(e.target.value)}/></label><label>Desde (opcional)<input type="datetime-local" value={promoStarts} onChange={e=>setPromoStarts(e.target.value)}/></label><label>Hasta (opcional)<input type="datetime-local" value={promoEnds} onChange={e=>setPromoEnds(e.target.value)}/></label><label className="ops-check"><input type="checkbox" checked={promotionEnabled} onChange={e=>setPromotionEnabled(e.target.checked)}/>Activa</label><button className="button button-secondary" disabled={!promotionTitle.trim()||loading} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/promotions`,'POST',{title:promotionTitle,active:promotionEnabled,startsAt:promoStarts?new Date(promoStarts).toISOString():null,endsAt:promoEnds?new Date(promoEnds).toISOString():null});setPromotionTitle('');setSavedArea('promotions')})}>Guardar promoción</button></div>{savedNext('promotions')}</section>)}
-  {activeArea==='payments'&&(<section className="ops-panel"><h2><CreditCard size={19}/> Pagos por local y modalidad</h2><div className="ops-inline"><label>Tipo de atención<select value={paymentMode} onChange={e=>setPaymentMode(e.target.value)}>{modes.map(m=><option key={m.key} value={m.key}>{m.name}</option>)}</select></label><label>Medio de pago<select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}>{payments.map(p=><option key={p.key} value={p.key}>{p.name}</option>)}</select></label><label className="ops-check"><input type="checkbox" checked={paymentEnabled} onChange={e=>setPaymentEnabled(e.target.checked)}/>Habilitado</label><button className="button button-secondary" disabled={!paymentStore||loading} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/payments`,'POST',{storeId:paymentStore,mode:paymentMode,method:paymentMethod,enabled:paymentEnabled});setSavedArea('payments')})}>Guardar</button></div>{savedNext('payments')}<p className="ops-hint">Configura medios de pago independientes para Delivery, Reservación y Recojo en tienda. Las tres modalidades están disponibles para su configuración, aunque el servicio todavía esté deshabilitado. Los medios solo se ofrecen al cliente cuando la modalidad correspondiente está habilitada. Habilitar un medio no verifica ni realiza cobros.</p></section>)}
+  {activeArea==='payments'&&(<section className="ops-panel ops-payment-panel">
+    <h2><CreditCard size={19}/> Pagos por local y modalidad</h2>
+    <p className="ops-hint">Configura los métodos de pago de {selectedStore?.name||'este local'} para cada modalidad de forma independiente.</p>
+    <div className="ops-payment-head"><label>Tipo de atención
+     <select value={paymentMode} disabled={loading||paymentLoading} onChange={e=>{setSavedArea('');setPaymentMode(e.target.value)}}>
+      {modes.map(m=><option key={m.key} value={m.key}>{m.name}</option>)}
+     </select></label></div>
+    <h3>Medios de pago habilitados</h3>
+    {paymentLoading?<p role="status" className="ops-hint">Cargando medios de pago...</p>:
+     paymentLoadError?<div role="alert" className="ops-error">{paymentLoadError} <button type="button" className="button button-secondary" onClick={()=>setPaymentReload(x=>x+1)}>Reintentar</button></div>:
+     <div className="ops-payment-method-grid">{payments.map(method=>
+      <label className="ops-payment-method" key={method.key}>
+       <input type="checkbox" disabled={loading} checked={paymentSelection[method.key]}
+        onChange={e=>{setSavedArea('');setPaymentSelection(current=>({...current,[method.key]:e.target.checked}))}}/>
+       <span>{method.name}</span>
+       <span className="ops-payment-status">{paymentSelection[method.key]?'Habilitado':'Deshabilitado'}</span>
+      </label>
+     )}</div>}
+    <button type="button" className="button button-primary" disabled={!paymentStore||loading||paymentLoading||!!paymentLoadError||!paymentDirty}
+     onClick={()=>void act(async()=>{
+      const changes=payments.filter(method=>paymentSelection[method.key]!==paymentBaseline[method.key])
+      for(const method of changes){
+       await api(`/api/admin/tenants/${tenantId}/payments`,'POST',
+        {storeId:paymentStore,mode:paymentMode,method:method.key,enabled:paymentSelection[method.key]})
+      }
+      setPaymentBaseline({...paymentSelection})
+      setSavedArea('payments')
+     })}>Guardar métodos de pago</button>
+    {savedNext('payments')}
+    <p className="ops-hint">Las tres modalidades se pueden configurar aunque aún no estén habilitadas en el local. Habilitar un medio no verifica ni realiza cobros, ni activa el servicio por sí solo.</p>
+   </section>)}
   {activeArea==='settings'&&(<section className="ops-panel"><h2>Libro de Reclamaciones · Enlace oficial</h2>
   <p>Ingresa únicamente la URL HTTPS del Libro de Reclamaciones real de la empresa seleccionada. La aplicación mostrará el botón de acceso después de publicar los cambios. Este campo no crea ni recibe reclamaciones.</p>
   <label>Dirección HTTPS del Libro de Reclamaciones<input type="url" value={complaintsBookUrl} placeholder="https://..." onChange={e=>setComplaintsBookUrl(e.target.value)} /></label>
