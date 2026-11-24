@@ -50,7 +50,10 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [paymentReload,setPaymentReload]=useState(0)
  const paymentDirty=payments.some(p=>paymentSelection[p.key]!==paymentBaseline[p.key])
  const [newTenantEmail,setNewTenantEmail]=useState(''),[newTenantPassword,setNewTenantPassword]=useState('')
- const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false),[promoStarts,setPromoStarts]=useState(''),[promoEnds,setPromoEnds]=useState('')
+ const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false)
+ const [promoStartDate,setPromoStartDate]=useState(''),[promoEndDate,setPromoEndDate]=useState('')
+ const [promoStartTime,setPromoStartTime]=useState(''),[promoEndTime,setPromoEndTime]=useState('')
+ const [promoDays,setPromoDays]=useState<number[]>([])
  const [appId,setAppId]=useState('')
  const [timeZone,setTimeZone]=useState('America/Lima')
   const [reservationStoreId,setReservationStoreId]=useState('')
@@ -317,7 +320,53 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    </div>
    {savedNext('vacancies')}<div className="ops-list">{vacancies.map(job=><button key={job.id} className="ops-row" onClick={()=>setVacancy({id:job.id,title:job.title,summary:job.summary,description:job.description,requirements:job.requirements,schedule:job.schedule,employmentType:job.employment_type,locationLabel:job.location_label,imageUrl:job.image_url||'',whatsappPhone:job.whatsapp_phone,active:job.active})}><strong>{job.title}</strong><span className={job.active?'ops-state ops-state--yes':'ops-state ops-state--no'}>{job.active?'Activa':'Desactivada'}</span><small>{job.location_label||'Sin sede definida'}</small></button>)}</div>
   </section>)}
-  {activeArea==='promotions'&&(<section className="ops-panel"><p className="ops-global-note" role="status">Promociones compartidas de la empresa. No se restringen automáticamente a la sede desde la que accediste.</p><h2>Promociones de la aplicación</h2><p>La promoción no estará visible hasta publicar. Solo se muestra el título aprobado; no se inventan precios ni descuentos.</p><div className="ops-inline"><label>Nombre de la promoción<input placeholder="Ej. Promoción del fin de semana" value={promotionTitle} onChange={e=>setPromotionTitle(e.target.value)}/></label><label>Desde (opcional)<input type="datetime-local" value={promoStarts} onChange={e=>setPromoStarts(e.target.value)}/></label><label>Hasta (opcional)<input type="datetime-local" value={promoEnds} onChange={e=>setPromoEnds(e.target.value)}/></label><label className="ops-check"><input type="checkbox" checked={promotionEnabled} onChange={e=>setPromotionEnabled(e.target.checked)}/>Activa</label><button className="button button-secondary" disabled={!promotionTitle.trim()||loading} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/promotions`,'POST',{title:promotionTitle,active:promotionEnabled,startsAt:promoStarts?new Date(promoStarts).toISOString():null,endsAt:promoEnds?new Date(promoEnds).toISOString():null});setPromotionTitle('');setSavedArea('promotions')})}>Guardar promoción</button></div>{savedNext('promotions')}</section>)}
+  {activeArea==='promotions'&&(<section className="ops-panel ops-promo-panel">
+    <p className="ops-global-note" role="status">Promociones compartidas de la empresa. No se restringen automáticamente a la sede desde la que accediste.</p>
+    <h2>Promociones de la aplicación</h2>
+    <p className="ops-hint">Elige un periodo de fechas, las horas de actividad y los días de la semana. La promoción no será visible hasta publicar los cambios. Solo se mostrará el título aprobado.</p>
+    <div className="ops-promo-fields">
+     <label>Nombre de la promoción<input placeholder="Ej. Promoción del fin de semana"
+      value={promotionTitle} onChange={e=>setPromotionTitle(e.target.value)}/></label>
+     <label>Fecha de inicio<input type="date" value={promoStartDate}
+      onChange={e=>setPromoStartDate(e.target.value)}/></label>
+     <label>Fecha de fin<input type="date" min={promoStartDate||undefined} value={promoEndDate}
+      onChange={e=>setPromoEndDate(e.target.value)}/></label>
+    </div>
+    <div className="ops-promo-time-fields">
+     <label>Hora de inicio<input type="time" value={promoStartTime}
+      onChange={e=>setPromoStartTime(e.target.value)}/></label>
+     <label>Hora de fin<input type="time" value={promoEndTime}
+      onChange={e=>setPromoEndTime(e.target.value)}/></label>
+    </div>
+    <fieldset className="ops-promo-weekdays"><legend>Días en los que estará activa</legend>
+     <div className="ops-promo-days">
+      {([{value:1,name:'Lunes'},{value:2,name:'Martes'},{value:3,name:'Miércoles'},
+       {value:4,name:'Jueves'},{value:5,name:'Viernes'},{value:6,name:'Sábado'},
+       {value:7,name:'Domingo'}] as const).map(day=><label key={day.value} className={promoDays.includes(day.value)?'ops-promo-day is-selected':'ops-promo-day'}>
+       <input type="checkbox" checked={promoDays.includes(day.value)}
+        onChange={e=>setPromoDays(prev=>e.target.checked?[...prev,day.value].sort((a,b)=>a-b):prev.filter(n=>n!==day.value))}/>
+       {day.name}
+      </label>)}
+     </div>
+    </fieldset>
+    <div className="ops-promo-actions"><label className="ops-check">
+     <input type="checkbox" checked={promotionEnabled} onChange={e=>setPromotionEnabled(e.target.checked)}/>
+     Promoción activa</label>
+     <button className="button button-primary" disabled={loading||!promotionTitle.trim()||!promoStartDate||
+      !promoEndDate||promoStartDate>promoEndDate||!promoStartTime||!promoEndTime||
+      promoStartTime>=promoEndTime||promoDays.length===0}
+      onClick={()=>void act(async()=>{
+       await api(`/api/admin/tenants/${tenantId}/promotions`,'POST',{
+        title:promotionTitle.trim(),active:promotionEnabled,startDate:promoStartDate,
+        endDate:promoEndDate,startTime:promoStartTime,endTime:promoEndTime,weekdays:promoDays
+       })
+       setPromotionTitle('');setPromotionEnabled(false);setPromoStartDate('');setPromoEndDate('')
+       setPromoStartTime('');setPromoEndTime('');setPromoDays([]);setSavedArea('promotions')
+      })}>Guardar promoción</button>
+    </div>
+    <p className="ops-hint">La franja horaria pertenece a cada día marcado (hora de inicio anterior a la de fin). La aplicación aplica la hora local de la empresa. Una promoción guardada no aparecerá hasta publicarla.</p>
+    {savedNext('promotions')}
+   </section>)}
   {activeArea==='payments'&&(<section className="ops-panel ops-payment-panel">
     <h2><CreditCard size={19}/> Pagos por local y modalidad</h2>
     <p className="ops-hint">Configura los métodos de pago de {selectedStore?.name||'este local'} para cada modalidad de forma independiente.</p>
