@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS company_mobile_notifications (
  image_url TEXT,
  scheduled_at TIMESTAMPTZ NOT NULL,
  expires_at TIMESTAMPTZ NOT NULL,
+ weekdays INTEGER[],
+ run_time TIME WITHOUT TIME ZONE,
  status TEXT NOT NULL DEFAULT 'DRAFT' CHECK(status IN ('DRAFT','PUBLISHED','DISABLED')),
  published_at TIMESTAMPTZ,
  push_sent_at TIMESTAMPTZ,
@@ -110,12 +112,30 @@ CREATE TABLE IF NOT EXISTS company_mobile_notifications (
  push_error TEXT,
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- CONSTRAINT company_mobile_notifications_dates CHECK(expires_at>scheduled_at)
+ CONSTRAINT company_mobile_notifications_dates CHECK(expires_at>scheduled_at),
+ CONSTRAINT company_mobile_notifications_weekly_schedule_check CHECK(
+  (weekdays IS NULL AND run_time IS NULL)
+  OR (weekdays IS NOT NULL AND run_time IS NOT NULL
+   AND cardinality(weekdays) BETWEEN 1 AND 7
+   AND weekdays <@ ARRAY[1,2,3,4,5,6,7]::INTEGER[]
+   AND array_position(weekdays,NULL) IS NULL)
+ )
 );
 CREATE INDEX IF NOT EXISTS idx_company_mobile_notifications_tenant
  ON company_mobile_notifications(tenant_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_company_mobile_notifications_push
  ON company_mobile_notifications(status,scheduled_at) WHERE push_sent_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS company_mobile_notification_runs (
+ notification_id UUID NOT NULL REFERENCES company_mobile_notifications(id) ON DELETE CASCADE,
+ run_date DATE NOT NULL,
+ claim_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ sent_at TIMESTAMPTZ,
+ error TEXT,
+ PRIMARY KEY(notification_id,run_date)
+);
+CREATE INDEX IF NOT EXISTS idx_company_mobile_notification_runs_pending
+ ON company_mobile_notification_runs(claim_at) WHERE sent_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS payment_methods (
   tenant_id UUID NOT NULL REFERENCES tenants(id),
