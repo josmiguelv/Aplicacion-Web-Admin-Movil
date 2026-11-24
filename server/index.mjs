@@ -534,7 +534,7 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(await serviceCatalogRoute({req,res,url,pool,json}))return
  if(url.pathname.startsWith('/api/v1/mobile/')){
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
- if(await mobileTuVersoRoutes({req,res,url}))return
+ await mobileTuVersoRoutes({req,res,url});if(res.writableEnded)return
  if(await mobileOrderAvailabilityRoutes({req,res,url}))return
   if(/^\/api\/v1\/mobile\/stores\/[0-9a-f-]{36}\/reservation-slots$/i.test(url.pathname))
    return await mobileReservationSlotsRoute({req,res,url})
