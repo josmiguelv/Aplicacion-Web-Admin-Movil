@@ -21,7 +21,15 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
  const createdIds=new Map()
  const terminalSessions=new Map()
  let referenceForTest=''
- const pool={async query(sql,args){
+ const pool={async connect(){return {
+  async query(sql,args){
+   queries.push({sql,args})
+   if(sql==='BEGIN'||sql==='COMMIT'||sql==='ROLLBACK')return {rowCount:0,rows:[]}
+   if(sql.startsWith('INSERT INTO product_images'))return {rowCount:1,rows:[{id:'99999999-9999-4999-8999-999999999999'}]}
+   if(sql.startsWith('INSERT INTO mobile_payment_receipt_images'))return {rowCount:1,rows:[]}
+   throw Error('Unexpected receipt SQL: '+sql)
+  },release(){}
+ }},async query(sql,args){
   queries.push({sql,args})
   if(sql.includes('FROM published_catalogs p')){
    const row=catalogs[args[0]]
@@ -53,6 +61,8 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
  }}
  const route=createMobileTuVersoRoutes({pool,body:async req=>req.body,
   json:(res,code,payload)=>{res.reply={code,payload}},
+  imageBody:async req=>req.rawImage||Buffer.from('ffd8ffe0','hex'),imageMime:()=> 'image/jpeg',
+  receiptBaseUrl:()=> 'https://admin.example.com',
   storeOpen:()=>open,checkMode:()=>enabled?'LIVE':'DISABLED',
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   decrypt:()=> 'private-credential',
@@ -76,7 +86,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   }
  })
  const call=async(method,path,{payload,headers}={})=>{
-  const req={method,body:payload,headers:headers||{},socket:{remoteAddress:'synthetic'}}
+  const req={method,body:payload,rawImage:Buffer.from('ffd8ffe0','hex'),headers:headers||{},socket:{remoteAddress:'synthetic'}}
   const res={}
   const handled=await route({req,res,url:new URL('http://local.test'+path)})
   assert.equal(handled,undefined)
@@ -772,4 +782,27 @@ test('payment receipt rejects invalid image, missing idempotency, wrong access a
  const forbidden=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID(),'idempotency-key':key},payload})
  assert.equal(forbidden.code,403)
  assert.deepEqual(h.remote.map(x=>x.operation),['read'])
+})
+
+test('receipt upload stores image for the authorized accepted order and returns a public URL',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),h=harness({remoteStatus:'ACCEPTED'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const url='/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA
+ const result=await h.call('POST',url,{headers:{'x-order-access-key':access,'content-type':'image/jpeg'}})
+ assert.equal(result.code,201)
+ assert.equal(result.payload.imageId,'99999999-9999-4999-8999-999999999999')
+ assert.equal(result.payload.imageUrl,'https://admin.example.com/api/v1/mobile/payment-receipts/images/'+result.payload.imageId)
+ assert.deepEqual(h.remote.map(x=>x.operation),['read'])
+ assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO mobile_payment_receipt_images')),true)
+})
+test('receipt upload never persists a non-accepted order or mismatched access key',async()=>{
+ const access=randomUUID(),id=randomUUID(),h=harness({remoteStatus:'PENDING'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const path='/api/v1/mobile/interactions/'+id+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA
+ const pending=await h.call('POST',path,{headers:{'x-order-access-key':access}})
+ assert.equal(pending.code,409)
+ assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO product_images')),false)
+ const other=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID()}})
+ assert.equal(other.code,403)
+ assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO product_images')),false)
 })
