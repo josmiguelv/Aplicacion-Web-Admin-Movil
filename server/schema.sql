@@ -441,6 +441,9 @@ CREATE TABLE IF NOT EXISTS mobile_checkout_policies(
  reminders_enabled BOOLEAN NOT NULL DEFAULT false,
  reminder_title TEXT NOT NULL DEFAULT 'Tu compra está pendiente',
  reminder_message TEXT NOT NULL DEFAULT 'Continúa con el pago o cancela tu solicitud de Pollos B3.',
+ reminder2_title TEXT NOT NULL DEFAULT '⏰ Tu pedido sigue pendiente',
+ reminder2_message TEXT NOT NULL DEFAULT 'Aún tienes un pago pendiente en Pollos B3. Entra a la app y completa tu pedido antes de que termine el plazo.',
+ CONSTRAINT mobile_checkout_policies_reminder2_content_check CHECK (length(trim(reminder2_title)) BETWEEN 1 AND 120 AND length(trim(reminder2_message)) BETWEEN 1 AND 500),
  CONSTRAINT mobile_checkout_policies_reminder_content_check CHECK (length(trim(reminder_title)) BETWEEN 1 AND 120 AND length(trim(reminder_message)) BETWEEN 1 AND 500),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
