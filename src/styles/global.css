@@ -131,3 +131,13 @@
 @media(max-width:1000px){.ops-promo-days{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:680px){.ops-promo-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-promo-fields>label:first-child{grid-column:1/-1}.ops-promo-time-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-promo-days{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:380px){.ops-promo-fields,.ops-promo-time-fields{grid-template-columns:1fr}.ops-promo-fields>label:first-child{grid-column:auto}}
+
+
+/* Jobs: select one or more existing active business locations. */
+.ops-vacancy-stores{border:0;padding:0;margin:16px 0 22px;min-width:0}
+.ops-vacancy-stores legend{font-size:14px;font-weight:750;margin-bottom:12px}
+.ops-vacancy-store-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:11px}
+.ops-vacancy-store{display:flex;align-items:center;gap:10px;padding:15px;border:1px solid #dbe4e9;background:#fff;border-radius:12px;cursor:pointer;font-size:14px;font-weight:650}
+.ops-vacancy-store.is-selected{background:#f1faf5;border-color:#a2d8bc;color:#176548}
+.ops-vacancy-store input[type=checkbox]{accent-color:#16744d;width:18px;height:18px;flex:none}
+.ops-vacancy-store:focus-within{outline:2px solid #166f50;outline-offset:2px}
