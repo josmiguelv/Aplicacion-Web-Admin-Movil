@@ -85,6 +85,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [remindersEnabled,setRemindersEnabled]=useState(false)
  const [reminderTitle,setReminderTitle]=useState('Tu compra está pendiente')
  const [reminderMessage,setReminderMessage]=useState('Continúa con el pago o cancela tu solicitud de Pollos B3.')
+ const [reminder2Title,setReminder2Title]=useState('⏰ Tu pedido sigue pendiente')
+ const [reminder2Message,setReminder2Message]=useState('Aún tienes un pago pendiente en Pollos B3. Entra a la app y completa tu pedido antes de que termine el plazo.')
  const [complaintsBookUrl,setComplaintsBookUrl]=useState('')
  const [loading,setLoading]=useState(false)
  const [savedArea,setSavedArea]=useState<string>('')
@@ -105,7 +107,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),
    api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),
    api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`),
-   api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string}>(`/api/admin/tenants/${id}/checkout-settings`)
+   api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string;reminder2Title:string;reminder2Message:string}>(`/api/admin/tenants/${id}/checkout-settings`)
   ])
   const warnings:string[]=[]
   if(st.status==='fulfilled'){
@@ -131,6 +133,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    setRemindersEnabled(checkout.value.remindersEnabled)
    setReminderTitle(checkout.value.reminderTitle)
    setReminderMessage(checkout.value.reminderMessage)
+   setReminder2Title(checkout.value.reminder2Title)
+   setReminder2Message(checkout.value.reminder2Message)
   }else warnings.push('Notificaciones / Seguimiento de pago (revisar migración 007)')
   setModuleWarnings(warnings)
  }
@@ -681,33 +685,53 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     </select>
    </label>
   </div>
-  <h3>Contenido que llegará al celular</h3>
-  <p className="ops-hint">Configura el título y el mensaje personal. Nunca se envían a un tema comercial ni a todos los clientes.</p>
-  <div className="ops-grid">
-   <label>Título de la notificación
-    <input maxLength={120} value={reminderTitle} onChange={e=>setReminderTitle(e.target.value)}/>
-   </label>
-   <label>Mensaje de la notificación
-    <textarea rows={3} maxLength={500} value={reminderMessage} onChange={e=>setReminderMessage(e.target.value)}/>
-   </label>
-  </div>
-  <div className="ops-marketing-preview">
-   <div className="ops-marketing-phone">
-    <div className="ops-marketing-phone-head"><Bell size={15}/> Pollos B3 · Vista previa del aviso personal</div>
-    <strong>{reminderTitle.trim()||'Título de la notificación'}</strong>
-    <p>{reminderMessage.trim()||'Mensaje que verá el cliente en su celular.'}</p>
-    <small>Al tocar el aviso, la aplicación abre el pedido relacionado.</small>
+  {reminderCount>0&&<>
+   <h3>Contenido de los recordatorios que recibirá el cliente</h3>
+   <p className="ops-hint">Cada aviso tiene su propio título y mensaje. Se envían únicamente al celular vinculado al pedido.</p>
+   <div className="ops-reminder-editors">
+    <div className="ops-reminder-editor">
+     <h4>Recordatorio 1</h4>
+     <div className="ops-grid">
+      <label>Título del primer aviso<input maxLength={120} value={reminderTitle}
+       onChange={e=>setReminderTitle(e.target.value)}/></label>
+      <label>Mensaje del primer aviso<textarea rows={3} maxLength={500} value={reminderMessage}
+       onChange={e=>setReminderMessage(e.target.value)}/></label>
+     </div>
+     <div className="ops-marketing-preview"><div className="ops-marketing-phone">
+      <div className="ops-marketing-phone-head"><Bell size={15}/> Pollos B3 · Vista previa · Aviso 1</div>
+      <strong>{reminderTitle.trim()||'Título del primer aviso'}</strong>
+      <p>{reminderMessage.trim()||'Mensaje que recibirá el cliente.'}</p>
+      <small>Al tocarlo se abrirá el pedido vinculado en la aplicación.</small>
+     </div></div>
+    </div>
+    {reminderCount===2&&<div className="ops-reminder-editor">
+     <h4>Recordatorio 2</h4>
+     <div className="ops-grid">
+      <label>Título del segundo aviso<input maxLength={120} value={reminder2Title}
+       onChange={e=>setReminder2Title(e.target.value)}/></label>
+      <label>Mensaje del segundo aviso<textarea rows={3} maxLength={500} value={reminder2Message}
+       onChange={e=>setReminder2Message(e.target.value)}/></label>
+     </div>
+     <div className="ops-marketing-preview"><div className="ops-marketing-phone">
+      <div className="ops-marketing-phone-head"><Bell size={15}/> Pollos B3 · Vista previa · Aviso 2</div>
+      <strong>{reminder2Title.trim()||'Título del segundo aviso'}</strong>
+      <p>{reminder2Message.trim()||'Mensaje que recibirá el cliente.'}</p>
+      <small>Al tocarlo se abrirá el pedido vinculado en la aplicación.</small>
+     </div></div>
+    </div>}
    </div>
-  </div>
+  </>}
   <p className="ops-hint">Ejemplo: si el pago empieza a las 12:00, con 10 minutos y 2 recordatorios, los intentos serán aproximadamente a las 12:03:20 y 12:06:40. Si otro pedido inicia a las 23:00, sus recordatorios se calculan independientemente. El envío requiere autorización del dispositivo y Firebase configurado.</p>
   <button type="button" className="button button-primary" disabled={loading||!tenantId||
    !Number.isInteger(paymentWaitMinutes)||paymentWaitMinutes<5||paymentWaitMinutes>30||
-   !reminderTitle.trim()||reminderTitle.trim().length>120||!reminderMessage.trim()||reminderMessage.trim().length>500}
+   (reminderCount>0&&(!reminderTitle.trim()||reminderTitle.trim().length>120||!reminderMessage.trim()||reminderMessage.trim().length>500))||
+   (reminderCount===2&&(!reminder2Title.trim()||reminder2Title.trim().length>120||!reminder2Message.trim()||reminder2Message.trim().length>500))}
    onClick={()=>void act(async()=>{
     const r=await api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',
-     {paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage})
+     {paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage,reminder2Title,reminder2Message})
     setPaymentWaitMinutes(r.paymentWaitMinutes);setReminderCount(r.reminderCount)
     setRemindersEnabled(r.remindersEnabled);setReminderTitle(r.reminderTitle);setReminderMessage(r.reminderMessage)
+    setReminder2Title(r.reminder2Title);setReminder2Message(r.reminder2Message)
     setMessage('Configuración de recordatorios personales guardada para todas las sedes.')
    })}>Guardar recordatorios de pago</button>
   <p className="ops-hint">Guardar no envía avisos inmediatamente. El servicio automático sigue controlado por el backend; nunca se envía una notificación grupal. No se modifica el tiempo de espera de TU VERSO.</p>
