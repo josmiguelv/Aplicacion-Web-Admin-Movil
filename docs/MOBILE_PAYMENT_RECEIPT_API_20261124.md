@@ -11,7 +11,7 @@ Encabezados:
 - `Content-Type: image/jpeg` (o PNG/WebP)
 - Cuerpo: **bytes binarios de la imagen**, no JSON ni base64.
 
-La operación comprueba la interacción ACCEPTED y que pertenezca a la empresa y sede de la clave del pedido, valida los primeros bytes reales de JPEG/PNG/WebP, aplica el límite de 4 MB, almacena el contenido en `product_images` y registra su propiedad en `mobile_payment_receipt_images`. Devuelve **201**:
+La operación comprueba que la interacción siga activa (estado técnico PENDING o ACCEPTED) y que pertenezca a la empresa y sede de la clave del pedido, valida los primeros bytes reales de JPEG/PNG/WebP, aplica el límite de 4 MB, almacena el contenido en `product_images` y registra su propiedad en `mobile_payment_receipt_images`. Devuelve **201**:
 
 ```json
 {"imageId":"<UUID>","imageUrl":"https://admin.example.com/api/v1/mobile/payment-receipts/images/<UUID>","mime":"image/jpeg"}
@@ -60,7 +60,7 @@ Respuesta `200` después de la confirmación de entrega del mensaje:
 
 ## Seguridad y compatibilidad
 - Reutiliza el vínculo validado de `appId`, `storeId`, `tenantId`, clave de acceso y referencia exacta de la interacción, más estado de checkout local.
-- Solo permite el envío si TU VERSO identifica la interacción como `ACCEPTED`; nunca después de `CANCELLED`, `EXPIRED`, `FINISHED`, `REJECTED`.
+- Permite el envío con estado técnico `PENDING` o `ACCEPTED` siempre que la interacción siga activa y autorizada. La aprobación comercial ya la procesa Android; el Administrador no interpreta mensajes del agente. Se bloquean estados `CANCELLED`, `EXPIRED`, `FINISHED`, `REJECTED` y conversaciones `CLOSED` o `RESOLVED`.
 - Se rechazan links HTTP, localhost, IP literal, URL con credenciales y dominios internos; no se descarga la imagen desde el Administrador.
 - Se exige un UUID de idempotencia independiente del identificador de acceso del pedido; un reintento usa exactamente el mismo UUID.
 - `POST /api/v1/mobile/interactions/{id}/message` mantiene TEXT / FORM y ahora permite `form.imageUrl` opcional.
@@ -74,3 +74,6 @@ node --check server/tuverso-mobile-connector.mjs
 node --test server/payment-receipt-validation.test.mjs server/mobile-tuverso-routes.test.mjs
 ```
 No marcar como validado en entorno real hasta probar con una interacción de prueba y comprobar que TU VERSO renderiza `imageUrl`.
+
+## Corrección 24/11 — 409 con estado técnico PENDING
+Las rutas de subida y de envío de comprobante ya no exigen `remote.data.status === 'ACCEPTED'`: TU VERSO puede mantener `PENDING` aunque Android ya haya procesado «aceptar». Se verifican identidad, binding, sesión local y que la conversación no esté cerrada. No se altera el contrato ni se traslada lógica comercial al Administrador.
