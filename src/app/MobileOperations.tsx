@@ -81,7 +81,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [loading,setLoading]=useState(false)
  const [savedArea,setSavedArea]=useState<string>('')
  const savedNext=(area:string)=>savedArea===area&&<div className="ops-save-next" role="status"><div className="ops-save-next-heading"><Check size={18}/><strong>Cambios guardados</strong></div><p>Los cambios están guardados. Para que aparezcan en la aplicación, debes publicarlos.</p><div className="ops-save-next-actions"><button type="button" className="button button-secondary" onClick={()=>setSavedArea('')}>Seguir editando</button><button type="button" className="button button-primary" onClick={()=>chooseArea('publish')}><Send size={15}/> Ir a publicar</button></div></div>
- const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'notifications'|'commercial-notifications'|'publish'>('overview')
+ const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'commercial-notifications'|'publish'>('overview')
  const chooseArea=(area:typeof activeArea)=>{
   if(area===activeArea)return
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Tienes cambios sin guardar en el local. ¿Quieres salir sin guardarlos?'))return
@@ -315,12 +315,12 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    {moduleWarnings.length>0&&<p role="status" className="ops-global-note">Algunos módulos no pudieron cargar: {moduleWarnings.join(', ')}. Puedes consultar tus locales mientras se corrige el módulo afectado.</p>}
    <div className="ops-local-grid">{!storesLoaded?<div className="ops-panel" role="status">No se pudo completar la carga de locales. No significa que se hayan eliminado; revisa el error del servidor.</div>:stores.length===0?<div className="ops-panel">Todavía no hay locales registrados.</div>:stores.map(local=><button type="button" className="ops-local-card" key={local.id} onClick={()=>enterLocal(local)}><span className="ops-card-icon"><Store size={23}/></span><span className="ops-card-status" data-enabled={local.active}>{local.active?'Activo':'Inactivo'}</span><strong>{local.name}</strong><span className="ops-card-address"><MapPin size={14}/>{local.address||'Dirección sin configurar'}</span><span className="ops-card-tags"><span data-on={local.delivery_enabled}>Delivery {local.delivery_enabled?'· Sí':'· No'}</span><span data-on={local.pickup_enabled}>Recojo {local.pickup_enabled?'· Sí':'· No'}</span><span data-on={reservationFlags[local.id]===true}>Reserva {reservationFlags[local.id]===undefined?'· Consultando':reservationFlags[local.id]===null?'· Sin datos':reservationFlags[local.id]?'· Sí':'· No'}</span></span><span className="ops-card-link">Configurar local <ArrowRight size={16}/></span></button>)}</div>
   </section>}
-  {activeArea==='overview'&&<section className="ops-workspace" aria-label="Avisos generales de la empresa">
-   <div className="ops-workspace-head"><div><h2>Avisos al celular</h2><p>Notificaciones comerciales para los clientes de todas las sedes de esta empresa.</p></div></div>
+  {activeArea==='overview'&&<section className="ops-workspace" aria-label="Notificaciones para el cliente">
+   <div className="ops-workspace-head"><div><h2>Notificaciones para el cliente</h2><p>Configuración de avisos al celular y recordatorios personales de pago para todas las sedes de la empresa.</p></div></div>
    <div className="ops-module-grid">
     <button type="button" className="ops-module-card" onClick={()=>chooseArea('commercial-notifications')}>
-     <Bell size={24}/><strong>Avisos al celular</strong>
-     <span>Título, mensaje, imagen y programación para clientes · Todas las sedes</span>
+     <Bell size={24}/><strong>Notificaciones para el cliente</strong>
+     <span>Avisos comerciales, contenido para el celular y recordatorios de pago · Todas las sedes</span>
      <ArrowRight className="ops-card-arrow" size={17}/>
     </button>
    </div>
@@ -340,7 +340,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       {area:'promotions',title:'Promociones',subtitle:'Promociones generales · compartidas',icon:Tag},
       {area:'vacancies',title:'Empleo',subtitle:'Vacantes de la empresa · compartidas',icon:Store},
       {area:'settings',title:'Datos de la empresa',subtitle:'Configuración general · compartida',icon:Settings2},
-      {area:'notifications',title:'Notificaciones',subtitle:'Recordatorios personales de pago · todas las sedes',icon:Bell},
       {area:'publish',title:'Publicar cambios',subtitle:'Publicación del catálogo de la empresa',icon:Send}
      ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={false}>Compartida</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}</div>
     <p className="ops-global-note">Las tarjetas marcadas como compartidas abren formularios generales de la empresa; aún no realizan cambios exclusivos en este local. La personalización por sede requiere API y persistencia adicionales.</p>
@@ -491,8 +490,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   <p className="ops-hint">Debe corresponder al Libro auténtico del proveedor y permitir obtener constancia del reclamo. Si está vacío, la aplicación informará que el acceso digital aún no está configurado; no simulará registros.</p>
  </section>)}
  {activeArea==='commercial-notifications'&&(<section className="ops-panel ops-marketing-panel">
-  <h2><Bell size={19}/> Avisos comerciales al celular</h2>
-  <p className="ops-hint">Avisos para los clientes de toda la empresa. Configura el contenido, la imagen y el periodo de vigencia; separado de recordatorios personales de pago.</p>
+  <h2><Bell size={19}/> Notificaciones para el cliente · Avisos al celular</h2>
+  <p className="ops-hint">Configura los avisos comerciales para los clientes de todas las sedes. Más abajo encontrarás la configuración de recordatorios personales de pago, dentro de este mismo módulo.</p>
   <div className="ops-marketing-layout">
    <div className="ops-marketing-fields">
     <label>Título de la notificación<input maxLength={120} value={noticeTitle} placeholder="Título que verá el cliente"
@@ -564,9 +563,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    </div>)}</div>}
   <p className="ops-hint">El envío push está desactivado por defecto en el backend. Requiere Firebase configurado y suscripción voluntaria al tema comercial del aplicativo; guardar o publicar no significa que se entregó al celular.</p>
  </section>)}
- {activeArea==='notifications'&&(<section className="ops-panel ops-notifications-panel">
-  <h2><Bell size={19}/> Notificaciones de la empresa</h2>
-  <p className="ops-hint">Se configuran una sola vez para todas las sedes de esta empresa. Los avisos se dirigen al cliente y pedido correspondiente, no a listas masivas de promociones.</p>
+ {activeArea==='commercial-notifications'&&(<section className="ops-panel ops-notifications-panel">
+  <h2><Bell size={19}/> Recordatorios personales de pago</h2>
+  <p className="ops-hint">Los recordatorios se configuran una sola vez para la empresa y se dirigen únicamente al cliente y pedido correspondiente. Son independientes de los avisos comerciales anteriores.</p>
   <h3>Seguimiento de pago y recordatorios personales</h3>
   <p className="ops-hint">El plazo inicia cuando el pedido fue aceptado por la sede y la app presenta el total. Los avisos son individuales por dispositivo y solicitud; nunca se envían a un tema de promociones. La espera de respuesta del agente no tiene este plazo.</p>
   <div className="ops-grid">
