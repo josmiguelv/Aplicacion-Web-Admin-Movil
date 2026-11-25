@@ -114,7 +114,7 @@ function validClientForm(value){
     (value.imageUrl!==undefined&&!validReceiptImageUrl(value.imageUrl))||
     value.subtitle!==undefined&&(typeof value.subtitle!=='string'||value.subtitle.length>350||
      /[\x00-\x1f\x7f]/.test(value.subtitle))||
-    !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>5)return false
+    !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>10)return false
  const names=new Set()
  for(const row of value.fields){
   if(!plainObject(row)||Object.keys(row).some(k=>!['variable','value'].includes(k))||
