@@ -77,3 +77,6 @@ No marcar como validado en entorno real hasta probar con una interacción de pru
 
 ## Corrección 24/11 — 409 con estado técnico PENDING
 Las rutas de subida y de envío de comprobante ya no exigen `remote.data.status === 'ACCEPTED'`: TU VERSO puede mantener `PENDING` aunque Android ya haya procesado «aceptar». Se verifican identidad, binding, sesión local y que la conversación no esté cerrada. No se altera el contrato ni se traslada lógica comercial al Administrador.
+
+## Capacidad FORM (actualización 24/11)
+El Administrador Web acepta ahora de **1 a 10** pares `variable`/`value` en `form.fields` tanto para mensajes FORM directos como para FORM de comprobantes. `imageUrl`, `title` y `subtitle` son atributos independientes y no consumen un campo. Más de 10 campos se rechazan con HTTP 400 antes de contactar a TU VERSO. No se cambió la API receptora de TU VERSO: se requiere verificar allí que admita diez filas antes de certificar el flujo extremo a extremo.
