@@ -333,7 +333,7 @@ test('reject type confusion, cross-content fields, and unsafe TEXT before contac
 })
 
 
-test('Android sends title, subtitle and five independent FORM rows unchanged to TU VERSO',async()=>{
+test('Android sends title, subtitle and ten independent FORM rows unchanged to TU VERSO',async()=>{
  const h=harness(),access=randomUUID(),messageKey=randomUUID(),interactionId=randomUUID()
  const external='mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48)
  h.setReference(external)
@@ -343,6 +343,11 @@ test('Android sends title, subtitle and five independent FORM rows unchanged to 
   {variable:'Productos',value:'2 pollos a la brasa'},
   {variable:'Subtotal',value:'S/ 90.00'},
   {variable:'Dirección',value:'Av. Principal 123, Santa Anita'},
+  {variable:'Distrito',value:'Santa Anita'},
+  {variable:'Referencia',value:'Frente al parque'},
+  {variable:'Modalidad',value:'Delivery'},
+  {variable:'Pago',value:'Yape'},
+  {variable:'Observación',value:'Sin ají'},
  ]}
  const payload={type:'FORM',appId:appA,storeId:storeA,form}
  const path='/api/v1/mobile/interactions/'+interactionId+'/message'
@@ -366,7 +371,7 @@ test('direct FORM rejects invalid rows, missing independent key, and mixed order
  const valid={title:'SOLICITUD',subtitle:'Revisar sede',fields:[{variable:'Cliente',value:'Ana'}]}
  const bad=[
   {form:{...valid,fields:[]}},
-  {form:{...valid,fields:Array(6).fill({variable:'A',value:'B'})}},
+  {form:{...valid,fields:Array.from({length:11},(_,i)=>({variable:'Campo '+i,value:'B'}))}},
   {form:{...valid,fields:[{variable:'A',value:'1'},{variable:'a',value:'2'}]}},
   {form:{...valid,title:' '}},
   {form:{...valid,subtitle:'A'.repeat(351)}},
@@ -834,4 +839,21 @@ test('technical ACCEPTED remains compatible with both receipt routes',async()=>{
  })
  assert.equal(form.code,200)
  assert.equal(form.payload.paymentStatus,'PENDING_VALIDATION')
+})
+
+test('payment receipt accepts ten independent fields while keeping imageUrl separate',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),messageKey=randomUUID()
+ const h=harness({remoteStatus:'PENDING'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const fields=Array.from({length:10},(_,i)=>({variable:'Dato '+(i+1),value:'Valor '+(i+1)}))
+ const imageUrl='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ const path='/api/v1/mobile/interactions/'+interactionId+'/payment-receipt'
+ const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',imageUrl,fields}}
+ const headers={'x-order-access-key':access,'idempotency-key':messageKey}
+ const result=await h.call('POST',path,{headers,payload})
+ assert.equal(result.code,200)
+ assert.equal(h.remote[1].value.form.fields.length,10)
+ assert.equal(h.remote[1].value.form.imageUrl,imageUrl)
+ const invalid=await h.call('POST',path,{headers,payload:{...payload,form:{...payload.form,fields:[...fields,{variable:'Dato 11',value:'Extra'}]}}})
+ assert.equal(invalid.code,400)
 })
