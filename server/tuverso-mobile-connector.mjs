@@ -156,7 +156,7 @@ function validMobileForm(form){
  if(typeof form.title!=='string'||!form.title.trim()||form.title.trim().length>180||
     (form.imageUrl!==undefined&&!validReceiptImageUrl(form.imageUrl))||
     form.subtitle!==undefined&&(typeof form.subtitle!=='string'||form.subtitle.trim().length>350)||
-    !Array.isArray(form.fields)||form.fields.length>5)return false
+    !Array.isArray(form.fields)||form.fields.length>10)return false
  const labels=new Set()
  for(const entry of form.fields){
   if(!entry||typeof entry!=='object'||Array.isArray(entry)||
