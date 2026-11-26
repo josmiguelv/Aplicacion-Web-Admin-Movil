@@ -21,7 +21,15 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
  const createdIds=new Map()
  const terminalSessions=new Map()
  let referenceForTest=''
- const pool={async query(sql,args){
+ const pool={async connect(){return {
+  async query(sql,args){
+   queries.push({sql,args})
+   if(sql==='BEGIN'||sql==='COMMIT'||sql==='ROLLBACK')return {rowCount:0,rows:[]}
+   if(sql.startsWith('INSERT INTO product_images'))return {rowCount:1,rows:[{id:'99999999-9999-4999-8999-999999999999'}]}
+   if(sql.startsWith('INSERT INTO mobile_payment_receipt_images'))return {rowCount:1,rows:[]}
+   throw Error('Unexpected receipt SQL: '+sql)
+  },release(){}
+ }},async query(sql,args){
   queries.push({sql,args})
   if(sql.includes('FROM published_catalogs p')){
    const row=catalogs[args[0]]
@@ -38,6 +46,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
    const state=terminalSessions.get(args.join('|'))
    return {rowCount:state?1:0,rows:state?[{state}]:[]}
   }
+  if(sql.includes('FROM mobile_payment_receipt_images'))return {rowCount:1,rows:[{'?column?':1}]}
   if(sql.startsWith('SELECT payment_wait_minutes'))return {rowCount:0,rows:[]}
   if(sql.startsWith('INSERT INTO mobile_checkout_followups')){
    if(sql.includes('state,agent_notice_sent,expiry_notice_sent')){
@@ -53,6 +62,8 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
  }}
  const route=createMobileTuVersoRoutes({pool,body:async req=>req.body,
   json:(res,code,payload)=>{res.reply={code,payload}},
+  imageBody:async req=>req.rawImage||Buffer.from('ffd8ffe0','hex'),imageMime:()=> 'image/jpeg',
+  receiptBaseUrl:()=> 'https://admin.example.com',
   storeOpen:()=>open,checkMode:()=>enabled?'LIVE':'DISABLED',
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   decrypt:()=> 'private-credential',
@@ -76,7 +87,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   }
  })
  const call=async(method,path,{payload,headers}={})=>{
-  const req={method,body:payload,headers:headers||{},socket:{remoteAddress:'synthetic'}}
+  const req={method,body:payload,rawImage:Buffer.from('ffd8ffe0','hex'),headers:headers||{},socket:{remoteAddress:'synthetic'}}
   const res={}
   const handled=await route({req,res,url:new URL('http://local.test'+path)})
   assert.equal(handled,undefined)
@@ -322,7 +333,7 @@ test('reject type confusion, cross-content fields, and unsafe TEXT before contac
 })
 
 
-test('Android sends title, subtitle and five independent FORM rows unchanged to TU VERSO',async()=>{
+test('Android sends title, subtitle and ten independent FORM rows unchanged to TU VERSO',async()=>{
  const h=harness(),access=randomUUID(),messageKey=randomUUID(),interactionId=randomUUID()
  const external='mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48)
  h.setReference(external)
@@ -332,6 +343,11 @@ test('Android sends title, subtitle and five independent FORM rows unchanged to 
   {variable:'Productos',value:'2 pollos a la brasa'},
   {variable:'Subtotal',value:'S/ 90.00'},
   {variable:'Dirección',value:'Av. Principal 123, Santa Anita'},
+  {variable:'Distrito',value:'Santa Anita'},
+  {variable:'Referencia',value:'Frente al parque'},
+  {variable:'Modalidad',value:'Delivery'},
+  {variable:'Pago',value:'Yape'},
+  {variable:'Observación',value:'Sin ají'},
  ]}
  const payload={type:'FORM',appId:appA,storeId:storeA,form}
  const path='/api/v1/mobile/interactions/'+interactionId+'/message'
@@ -355,7 +371,7 @@ test('direct FORM rejects invalid rows, missing independent key, and mixed order
  const valid={title:'SOLICITUD',subtitle:'Revisar sede',fields:[{variable:'Cliente',value:'Ana'}]}
  const bad=[
   {form:{...valid,fields:[]}},
-  {form:{...valid,fields:Array(6).fill({variable:'A',value:'B'})}},
+  {form:{...valid,fields:Array.from({length:11},(_,i)=>({variable:'Campo '+i,value:'B'}))}},
   {form:{...valid,fields:[{variable:'A',value:'1'},{variable:'a',value:'2'}]}},
   {form:{...valid,title:' '}},
   {form:{...valid,subtitle:'A'.repeat(351)}},
@@ -732,4 +748,112 @@ test('TU VERSO explicit OPEN is recognized while absence remains UNKNOWN',async(
  assert.equal(missing.payload.conversationState,'UNKNOWN')
  assert.equal(Object.hasOwn(missing.payload,'operationalConversationStatus'),false)
  assert.equal(missing.payload.messagesAvailable,false)
+})
+
+
+test('payment receipt sends exactly one image FORM for an active authorized order',async()=>{
+ const access=randomUUID(),id=randomUUID(),messageKey=randomUUID()
+ const h=harness({remoteStatus:'PENDING'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
+  subtitle:'Comprobante de pago Yape',imageUrl:'https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999',
+  fields:[{variable:'Pedido',value:'B3-1025'},{variable:'Método',value:'Yape'}]}}
+ const result=await h.call('POST','/api/v1/mobile/interactions/'+id+'/payment-receipt',{
+  headers:{'x-order-access-key':access,'idempotency-key':messageKey},payload})
+ assert.equal(result.code,200)
+ assert.equal(result.payload.type,'FORM')
+ assert.equal(result.payload.paymentStatus,'PENDING_VALIDATION')
+ assert.deepEqual(h.remote.map(x=>x.operation),['read','orderForm'])
+ assert.equal(h.remote[1].value.idempotencyKey,messageKey)
+ assert.equal(h.remote[1].value.form.imageUrl,payload.form.imageUrl)
+})
+test('payment receipt rejects invalid image, missing idempotency and wrong access',async()=>{
+ const access=randomUUID(),id=randomUUID(),key=randomUUID()
+ const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
+  imageUrl:'https://127.0.0.1/private.png',fields:[{variable:'Método',value:'Yape'}]}}
+ const h=harness({remoteStatus:'ACCEPTED'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const path='/api/v1/mobile/interactions/'+id+'/payment-receipt'
+ const bad=await h.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},payload})
+ assert.equal(bad.code,400)
+ assert.equal(h.remote.length,0)
+ payload.form.imageUrl='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ const noKey=await h.call('POST',path,{headers:{'x-order-access-key':access},payload})
+ assert.equal(noKey.code,400)
+ const forbidden=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID(),'idempotency-key':key},payload})
+ assert.equal(forbidden.code,403)
+ assert.deepEqual(h.remote.map(x=>x.operation),['read'])
+})
+
+test('receipt upload stores image for the authorized technical PENDING order and returns a public URL',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),h=harness({remoteStatus:'PENDING'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const url='/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA
+ const result=await h.call('POST',url,{headers:{'x-order-access-key':access,'content-type':'image/jpeg'}})
+ assert.equal(result.code,201)
+ assert.equal(result.payload.imageId,'99999999-9999-4999-8999-999999999999')
+ assert.equal(result.payload.imageUrl,'https://admin.example.com/api/v1/mobile/payment-receipts/images/'+result.payload.imageId)
+ assert.deepEqual(h.remote.map(x=>x.operation),['read'])
+ assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO mobile_payment_receipt_images')),true)
+})
+test('receipt upload rejects mismatched access key before storage',async()=>{
+ const access=randomUUID(),id=randomUUID(),h=harness({remoteStatus:'PENDING'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const path='/api/v1/mobile/interactions/'+id+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA
+ const other=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID()}})
+ assert.equal(other.code,403)
+ assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO product_images')),false)
+})
+
+test('both receipt routes block rejected, expired and closed chats without storage or relay',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),idempotencyKey=randomUUID()
+ const reference='mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48)
+ const media='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ for(const settings of [
+  {remoteStatus:'REJECTED'},
+  {remoteStatus:'EXPIRED'},
+  {remoteStatus:'PENDING',operationalConversationStatus:'CLOSED'},
+  {remoteStatus:'ACCEPTED',operationalConversationStatus:'RESOLVED'}
+ ]){
+  const h=harness(settings)
+  h.setReference(reference)
+  const headers={'x-order-access-key':access,'idempotency-key':idempotencyKey}
+  const upload=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA,
+   {headers})
+  assert.equal(upload.code,409,JSON.stringify(settings))
+  const form=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt',
+   {headers,payload:{appId:appA,storeId:storeA,form:{title:'Comprobante',imageUrl:media,fields:[{variable:'Método',value:'Yape'}]}}})
+  assert.equal(form.code,409,JSON.stringify(settings))
+  assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO product_images')),false)
+  assert.deepEqual(h.remote.map(x=>x.operation),['read','read'])
+ }
+})
+test('technical ACCEPTED remains compatible with both receipt routes',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),idempotencyKey=randomUUID(),h=harness({remoteStatus:'ACCEPTED'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const headers={'x-order-access-key':access,'idempotency-key':idempotencyKey}
+ const upload=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA,{headers})
+ assert.equal(upload.code,201)
+ const form=await h.call('POST','/api/v1/mobile/interactions/'+interactionId+'/payment-receipt',{
+  headers,payload:{appId:appA,storeId:storeA,form:{title:'Comprobante',imageUrl:upload.payload.imageUrl,fields:[{variable:'Método',value:'Yape'}]}}
+ })
+ assert.equal(form.code,200)
+ assert.equal(form.payload.paymentStatus,'PENDING_VALIDATION')
+})
+
+test('payment receipt accepts ten independent fields while keeping imageUrl separate',async()=>{
+ const access=randomUUID(),interactionId=randomUUID(),messageKey=randomUUID()
+ const h=harness({remoteStatus:'PENDING'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
+ const fields=Array.from({length:10},(_,i)=>({variable:'Dato '+(i+1),value:'Valor '+(i+1)}))
+ const imageUrl='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ const path='/api/v1/mobile/interactions/'+interactionId+'/payment-receipt'
+ const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',imageUrl,fields}}
+ const headers={'x-order-access-key':access,'idempotency-key':messageKey}
+ const result=await h.call('POST',path,{headers,payload})
+ assert.equal(result.code,200)
+ assert.equal(h.remote[1].value.form.fields.length,10)
+ assert.equal(h.remote[1].value.form.imageUrl,imageUrl)
+ const invalid=await h.call('POST',path,{headers,payload:{...payload,form:{...payload.form,fields:[...fields,{variable:'Dato 11',value:'Extra'}]}}})
+ assert.equal(invalid.code,400)
 })

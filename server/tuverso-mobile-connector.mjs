@@ -1,5 +1,6 @@
 import {TUVERSO_BASE} from './tuverso-client.mjs'
 import {normalizeTuVersoCredential} from './tuverso-credential-format.mjs'
+import {validReceiptImageUrl} from './payment-receipt-validation.mjs'
 
 // Private backend-to-backend client; no TU VERSO bearer may enter the APK,
 // browser, access logs, analytics, application config or URLs.
@@ -151,10 +152,11 @@ export async function pollMobileInteractionEvents(token,{after=null,limit=50}={}
 // Mirrors TU VERSO PRE-F2/07: a FORM has no extra free-text body or buttons.
 function validMobileForm(form){
  if(!form||typeof form!=='object'||Array.isArray(form)||
-    Object.keys(form).some(k=>!['title','subtitle','fields'].includes(k)))return false
+    Object.keys(form).some(k=>!['title','subtitle','imageUrl','fields'].includes(k)))return false
  if(typeof form.title!=='string'||!form.title.trim()||form.title.trim().length>180||
+    (form.imageUrl!==undefined&&!validReceiptImageUrl(form.imageUrl))||
     form.subtitle!==undefined&&(typeof form.subtitle!=='string'||form.subtitle.trim().length>350)||
-    !Array.isArray(form.fields)||form.fields.length>5)return false
+    !Array.isArray(form.fields)||form.fields.length>10)return false
  const labels=new Set()
  for(const entry of form.fields){
   if(!entry||typeof entry!=='object'||Array.isArray(entry)||

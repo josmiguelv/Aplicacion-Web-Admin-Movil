@@ -3,6 +3,7 @@ import {decryptCredential} from './integration-crypto.mjs'
 import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
+import {validReceiptImageUrl} from './payment-receipt-validation.mjs'
 import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -13,6 +14,12 @@ const plainObject=value=>value&&typeof value==='object'&&!Array.isArray(value)
 const safeError=error=>Number.isInteger(error?.code)&&error.code>=400&&error.code<=599?error.code:503
 // Only upstream TU VERSO can confirm a scope failure. Never rely on cached scopes.
 const remoteAuthStatus=remote=>[401,403].includes(remote?.httpStatus)?remote.httpStatus:503
+// Technical PENDING may coexist with commercial acceptance already handled in Android.
+// Only reject terminal or closed conversations; never infer approval from agent text.
+function receiptCommunicationAllowed(interaction){
+ return ['PENDING','ACCEPTED'].includes(interaction?.status)&&
+  !['CLOSED','RESOLVED'].includes(interaction?.operationalConversationStatus)
+}
 const counter=new Map()
 const CANCEL_NOTICE='[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
 const CANCEL_PURCHASE_NOTICE='[Pollos B3 · Sistema] El cliente canceló su compra antes del pago. Esta solicitud queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
@@ -102,11 +109,12 @@ function orderForm(cart,store,customer){
 // A client-authored FORM is informational only: it never supplies authoritative prices,
 // store availability, fulfillment status or an approval decision.
 function validClientForm(value){
- if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','fields'].includes(key))||
+ if(!plainObject(value)||Object.keys(value).some(key=>!['title','subtitle','imageUrl','fields'].includes(key))||
     !validText(value.title,180)||
+    (value.imageUrl!==undefined&&!validReceiptImageUrl(value.imageUrl))||
     value.subtitle!==undefined&&(typeof value.subtitle!=='string'||value.subtitle.length>350||
      /[\x00-\x1f\x7f]/.test(value.subtitle))||
-    !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>5)return false
+    !Array.isArray(value.fields)||value.fields.length<1||value.fields.length>10)return false
  const names=new Set()
  for(const row of value.fields){
   if(!plainObject(row)||Object.keys(row).some(k=>!['variable','value'].includes(k))||
@@ -138,6 +146,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  availability=checkAvailability,createInteraction=createMobileInteraction,
  readInteraction=readMobileInteraction,readMessages=readMobileInteractionMessages,
  sendMessage=sendMobileInteractionMessage,decrypt=decryptCredential,
+ imageBody=null,imageMime=null,receiptBaseUrl=()=>process.env.PUBLIC_API_BASE_URL,
  checkMode=connectionMode,interactionMode=mobileInteractionMode,rateLimit=throttled}){
  async function context(appId,storeId,requireOpen=true){
   const result=await pool.query(`SELECT p.tenant_id,p.revision,p.payload
@@ -181,7 +190,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
   const creating=url.pathname==='/api/v1/mobile/interactions'
   const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
-  if(!match&&!creating&&!statusMatch&&!messageMatch)return false
+  const receiptMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt$/i)
+  const receiptUploadMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt\/upload$/i)
+  if(!match&&!creating&&!statusMatch&&!messageMatch&&!receiptMatch&&!receiptUploadMatch)return false
   try{
    rateLimit(req)
    if(match){
@@ -275,13 +286,56 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      ...(['OPEN','CLOSED','RESOLVED'].includes(operationalConversationStatus)?
       {operationalConversationStatus}:{})})
    }
-   if(messageMatch){
+   if(receiptUploadMatch){
+    if(req.method!=='POST')throw fail(405,'Método no permitido')
+    if(interactionMode()!=='LIVE')throw fail(503,'Recepción de comprobantes no habilitada')
+    const interactionId=receiptUploadMatch[1],access=req.headers['x-order-access-key']
+    if(!VALID_UUID.test(access||''))throw fail(403,'Clave del pedido inválida')
+    const appId=url.searchParams.get('appId'),storeId=url.searchParams.get('storeId')
+    if(!APP.test(appId||'')||!VALID_UUID.test(storeId||''))throw fail(400,'Aplicación o sede inválida')
+    const base=receiptBaseUrl()
+    let publicBase
+    try{
+     const parsed=new URL(base)
+     if(!validReceiptImageUrl(parsed.origin+'/check')||parsed.pathname!=='/'||
+        parsed.search||parsed.hash)throw Error('BAD_BASE')
+     publicBase=parsed.origin
+    }catch{throw fail(503,'Configura PUBLIC_API_BASE_URL con la URL HTTPS pública del Administrador')}
+    const ctx=await context(appId,storeId,false)
+    const owner={interactionId,tenantId:ctx.tenantId,appId,storeId,accessKey:access}
+    const state=await checkoutSessionState(pool,owner)
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(state))throw fail(409,'Pedido cerrado')
+    const integration=await binding(ctx.tenantId,appId,storeId)
+    const remote=await readInteraction(integration.token,interactionId)
+    if(!remote.ok)throw fail(remote.httpStatus===404?404:remoteAuthStatus(remote),'No se pudo verificar la interacción')
+    const expected=reference(ctx.tenantId,appId,storeId,access)
+    if(!equals(remote.data?.externalReference,expected)||
+       remote.data?.externalLocationId!==integration.external_location_id||
+       remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Comprobante no autorizado')
+    if(!receiptCommunicationAllowed(remote.data))throw fail(409,'La interacción no permite recibir comprobantes')
+    if(typeof imageBody!=='function'||typeof imageMime!=='function')throw fail(503,'Carga de comprobantes no disponible')
+    const bytes=await imageBody(req)
+    const mime=imageMime(bytes)
+    if(!mime)throw fail(415,'Solo imágenes JPEG, PNG y WebP reales')
+    const client=await pool.connect()
+    try{
+     await client.query('BEGIN')
+     const inserted=await client.query('INSERT INTO product_images(tenant_id,mime,content) VALUES($1,$2,$3) RETURNING id',[ctx.tenantId,mime,bytes])
+     const imageId=inserted.rows[0].id
+     await client.query('INSERT INTO mobile_payment_receipt_images(image_id,tenant_id,app_id,store_id,interaction_id) VALUES($1,$2,$3,$4,$5)',
+      [imageId,ctx.tenantId,appId,storeId,interactionId])
+     await client.query('COMMIT')
+     return json(res,201,{imageUrl:publicBase+'/api/v1/mobile/payment-receipts/images/'+imageId,imageId,mime})
+    }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
+   }
+   if(messageMatch||receiptMatch){
     if(req.method!=='POST')throw fail(405,'Método no permitido')
     if(interactionMode()!=='LIVE')throw fail(503,'Mensajes de TU VERSO no habilitados')
-    const interactionId=messageMatch[1],access=req.headers['x-order-access-key']
+    const interactionId=(receiptMatch||messageMatch)[1],access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
     const input=await body(req)
-    const requestedType=input?.type
+    // Dedicated receipt route requires a FORM with an image, never text or a payment decision.
+    const requestedType=receiptMatch?'FORM':input?.type
     // Pre-existing Android clients sent an order body without type. They remain
     // TEXT for backward compatibility; new clients must select TEXT or FORM.
     const type=requestedType===undefined?'TEXT':requestedType
@@ -298,7 +352,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        !APP.test(input.appId)||!VALID_UUID.test(input.storeId)||
        Object.keys(input).some(k=>!(directForm?formKeys:freeText?textKeys:orderKeys).includes(k))||
        (directForm?(
-         requestedType!=='FORM'||!independentKeyValid||!validClientForm(input.form)
+         (receiptMatch?input.type!==undefined:requestedType!=='FORM')||!independentKeyValid||
+         !validClientForm(input.form)||(receiptMatch&&!validReceiptImageUrl(input.form.imageUrl))
        ):freeText?(
          requestedType!=='TEXT'||typeof input.text!=='string'||!input.text.trim()||
          input.text.length>8000||/[\x00-\x09\x0b-\x1f]/.test(input.text)||
@@ -317,6 +372,23 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      appId:input.appId,storeId:input.storeId,accessKey:access})
     if(['CANCELLED','EXPIRED','FINISHED'].includes(session))
      throw fail(409,'La solicitud ya está cerrada; no se enviarán más mensajes')
+    if(receiptMatch){
+     // Only an image uploaded for this specific interaction can be relayed.
+     let expectedOrigin
+     try{
+      const base=new URL(receiptBaseUrl())
+      if(!validReceiptImageUrl(base.origin+'/check')||base.pathname!=='/'||base.search||base.hash)throw Error('BAD_BASE')
+      expectedOrigin=base.origin
+     }catch{throw fail(503,'Configura PUBLIC_API_BASE_URL con la URL HTTPS pública del Administrador')}
+     const expectedPrefix=expectedOrigin+'/api/v1/mobile/payment-receipts/images/'
+     const imageUrl=input.form.imageUrl
+     if(!imageUrl.startsWith(expectedPrefix)||!VALID_UUID.test(imageUrl.slice(expectedPrefix.length)))
+      throw fail(400,'El comprobante debe utilizar la URL generada por el Administrador')
+     const stored=await pool.query(`SELECT 1 FROM mobile_payment_receipt_images
+      WHERE image_id=$1 AND tenant_id=$2 AND app_id=$3 AND store_id=$4 AND interaction_id=$5`,
+      [imageUrl.slice(expectedPrefix.length),ctx.tenantId,input.appId,input.storeId,interactionId])
+     if(stored.rowCount!==1)throw fail(403,'Comprobante no asociado a este pedido')
+    }
     let text,form,legacyText
     if(freeText){
      text=input.text
@@ -324,6 +396,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      form={
       title:input.form.title.trim(),
       ...(input.form.subtitle!==undefined?{subtitle:input.form.subtitle.trim()}:{}),
+      ...(input.form.imageUrl?{imageUrl:input.form.imageUrl}:{}),
       fields:input.form.fields.map(row=>({variable:row.variable.trim(),value:row.value.trim()})),
      }
     }else{
@@ -344,7 +417,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')
       throw fail(403,'Interacción no autorizada para esta aplicación y sede')
-    if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED')
+    if(remote.data.status==='EXPIRED'||remote.data.status==='REJECTED'||
+       (receiptMatch&&!receiptCommunicationAllowed(remote.data)))
       throw fail(409,'La solicitud ya no permite enviar mensajes')
     const delivered=await sendMessage(integration.token,interactionId,
      type==='FORM'?{
@@ -365,7 +439,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     }
     if(!delivered.ok||!VALID_UUID.test(delivered.data?.messageId||''))
       throw fail(delivered.httpStatus===409?409:remoteAuthStatus(delivered),'TU VERSO no confirmó el mensaje '+type)
-    return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId,type})
+    return json(res,200,{interactionId,delivered:true,messageId:delivered.data.messageId,type,
+     ...(receiptMatch?{paymentStatus:'PENDING_VALIDATION'}:{})})
    }
    if(req.method!=='POST')throw fail(405,'Método no permitido')
    if(interactionMode()!=='LIVE'||checkMode()==='DISABLED')throw fail(503,'Interacciones TU VERSO no habilitadas')

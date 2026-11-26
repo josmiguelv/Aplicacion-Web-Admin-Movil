@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { ArrowLeft, ArrowRight, Bike, Building2, CalendarDays, Check, Clock3, Copy, CreditCard, MapPin, Package, Send, ShoppingBag, Store, Smartphone, Tag, Settings2, Bell } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bike, Building2, CalendarDays, Check, Clock3, Copy, CreditCard, MapPin, Package, Send, ShoppingBag, Store, Smartphone, Tag, Settings2, Bell, Star } from 'lucide-react'
+import {SurveyModule,type SurveySummaryEntry} from './SurveyModule'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
@@ -76,6 +77,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [selectedStoreId,setSelectedStoreId]=useState('')
  const [storeFocus,setStoreFocus]=useState<'details'|'hours'|'delivery'|'pickup'>('details')
  const [reservationFlags,setReservationFlags]=useState<Record<string,boolean|null>>({})
+ const [surveySummary,setSurveySummary]=useState<Record<string,SurveySummaryEntry>|null>(null)
+ const [surveySummaryError,setSurveySummaryError]=useState(false)
   const [reservationSettings,setReservationSettings]=useState<ReservationSettings>(blankReservation)
   const [reservationLoading,setReservationLoading]=useState(false)
  const [noticeId,setNoticeId]=useState('')
@@ -132,7 +135,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  },[message,savedArea,storeSavedNotice])
  useEffect(()=>()=>clearToastTimers(),[])
 
- const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'commercial-notifications'|'publish'>('overview')
+ const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'commercial-notifications'|'publish'|'surveys'>('overview')
  const chooseArea=(area:typeof activeArea)=>{
   if(area===activeArea)return
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Tienes cambios sin guardar en el local. ¿Quieres salir sin guardarlos?'))return
@@ -237,6 +240,22 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   })).then(rows=>{if(alive)setReservationFlags(Object.fromEntries(rows))})
   return ()=>{alive=false}
  },[tenantId,stores])
+ useEffect(()=>{
+  if(!tenantId||!session){setSurveySummary(null);setSurveySummaryError(false);return}
+  if(!['overview','local','surveys'].includes(activeArea))return
+  const controller=new AbortController()
+  setSurveySummary(null);setSurveySummaryError(false)
+  const qs=session.role==='SUPER_ADMIN'?'?tenantId='+encodeURIComponent(tenantId):''
+  void fetch('/api/admin/mobile/surveys/summary'+qs,{credentials:'include',cache:'no-store',signal:controller.signal})
+   .then(async res=>{
+    const result=await res.json().catch(()=>({error:'Respuesta inválida'}))
+    if(!res.ok)throw new Error(result.error||'No se pudo consultar las encuestas')
+    return result as {stores:SurveySummaryEntry[]}
+   })
+   .then(value=>{if(!controller.signal.aborted)setSurveySummary(Object.fromEntries(value.stores.map(item=>[item.storeId,item])))})
+   .catch(()=>{if(!controller.signal.aborted)setSurveySummaryError(true)})
+  return ()=>controller.abort()
+ },[tenantId,session?.role,activeArea])
  const selectedStore=stores.find(s=>s.id===selectedStoreId)
  const storeEditorValue=(s:StoreRow)=>({id:s.id,code:s.code,name:s.name,address:s.address,latitude:s.latitude===null?'':String(s.latitude),longitude:s.longitude===null?'':String(s.longitude),radiusKm:s.radius_km===null?'':String(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?'':String(s.delivery_rate_per_km_pen),deliveryFeePen:s.delivery_fee_pen===null?'':String(s.delivery_fee_pen),deliveryPreparationMinutes:s.delivery_preparation_minutes==null?'':String(s.delivery_preparation_minutes),pickupPreparationMinutes:s.pickup_preparation_minutes==null?'':String(s.pickup_preparation_minutes),deliveryPricingMode:s.delivery_pricing_mode||'PER_KM' as 'PER_KM'|'FIXED',active:s.active,delivery_enabled:s.delivery_enabled,pickup_enabled:s.pickup_enabled,dine_in_enabled:s.dine_in_enabled,consultOrderAvailability:s.consult_order_availability===true,openingHours:s.opening_hours||{}})
  const enterLocal=(s:StoreRow)=>{
@@ -368,7 +387,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   {activeArea==='overview'&&<section className="ops-workspace" aria-label="Locales de la empresa">
    <div className="ops-workspace-head"><div><p className="eyebrow">SELECCIONA UNA SEDE</p><h2>Locales de la empresa</h2><p>Las tarjetas muestran servicios habilitados por el administrador; la recepción real depende del agente disponible en TU VERSO.</p></div><button className="button button-primary" onClick={()=>{setSelectedStoreId('');setStoreFocus('details');selectStoreForEditing(emptyStore());chooseArea('stores')}}>+ Nuevo local</button></div>
    {moduleWarnings.length>0&&<p role="status" className="ops-global-note">Algunos módulos no pudieron cargar: {moduleWarnings.join(', ')}. Puedes consultar tus locales mientras se corrige el módulo afectado.</p>}
-   <div className="ops-local-grid">{!storesLoaded?<div className="ops-panel" role="status">No se pudo completar la carga de locales. No significa que se hayan eliminado; revisa el error del servidor.</div>:stores.length===0?<div className="ops-panel">Todavía no hay locales registrados.</div>:stores.map(local=><button type="button" className="ops-local-card" key={local.id} onClick={()=>enterLocal(local)}><span className="ops-card-icon"><Store size={23}/></span><span className="ops-card-status" data-enabled={local.active}>{local.active?'Activo':'Inactivo'}</span><strong>{local.name}</strong><span className="ops-card-address"><MapPin size={14}/>{local.address||'Dirección sin configurar'}</span><span className="ops-card-tags"><span data-on={local.delivery_enabled}>Delivery {local.delivery_enabled?'· Sí':'· No'}</span><span data-on={local.pickup_enabled}>Recojo {local.pickup_enabled?'· Sí':'· No'}</span><span data-on={reservationFlags[local.id]===true}>Reserva {reservationFlags[local.id]===undefined?'· Consultando':reservationFlags[local.id]===null?'· Sin datos':reservationFlags[local.id]?'· Sí':'· No'}</span></span><span className="ops-card-link">Configurar local <ArrowRight size={16}/></span></button>)}</div>
+   <div className="ops-local-grid">{!storesLoaded?<div className="ops-panel" role="status">No se pudo completar la carga de locales. No significa que se hayan eliminado; revisa el error del servidor.</div>:stores.length===0?<div className="ops-panel">Todavía no hay locales registrados.</div>:stores.map(local=><button type="button" className="ops-local-card" key={local.id} onClick={()=>enterLocal(local)}><span className="ops-card-icon"><Store size={23}/></span><span className="ops-card-status" data-enabled={local.active}>{local.active?'Activo':'Inactivo'}</span><strong>{local.name}</strong><span className="ops-card-address"><MapPin size={14}/>{local.address||'Dirección sin configurar'}</span><span className="ops-card-tags"><span data-on={local.delivery_enabled}>Delivery {local.delivery_enabled?'· Sí':'· No'}</span><span data-on={local.pickup_enabled}>Recojo {local.pickup_enabled?'· Sí':'· No'}</span><span data-on={reservationFlags[local.id]===true}>Reserva {reservationFlags[local.id]===undefined?'· Consultando':reservationFlags[local.id]===null?'· Sin datos':reservationFlags[local.id]?'· Sí':'· No'}</span></span><span className="ops-survey-store-score"><Star size={16} aria-hidden="true"/>{surveySummary?.[local.id]?
+ <><strong>{surveySummary[local.id].average.toFixed(1)} / 5</strong><small>({surveySummary[local.id].total} {surveySummary[local.id].total===1?'encuesta':'encuestas'})</small></>
+ :surveySummaryError?'Encuestas no disponibles':surveySummary===null?'Consultando calificación…':'Sin encuestas'}</span><span className="ops-card-link">Configurar local <ArrowRight size={16}/></span></button>)}</div>
   </section>}
   {activeArea==='overview'&&<section className="ops-workspace" aria-label="Notificaciones para el cliente">
    <div className="ops-workspace-head"><div><h2>Notificaciones para el cliente</h2><p>Configuración de avisos al celular y recordatorios personales de pago para todas las sedes de la empresa.</p></div></div>
@@ -396,11 +417,20 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       {area:'vacancies',title:'Empleo',subtitle:'Vacantes de la empresa · compartidas',icon:Store},
       {area:'settings',title:'Datos de la empresa',subtitle:'Configuración general · compartida',icon:Settings2},
       {area:'publish',title:'Publicar cambios',subtitle:'Publicación del catálogo de la empresa',icon:Send}
-     ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={false}>Compartida</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}</div>
+     ] as const).map(item=><button type="button" className="ops-module-card" key={item.area} onClick={()=>chooseArea(item.area)}><item.icon size={24}/><strong>{item.title}</strong><span>{item.subtitle}</span><span className="ops-module-state" data-enabled={false}>Compartida</span><ArrowRight className="ops-card-arrow" size={17}/></button>)}
+     <button type="button" className="ops-module-card" onClick={()=>chooseArea('surveys')}>
+      <Star size={24}/><strong>Encuestas de satisfacción</strong>
+      <span>Respuestas de clientes, detalle y filtros de esta sede</span>
+      <span className="ops-survey-module-score">{surveySummary?.[selectedStore.id]?surveySummary[selectedStore.id].average.toFixed(1)+' / 5 · '+surveySummary[selectedStore.id].total+' encuestas':surveySummaryError?'No disponible':surveySummary===null?'Consultando…':'Sin encuestas'}</span>
+      <ArrowRight className="ops-card-arrow" size={17}/>
+     </button>
+    </div>
     <p className="ops-global-note">Las tarjetas marcadas como compartidas abren formularios generales de la empresa; aún no realizan cambios exclusivos en este local. La personalización por sede requiere API y persistencia adicionales.</p>
    </section>}
-  {!['overview','local'].includes(activeArea)&&<div className="ops-context-bar"><button type="button" className="ops-back" onClick={()=>chooseArea(selectedStore&&['stores','reservations','payments'].includes(activeArea)?'local':'overview')}><ArrowLeft size={16}/> {selectedStore&&['stores','reservations','payments'].includes(activeArea)?'Volver a '+selectedStore.name:'Volver a empresas y locales'}</button><span>{selectedStore&&['stores','reservations','payments'].includes(activeArea)?'Local: '+selectedStore.name:'Configuración general de la empresa · todas las sedes'}</span></div>}
+  {!['overview','local'].includes(activeArea)&&<div className="ops-context-bar"><button type="button" className="ops-back" onClick={()=>chooseArea(selectedStore&&['stores','reservations','payments','surveys'].includes(activeArea)?'local':'overview')}><ArrowLeft size={16}/> {selectedStore&&['stores','reservations','payments','surveys'].includes(activeArea)?'Volver a '+selectedStore.name:'Volver a empresas y locales'}</button><span>{selectedStore&&['stores','reservations','payments','surveys'].includes(activeArea)?'Local: '+selectedStore.name:'Configuración general de la empresa · todas las sedes'}</span></div>}
   {activeArea==='settings'&&session.role==='SUPER_ADMIN'&&!embeddedSession&&<section className="ops-panel"><h2>Acceso del administrador de empresa</h2><p>Solo el superadministrador puede crear credenciales para el tenant seleccionado.</p><div className="ops-inline"><input type="email" placeholder="Correo del administrador" value={newTenantEmail} onChange={e=>setNewTenantEmail(e.target.value)}/><input type="password" placeholder="Contraseña segura (mín. 14)" value={newTenantPassword} onChange={e=>setNewTenantPassword(e.target.value)}/><button className="button button-secondary" disabled={loading} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/users`,'POST',{email:newTenantEmail,password:newTenantPassword});setNewTenantPassword('');setNewTenantEmail('');setMessage('Administrador creado exclusivamente para esta empresa.')})}>Crear administrador</button></div></section>}
+  {activeArea==='surveys'&&<SurveyModule tenantId={tenantId} isSuperAdmin={session.role==='SUPER_ADMIN'}
+    stores={stores.map(item=>({id:item.id,name:item.name}))} initialStoreId={selectedStoreId}/>}
   {activeArea==='stores'&&(selectedStoreId?<section className="ops-panel ops-store-single-panel" aria-label={'Editar '+(selectedStore?.name||'local')}>{renderStoreEditor()}</section>:(<section className="ops-panel"><h2><Store size={19}/> Locales y horarios</h2><p>Configura los datos del local, sus modalidades de atención y horarios.</p><div className="ops-sede-header"><div><h3>Sedes creadas</h3><p className="ops-hint">Consulta rápidamente el estado de tus sedes y selecciona cuál quieres editar.</p></div><button type="button" className="button button-primary" onClick={()=>{setSelectedStoreId('');setStoreFocus('details');selectStoreForEditing(emptyStore())}}>Nueva sede</button></div><div className="ops-sede-list" aria-label="Sedes creadas">{stores.length===0?<p className="ops-hint">Todavía no hay sedes creadas. Selecciona «Nueva sede» para comenzar.</p>:stores.filter(s=>!selectedStoreId||s.id===selectedStoreId).map(s=><div key={s.id} className="ops-sede-card"><div className="ops-sede-info"><strong className="ops-sede-name">{s.name}</strong><div className="ops-sede-states"><span className={s.active?'ops-state ops-state--yes':'ops-state ops-state--no'}>{s.active?'Activa':'Desactivada'}</span><span className="ops-sede-consult">Consulta TU VERSO: <span className={s.consult_order_availability?'ops-state ops-state--yes':'ops-state ops-state--no'}>{s.consult_order_availability?'Sí':'No'}</span></span></div></div><div className="ops-sede-actions"><button type="button" className="button button-primary" onClick={()=>selectStoreForEditing(storeEditorValue(s))} aria-expanded={storeEditorOpen&&store.id===s.id} aria-controls={`sede-editor-${s.id}`}>Editar sede</button><button type="button" className="button button-secondary" aria-label={`Copiar ID de ${s.name}`} onClick={()=>void copyStoreCode(s.code)}><Copy size={15}/>{copiedStoreCode===s.code?'Copiado':'Copiar ID'}</button></div>{storeEditorOpen&&store.id===s.id&&renderStoreEditor()}</div>)}</div>{storeEditorOpen&&!store.id&&renderStoreEditor()}</section>))}
   {activeArea==='reservations'&&(<section className="ops-panel"><h2>Reservas — {selectedStore?.name||stores.find(s=>s.id===reservationStoreId)?.name||'Local'}</h2>
     <p className="ops-hint">Habilita reservas para esta sede y establece su tiempo de preparación. Para solicitar una reserva se requiere también la modalidad de entrega habilitada y un agente disponible en TU VERSO. El horario público del local es informativo.</p>

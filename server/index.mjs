@@ -3,11 +3,13 @@ import {validatePromotionSchedule,promotionVisible} from './promotion-schedule.m
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
+import {createMobileSurveyRoute,adminSurveyList,adminSurveySummary} from './mobile-order-surveys.mjs'
 import {createMobileReservationSlotsRoute} from './mobile-reservation-slots.mjs'
 import {createMobileReservationsRoutes} from './mobile-reservations.mjs'
 import {createAdminReservationRoutes} from './admin-reservations.mjs'
 import {readStoreReservationSettings,saveStoreReservationSettings,publishedReservationSettings} from './mobile-reservation-settings.mjs'
 import {checkoutPolicy,updateCheckoutPolicy,runCheckoutNotifications} from './mobile-checkout-followups.mjs'
+import {publicPaymentOptions} from './payment-public-options.mjs'
 import {commercialNotificationsAdmin,publicCommercialNotifications,dispatchCommercialNotifications} from './company-mobile-notifications.mjs'
 import {createServer} from 'node:http'
 import {readFile,stat} from 'node:fs/promises'
@@ -25,7 +27,7 @@ if(prod){
 }
 const secure=process.env.COOKIE_SECURE!== 'false' && prod
 const allowedOrigins=(process.env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean)
-const corsHeaders={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization, Idempotency-Key','Cache-Control':'no-store'}
+const corsHeaders={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization, Idempotency-Key, X-Order-Access-Key','Cache-Control':'no-store'}
 const json=(res,status,body,publicRead=false)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8',...(publicRead?corsHeaders:{'Cache-Control':'no-store'})});res.end(JSON.stringify(body))}
 const bad=(code,message)=>Object.assign(new Error(message),{code})
 const uuid=x=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(x)
@@ -74,7 +76,7 @@ function storeHours(store,date=new Date(),timeZone=DEFAULT_TENANT_TZ){
 }
 function withLiveHours(store,timeZone,at=new Date()){return {...store,...storeHours(store,at,timeZone)}}
 
-async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,sharedPaymentImages]=await Promise.all([
+async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,sharedPaymentImages,checkoutSettings]=await Promise.all([
  tx.query('SELECT s.id,s.name,s.address,s.latitude,s.longitude,s.radius_km,s.delivery_fee_pen,s.delivery_rate_per_km_pen,s.delivery_pricing_mode,s.delivery_preparation_minutes,s.pickup_preparation_minutes,s.active,s.delivery_enabled,s.pickup_enabled,s.dine_in_enabled,s.opening_hours,s.consult_order_availability, r.enabled AS reservation_enabled, r.preparation_minutes AS reservation_preparation_minutes FROM stores s LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id WHERE s.tenant_id=$1 AND s.active=true ORDER BY s.name',[tenantId]),
  tx.query('SELECT id,name,description,category,price_pen,image_url FROM products WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
  tx.query(`SELECT id,title,starts_at,ends_at,
@@ -99,14 +101,16 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
     WHERE vs.tenant_id=j.tenant_id AND vs.vacancy_id=j.id AND st.active=true)
    ORDER BY j.updated_at DESC,j.id`,[tenantId]),
  tx.query('SELECT complaints_book_url FROM mobile_apps WHERE tenant_id=$1 AND app_id=$2',[tenantId,appId]),
- tx.query('SELECT method,image_url FROM company_payment_images WHERE tenant_id=$1',[tenantId])
+ tx.query('SELECT method,image_url FROM company_payment_images WHERE tenant_id=$1',[tenantId]),
+ tx.query('SELECT payment_wait_minutes,reminder_count FROM mobile_checkout_policies WHERE tenant_id=$1',[tenantId])
  ]);const sharedPaymentImageMap=Object.fromEntries(sharedPaymentImages.rows.filter(p=>p.image_url).map(p=>[p.method,p.image_url]));
- const payload={schemaVersion:1,appId,currency:'PEN',timeZone:DEFAULT_TENANT_TZ,paymentImages:sharedPaymentImageMap,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),
+ const payload={schemaVersion:1,appId,currency:'PEN',timeZone:DEFAULT_TENANT_TZ,paymentImages:sharedPaymentImageMap,paymentWaitMinutes:checkoutSettings.rows[0]?.payment_wait_minutes??10,reminderCount:checkoutSettings.rows[0]?.reminder_count??2,stores:stores.rows.map(s=>({...s,latitude:s.latitude===null?null:Number(s.latitude),longitude:s.longitude===null?null:Number(s.longitude),radiusKm:s.radius_km===null?null:Number(s.radius_km),deliveryRatePerKmPen:s.delivery_rate_per_km_pen===null?null:Number(s.delivery_rate_per_km_pen),deliveryPricingMode:s.delivery_pricing_mode,deliveryFeePen:s.delivery_fee_pen===null?null:Number(s.delivery_fee_pen),openingHours:s.opening_hours??null,deliveryPreparationMinutes:s.delivery_preparation_minutes??null,pickupPreparationMinutes:s.pickup_preparation_minutes??null,consultOrderAvailability:s.delivery_enabled===true||s.pickup_enabled===true,preparationMinutes:s.reservation_preparation_minutes??null,reservationSettings:publishedReservationSettings({enabled:s.reservation_enabled,preparation_minutes:s.reservation_preparation_minutes}),paymentMethods:payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode].push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),
  paymentMethodImages:{
   delivery:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='delivery'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]])),
   pickup:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='pickup'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]])),
   reservation:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='reservation'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]]))
- }})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ },
+ paymentOptions:publicPaymentOptions(payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode]?.push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),sharedPaymentImageMap)})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[],notifications:[]},true);const commercial=await publicCommercialNotifications(pool,appId).catch(error=>{if(error.code==='42P01')return {items:[]};throw error});return json(res,200,{ready:true,revision:q.rows[0].revision,notifications:commercial.items,...q.rows[0].payload,timeZone:DEFAULT_TENANT_TZ,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
  ...withLiveHours(s,DEFAULT_TENANT_TZ),
@@ -214,7 +218,8 @@ async function isOrderCandidateLive(tenantId,candidate){
  return true
 }
 const mobileOrderAvailabilityRoutes=createMobileOrderAvailabilityRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),loadOrderContext,isCandidateLive:isOrderCandidateLive,rateLimit:limitMobileOrderRequests});
-const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,json:(res,status,value)=>json(res,status,value,true),storeOpen:store=>store.active!==false&&(store.delivery_enabled===true||store.pickup_enabled===true)});
+const mobileTuVersoRoutes=createMobileTuVersoRoutes({pool,body,imageBody,imageMime,json:(res,status,value)=>json(res,status,value,true),storeOpen:store=>store.active!==false&&(store.delivery_enabled===true||store.pickup_enabled===true)});
+const mobileSurveyRoute=createMobileSurveyRoute({pool,body,json:(res,status,value)=>json(res,status,value,true)});
 const reservationFulfillmentHours=()=>({hoursConfigured:true,isOpen:true});
 const mobileReservationSlotsRoute=createMobileReservationSlotsRoute({pool,json,storeHours:reservationFulfillmentHours});
 const mobileReservationsRoutes=createMobileReservationsRoutes({pool,body,json,storeHours:reservationFulfillmentHours,deliveryQuotes});
@@ -239,7 +244,7 @@ async function quote(req,res){
   if(!selected)throw bad(409,'Selecciona una sede habilitada para esta modalidad');
  }
  return json(res,200,{revision:q.rows[0].revision,storeId:selected.id,storeName:selected.name,
-  mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],preparationMinutes:b.mode==='delivery'?selected.deliveryPreparationMinutes??null:b.mode==='pickup'?selected.pickupPreparationMinutes??null:null,deliveryFeePen,routeDistanceKm:roadKm,
+  mode:b.mode,paymentMethods:selected.paymentMethods?.[b.mode]||[],paymentOptions:selected.paymentOptions?.[b.mode]||[],paymentWaitMinutes:config.paymentWaitMinutes??10,preparationMinutes:b.mode==='delivery'?selected.deliveryPreparationMinutes??null:b.mode==='pickup'?selected.pickupPreparationMinutes??null:null,deliveryFeePen,routeDistanceKm:roadKm,
   deliveryPricingMode:b.mode==='delivery'?selected.deliveryPricingMode:null,
   ratePerKmPen:b.mode==='delivery'&&selected.deliveryPricingMode!=='FIXED'?selected.deliveryRatePerKmPen:null,
   distanceSource:b.mode==='delivery'?'STRAIGHT_LINE':null,provisional:true,
@@ -248,6 +253,14 @@ async function quote(req,res){
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
  if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok)throw bad(401,'Credenciales inválidas');const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
  const user=await session(req);if(req.method!=='GET'&&!sameOrigin(req))throw bad(403,'Origen no autorizado');
+ if(url.pathname==='/api/admin/mobile/surveys/summary'){
+  if(req.method!=='GET')throw bad(405,'Método no permitido');
+  return json(res,200,await adminSurveySummary({pool,user,params:url.searchParams}));
+ }
+ if(url.pathname==='/api/admin/mobile/surveys'){
+  if(req.method!=='GET')throw bad(405,'Método no permitido');
+  return json(res,200,await adminSurveyList({pool,user,params:url.searchParams}));
+ }
  const mobileNoticeMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/mobile-notifications$/i)
  if(mobileNoticeMatch){
   const tenantId=mobileNoticeMatch[1];
@@ -531,7 +544,8 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
  if(await serviceCatalogRoute({req,res,url,pool,json}))return
  if(url.pathname.startsWith('/api/v1/mobile/')){
  if(req.method==='OPTIONS'){res.writeHead(204,corsHeaders);res.end();return}
- if(await mobileTuVersoRoutes({req,res,url}))return
+ if(await mobileSurveyRoute({req,res,url}))return
+ await mobileTuVersoRoutes({req,res,url});if(res.writableEnded)return
  if(await mobileOrderAvailabilityRoutes({req,res,url}))return
   if(/^\/api\/v1\/mobile\/stores\/[0-9a-f-]{36}\/reservation-slots$/i.test(url.pathname))
    return await mobileReservationSlotsRoute({req,res,url})
@@ -546,6 +560,17 @@ createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.heade
   return json(res,200,await publicCommercialNotifications(pool,id),true);
  }
  if(url.pathname==='/api/v1/mobile/config')return await publicConfig(req,res,url)
+ const receiptMedia=url.pathname.match(/^\/api\/v1\/mobile\/payment-receipts\/images\/([0-9a-f-]{36})$/i)
+ if(receiptMedia){
+  if(req.method!=='GET')throw bad(405,'Método no permitido')
+  const found=await sql(`SELECT i.mime,i.content FROM mobile_payment_receipt_images r
+   JOIN product_images i ON i.id=r.image_id AND i.tenant_id=r.tenant_id
+   JOIN tenants t ON t.id=r.tenant_id AND t.active=true
+   WHERE r.image_id=$1 LIMIT 1`,[receiptMedia[1]])
+  if(!found.rowCount)throw bad(404,'Comprobante no encontrado')
+  res.writeHead(200,{'Content-Type':found.rows[0].mime,'Cache-Control':'private,no-store','X-Content-Type-Options':'nosniff'})
+  return res.end(found.rows[0].content)
+ }
  const img=url.pathname.match(/^\/api\/v1\/mobile\/images\/([0-9a-f-]{36})$/)
  if(img&&req.method==='GET'){
   let found;
