@@ -23,6 +23,7 @@ test('Security response headers are present',()=>{
  applySecurityHeaders({setHeader:(key,value)=>headers.set(key,value)})
  assert.equal(headers.get('X-Content-Type-Options'),'nosniff')
  assert.equal(headers.get('X-Frame-Options'),'DENY')
+ assert.equal(headers.get('Cross-Origin-Resource-Policy'),'same-origin')
  assert.equal(headers.get('Referrer-Policy'),'strict-origin-when-cross-origin')
 })
 
@@ -47,4 +48,14 @@ test('Publication status is tenant scoped and reports pending changes',async()=>
  assert.equal(called.args[0],'tenant-1')
  assert.equal(called.args[1],'app')
  assert.match(called.sql,/tenant_id=\$1/)
+})
+
+test('Publication status differentiates clean snapshots and an unregistered app',async()=>{
+ const published=await getCatalogPublicationStatus({
+  query:async()=>({rows:[{published_at:'2026-11-27T12:00:00Z',revision:12,pending:false}]})
+ },'tenant','app')
+ assert.deepEqual({registered:published.registered,pending:published.pending,revision:published.revision},{registered:true,pending:false,revision:12})
+ const missing=await getCatalogPublicationStatus({query:async()=>({rows:[]})},'tenant','other')
+ assert.equal(missing.registered,false)
+ assert.equal(missing.pending,true)
 })
