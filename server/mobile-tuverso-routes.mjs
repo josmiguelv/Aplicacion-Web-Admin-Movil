@@ -1,7 +1,7 @@
 import {createHash,timingSafeEqual} from 'node:crypto'
 import {decryptCredential} from './integration-crypto.mjs'
 import {checkAvailability,connectionMode} from './tuverso-client.mjs'
-import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
+import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,closeMobileInteractionCommunication,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
 import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
@@ -137,7 +137,9 @@ function authorizedHour(store,storeOpen){
 export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  availability=checkAvailability,createInteraction=createMobileInteraction,
  readInteraction=readMobileInteraction,readMessages=readMobileInteractionMessages,
- sendMessage=sendMobileInteractionMessage,decrypt=decryptCredential,
+ sendMessage=sendMobileInteractionMessage,closeCommunication=closeMobileInteractionCommunication,
+ enableCommunicationClose=()=>process.env.TUVERSO_MOBILE_COMM_CLOSE_ENABLED==='true',
+ decrypt=decryptCredential,
  checkMode=connectionMode,interactionMode=mobileInteractionMode,rateLimit=throttled}){
  async function context(appId,storeId,requireOpen=true){
   const result=await pool.query(`SELECT p.tenant_id,p.revision,p.payload
@@ -225,6 +227,17 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
+    // The final message is committed first; this separate close event is opt-in.
+    // Never changes advisor assignment, conversation status or capacity.
+    const terminateRemoteCommunication=async()=>{
+     if(!enableCommunicationClose())return
+     const ended=await closeCommunication(integration.token,interactionId,{
+      eventId:orderMessageIdempotency('communication-close:'+access,interactionId),
+      reason:'CLIENT_CANCELLED',
+     })
+     if(!ended.ok||ended.data?.closed!==true||ended.data?.interactionId!==interactionId)
+      throw fail(ended.httpStatus===409?409:remoteAuthStatus(ended),'TU VERSO no confirmó el cierre de la comunicación')
+    }
     if(operation==='device')return json(res,200,await bindPersonalDevice(pool,owner,input.fcmToken))
     if(operation==='payment'){
      const data=req.method==='GET'?await readCheckoutPayment(pool,owner):await beginCheckoutPayment(pool,owner)
@@ -254,14 +267,16 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const messages=messagesAvailable?history.data.messages:[]
     const cancelled=messages.some(m=>m.direction==='INBOUND'&&(m.text===CANCEL_NOTICE||m.text===CANCEL_PURCHASE_NOTICE))
     if(operation==='cancel'){
-     if(cancelled){await closeCheckoutPayment(pool,owner);return json(res,200,{interactionId,status:'CANCELLED'})}
+     if(cancelled){await terminateRemoteCommunication();await closeCheckoutPayment(pool,owner);return json(res,200,{interactionId,status:'CANCELLED'})}
      if(remote.data.status==='EXPIRED')throw fail(409,'La interacción ya expiró')
      const sent=await sendMessage(integration.token,interactionId,{idempotencyKey:access,text:input.reason==='CANCEL'?CANCEL_PURCHASE_NOTICE:CANCEL_NOTICE})
      if(!sent.ok)throw fail(sent.httpStatus===409?409:remoteAuthStatus(sent),'No se pudo notificar la cancelación')
+     await terminateRemoteCommunication()
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
     if(cancelled){
+     await terminateRemoteCommunication()
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,storeId:input.storeId,
       status:'CANCELLED',agentMessages:[],messagesAvailable:false})
