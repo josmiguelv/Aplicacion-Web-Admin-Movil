@@ -297,7 +297,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
     [tenantId,imageId]);
   if(!found.rowCount)throw bad(404,'Imagen de la empresa no encontrada');
   res.writeHead(200,{'Content-Type':found.rows[0].mime,
-   'Cache-Control':'private,no-store','X-Content-Type-Options':'nosniff'});
+   'Cache-Control':'private,no-store','Cross-Origin-Resource-Policy':'cross-origin','X-Content-Type-Options':'nosniff'});
   return res.end(found.rows[0].content);
  }
  const sharedPaymentRoute=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/payment-images$/i);
@@ -527,7 +527,7 @@ if(process.env.B3_CHECKOUT_WORKER_ENABLED==='true'){
  const worker=setInterval(()=>{void tick()},30000)
  worker.unref?.();void tick()
 }
-createServer(async(req,res)=>{applySecurityHeaders(res);const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);try{
+createServer(async(req,res)=>{applySecurityHeaders(res);try{const url=new URL(req.url||'/','http://localhost');
  if(url.pathname==='/health/live'&&req.method==='GET')return json(res,200,{status:'ok'});
  if(url.pathname==='/health/ready'&&req.method==='GET'){
   let databaseReady=false;
@@ -588,7 +588,7 @@ createServer(async(req,res)=>{applySecurityHeaders(res);const url=new URL(req.ur
       AND c.payload::text LIKE '%'||$2||'%')
     LIMIT 1`,[img[1],img[1]]);
   }
-  if(!found.rowCount)throw bad(404,'Imagen no publicada');res.writeHead(200,{'Content-Type':found.rows[0].mime,'Cache-Control':'public,max-age=300','Access-Control-Allow-Origin':'*','X-Content-Type-Options':'nosniff'});return res.end(found.rows[0].content)
+  if(!found.rowCount)throw bad(404,'Imagen no publicada');res.writeHead(200,{'Content-Type':found.rows[0].mime,'Cache-Control':'public,max-age=300','Access-Control-Allow-Origin':'*','Cross-Origin-Resource-Policy':'cross-origin','X-Content-Type-Options':'nosniff'});return res.end(found.rows[0].content)
  }
  if(url.pathname==='/api/v1/mobile/fulfillment/resolve'&&req.method==='POST')return await quote(req,res)
  throw bad(404,'Ruta pública inexistente')}
