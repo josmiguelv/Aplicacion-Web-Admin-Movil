@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, Bike, Building2, CalendarDays, Check, Clock3, Copy, CreditCard, MapPin, Package, Send, ShoppingBag, Store, Smartphone, Tag, Settings2, Bell, Star } from 'lucide-react'
 import {SurveyModule,type SurveySummaryEntry} from './SurveyModule'
 import PublicationConfirmDialog,{type PublicationPrompt} from './PublicationConfirmDialog'
+import {useCommercialEditorData,type ProductRow,type VacancyRow} from './useCommercialEditorData'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
@@ -13,10 +14,8 @@ type ReservationSettings = {enabled:boolean;preparationMinutes:number|null}
 const blankReservation = ():ReservationSettings => ({enabled:false,preparationMinutes:null})
 type PublicationStatus = {registered:boolean;hasPublished:boolean;pending:boolean;revision:number;publishedAt:string|null}
 type PromotionRow = {id:string;title:string;active:boolean;productId:string|null;startDate:string|null;endDate:string|null;startTime:string|null;endTime:string|null;weekdays:number[]|null;productName:string|null;productPricePen:number|null;productImageUrl:string|null;productActive:boolean|null}
-type ProductRow = {id:string;name:string;description:string;category:string;price_pen:number;image_url:string|null;active:boolean}
 type CompanyNotice = {id:string;title:string;message:string;imageUrl:string|null;scheduledAt:string;expiresAt:string;startDate:string;endDate:string;weekdays:number[]|null;runTime:string|null;status:'DRAFT'|'PUBLISHED'|'DISABLED';pushSentAt:string|null;pushError:string|null}
 const limaDatetime=(iso:string)=>{const date=new Date(iso);if(Number.isNaN(date.getTime()))return '';const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`}
-type VacancyRow = {id:string;title:string;summary:string;description:string;requirements:string;employment_type:string;location_label:string;store_ids:string[];image_url:string|null;whatsapp_phone:string;active:boolean}
 const modes = [{key:'delivery',name:'Delivery'},{key:'reservation',name:'Reservación'},{key:'pickup',name:'Recojo en tienda'}]
 const payments = [{key:'yape',name:'Yape'},{key:'plin',name:'Plin'},{key:'card',name:'Izipay'},{key:'cash',name:'Efectivo'}] as const
 type PaymentMethod = typeof payments[number]['key']
@@ -41,7 +40,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [session,setSession]=useState<Session|null>(embeddedSession??null)
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('')
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
- const [stores,setStores]=useState<StoreRow[]>([]),[products,setProducts]=useState<ProductRow[]>([]),[vacancies,setVacancies]=useState<VacancyRow[]>([])
+ const [stores,setStores]=useState<StoreRow[]>([])
  const [storesLoaded,setStoresLoaded]=useState(false)
  const [catalogReload,setCatalogReload]=useState(0)
  const [moduleWarnings,setModuleWarnings]=useState<string[]>([])
@@ -152,6 +151,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  useEffect(()=>()=>clearToastTimers(),[])
 
  const [activeArea,setActiveArea]=useState<'overview'|'local'|'stores'|'reservations'|'products'|'vacancies'|'promotions'|'payments'|'settings'|'commercial-notifications'|'publish'|'surveys'>('overview')
+ const {products,vacancies}=useCommercialEditorData({tenantId,enabled:!!session,view:activeArea,reload:catalogReload,setError})
  const chooseArea=(area:typeof activeArea)=>{
   if(area===activeArea)return
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Tienes cambios sin guardar en el local. ¿Quieres salir sin guardarlos?'))return
@@ -212,20 +212,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   setModuleWarnings(warnings)
  }
  useEffect(()=>{
-  if(!session||!tenantId||!['products','promotions','vacancies'].includes(activeArea))return
-  let alive=true
-  if(activeArea==='vacancies'){
-   void api<{items:VacancyRow[]}>(`/api/admin/tenants/${tenantId}/vacancies`)
-    .then(result=>{if(alive)setVacancies(result.items)})
-    .catch(e=>{if(alive)setError('No se pudieron cargar las vacantes: '+(e instanceof Error?e.message:'Error desconocido'))})
-  }else{
-   void api<{items:ProductRow[]}>(`/api/admin/tenants/${tenantId}/products`)
-    .then(result=>{if(alive)setProducts(result.items)})
-    .catch(e=>{if(alive)setError('No se pudieron cargar los productos: '+(e instanceof Error?e.message:'Error desconocido'))})
-  }
-  return()=>{alive=false}
- },[session,tenantId,activeArea,catalogReload])
- useEffect(()=>{
   if(!session||!tenantId||!['payments','commercial-notifications'].includes(activeArea))return
   let alive=true
   void api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string;reminder2Title:string;reminder2Message:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`)
@@ -242,7 +228,6 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    .catch(e=>{if(alive)setError('No se pudo cargar la configuración de seguimiento: '+(e instanceof Error?e.message:'Error desconocido'))})
   return()=>{alive=false}
  },[session,tenantId,activeArea])
- useEffect(()=>{setProducts([]);setVacancies([])},[tenantId])
 
  useEffect(()=>{
   if(!session||!tenantId||!appId.trim()||(!publicationPrompt&&activeArea!=='publish')){
