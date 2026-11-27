@@ -41,6 +41,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('')
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
  const [storeData,setStoreData]=useState<{tenantId:string;items:StoreRow[]}>({tenantId:'',items:[]})
+ const latestTenantRef=useRef(tenantId)
+ latestTenantRef.current=tenantId
  const [storesRawLoaded,setStoresRawLoaded]=useState(false)
  const stores=storeData.tenantId===tenantId?storeData.items:[]
  const storesLoaded=storesRawLoaded&&storeData.tenantId===tenantId
@@ -198,6 +200,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    api<{items:StoreRow[]}>(`/api/admin/tenants/${id}/stores`),
    api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`)
   ])
+  if(latestTenantRef.current!==id)return
   const warnings:string[]=[]
   if(st.status==='fulfilled'){
    setStoreData({tenantId:id,items:st.value.items});setStoresRawLoaded(true)
