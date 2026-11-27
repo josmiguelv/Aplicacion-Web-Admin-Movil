@@ -14,8 +14,8 @@ Mantener este sistema separado de TU VERSO: proyecto Railway propio y PostgreSQL
 - Railway utiliza la segunda ruta para su healthcheck. No exponer secretos en endpoints de salud.
 
 ## Pasos previos a publicar (NO ejecutar hasta aprobar)
-1. Crear un **proyecto Railway nuevo**, separado del proyecto de TU VERSO.
-2. Crear un **PostgreSQL 17 nuevo** dentro de ese proyecto, privado.
+1. Identificar el **destino de despliegue autorizado** y confirmar que el Administrador permanece aislado de TU VERSO. **No crear automáticamente un proyecto o ambiente adicional.**
+2. Confirmar una **base PostgreSQL del Administrador separada**, privada y autorizada. **No reutilizar ni alterar la base de TU VERSO.**
 3. Revisar `server/schema.sql` con DBA. En base **vacía** aplicar el esquema; para una base preexistente revisar y planificar las sentencias `ALTER`, sin asumir que `CREATE TABLE IF NOT EXISTS` migra columnas. Evitar automatizar migraciones al iniciar contenedores.
 4. Configurar el servicio desde este repositorio/branch. Usar variables de servidor:
    - `DATABASE_URL`: referencia a conexión **privada** del PostgreSQL propio.
