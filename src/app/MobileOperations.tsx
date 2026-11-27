@@ -237,7 +237,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  },[session,tenantId,activeArea])
 
  useEffect(()=>{
-  if(!session||!tenantId||!appId.trim()||(!publicationPrompt&&activeArea!=='publish')){
+  if(!session||!tenantId||!appId.trim()){
    setPublicationStatus(null);setPublicationStatusLoading(false);return
   }
   let alive=true
@@ -247,7 +247,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    .catch(()=>{if(alive)setPublicationStatus(null)})
    .finally(()=>{if(alive)setPublicationStatusLoading(false)})
   return()=>{alive=false}
- },[session,tenantId,appId,activeArea,publicationPrompt,publicationStatusReload])
+ },[session,tenantId,appId,publicationStatusReload])
  useEffect(()=>{
   if(!session||!tenantId||activeArea!=='promotions')return
   let cancelled=false
@@ -468,6 +468,11 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    onConfirm={()=>void confirmPublication()}/>}
    {toast&&<div className={`ops-floating-toast${toast.closing?' ops-floating-toast--leaving':''}`} role="status" aria-live="polite" aria-atomic="true">
     <Check size={17} aria-hidden="true"/><span>{toast.text}</span>
+   </div>}
+  {publicationStatus?.registered&&publicationStatus.pending&&!publicationPrompt&&
+   <div className="ops-publication-pending" role="status">
+    <span><strong>Hay cambios pendientes de publicar.</strong> La aplicación sigue utilizando la última versión publicada.</span>
+    <button type="button" className="button button-secondary" onClick={()=>chooseArea('publish')}>Revisar publicación</button>
    </div>}
   {session.role==='SUPER_ADMIN'&&!embeddedSession&&<section className="ops-panel"><h2><Building2 size={19}/> Empresas</h2><div className="ops-inline"><select value={tenantId} onChange={e=>{setTenantId(e.target.value);setSelectedStoreId('');setActiveArea('overview')}} aria-label="Empresa seleccionada"><option value="">Selecciona una empresa</option>{tenants.map(t=><option value={t.id} key={t.id}>{t.name}</option>)}</select><input placeholder="Nueva empresa" value={companyName} onChange={e=>setCompanyName(e.target.value)}/><button className="button button-secondary" disabled={!companyName.trim()||loading} onClick={()=>void act(async()=>{const created=await api<Tenant>('/api/admin/tenants','POST',{name:companyName});setTenants(v=>[...v,created]);setTenantId(created.id);setSelectedStoreId('');setActiveArea('overview');setCompanyName('');setMessage('Empresa creada. Debes crear sus usuarios y registrar su aplicación.')})}>Crear empresa</button></div><p className="ops-hint">Cada administrador de empresa tiene permisos limitados a su tenant. Las cuentas deben crearse desde el endpoint autorizado de superadministración.</p></section>}
   {tenantId&&<>
