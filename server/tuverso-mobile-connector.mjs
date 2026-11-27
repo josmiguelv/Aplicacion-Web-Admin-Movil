@@ -76,12 +76,18 @@ function sanitizedData(kind,json){
  if(kind==='events'){
   if(!Array.isArray(data.events)||data.events.length>100||
      data.events.some(e=>!id(e.id)||!id(e.interactionId)||
-      !['REQUEST_CREATED','REQUEST_ACCEPTED','REQUEST_REJECTED','REQUEST_EXPIRED','MESSAGE_OUTBOUND'].includes(e.kind))||
+      !['REQUEST_CREATED','REQUEST_ACCEPTED','REQUEST_REJECTED','REQUEST_EXPIRED','MESSAGE_OUTBOUND','COMMUNICATION_CLOSED'].includes(e.kind))||
      data.nextCursor!==null&&data.nextCursor!==undefined&&!id(data.nextCursor)||
      typeof data.hasMore!=='boolean')return null
   return {events:data.events.map(e=>({id:e.id,interactionId:e.interactionId,kind:e.kind,
     createdAt:typeof e.createdAt==='string'?e.createdAt:null})),
    nextCursor:data.nextCursor??null,hasMore:data.hasMore}
+ }
+ if(kind==='close'){
+  if(!id(data.interactionId)||!id(data.conversationId)||data.closed!==true||
+     typeof data.replayed!=='boolean')return null
+  return {interactionId:data.interactionId,conversationId:data.conversationId,
+   closed:true,replayed:data.replayed}
  }
  if(kind==='message'){
   if(!id(data.messageId)||typeof data.created!=='boolean')return null
@@ -183,6 +189,15 @@ export async function sendMobileInteractionMessage(token,interactionId,{idempote
  return perform(token,'message',`/api/v1/conversations/${interactionId}/messages`,{
   method:'POST',idempotencyKey,
   requestBody:isForm?{type:'FORM',form}:type==='TEXT'?{type:'TEXT',text}:{text},
+ })
+}
+/** Explicit transport termination. Never changes agent status or capacity. */
+export async function closeMobileInteractionCommunication(token,interactionId,{eventId,reason='CLIENT_CANCELLED'}){
+ if(!id(interactionId)||!id(eventId)||!['CLIENT_ENDED','CLIENT_CANCELLED','FLOW_FINISHED'].includes(reason))
+  throw Error('TUVERSO_COMMUNICATION_CLOSE_INVALID')
+ return perform(token,'close',`/api/v1/conversations/${interactionId}/close`,{
+  method:'POST',idempotencyKey:eventId,
+  requestBody:{version:1,type:'CONVERSATION_CLOSE',eventId,interactionId,reason},
  })
 }
 export const mobileInteractionMode=()=>mode()?'LIVE':'DISABLED'
