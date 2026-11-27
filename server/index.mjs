@@ -2,6 +2,7 @@ import {integrationRoutes} from './integrations.mjs'
 import {validatePromotionSchedule,promotionVisible} from './promotion-schedule.mjs'
 import {indexedPromotionProducts} from './promotion-product-projection.mjs'
 import {applySecurityHeaders,limitAdminLogin} from './admin-security.mjs'
+import {getCatalogPublicationStatus} from './admin-publication-status.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
@@ -262,6 +263,13 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(url.pathname==='/api/admin/mobile/surveys'){
   if(req.method!=='GET')throw bad(405,'Método no permitido');
   return json(res,200,await adminSurveyList({pool,user,params:url.searchParams}));
+ }
+ const publicationStatusMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/publication-status$/i)
+ if(publicationStatusMatch){
+  if(req.method!=='GET')throw bad(405,'Método no permitido')
+  const tenantId=publicationStatusMatch[1];await tenantOf(user,tenantId)
+  const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio')
+  return json(res,200,await getCatalogPublicationStatus(pool,tenantId,appId))
  }
  const mobileNoticeMatch=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]{36})\/mobile-notifications$/i)
  if(mobileNoticeMatch){
