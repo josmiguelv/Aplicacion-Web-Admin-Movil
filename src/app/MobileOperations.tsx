@@ -80,6 +80,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [promoStartTime,setPromoStartTime]=useState(''),[promoEndTime,setPromoEndTime]=useState('')
  const [promoDays,setPromoDays]=useState<number[]>([])
  const [appId,setAppId]=useState('')
+ const [registeredAppIds,setRegisteredAppIds]=useState<string[]>([])
+ const [publicationPrompt,setPublicationPrompt]=useState<{label:string;target:'catalog'|'notice'}|null>(null)
+ const [publishingPrompt,setPublishingPrompt]=useState(false)
   const [reservationStoreId,setReservationStoreId]=useState('')
  const [selectedStoreId,setSelectedStoreId]=useState('')
  const [storeFocus,setStoreFocus]=useState<'details'|'hours'|'delivery'|'pickup'>('details')
@@ -148,6 +151,30 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Tienes cambios sin guardar en el local. ¿Quieres salir sin guardarlos?'))return
   setActiveArea(area);setSavedArea('');setStoreSavedNotice(false);setError('');setMessage('')
  }
+ const requestPublication=(label:string,target:'catalog'|'notice'='catalog')=>setPublicationPrompt({label,target})
+ const confirmPublication=async()=>{
+  if(!publicationPrompt||publishingPrompt)return
+  const target=publicationPrompt.target
+  if(target==='notice'){
+   setPublicationPrompt(null);setActiveArea('commercial-notifications')
+   setMessage('Selecciona «Publicar» en el aviso guardado. Los avisos comerciales tienen publicación independiente del catálogo.')
+   return
+  }
+  if(!appId.trim()||!registeredAppIds.includes(appId.trim())){
+   setPublicationPrompt(null);setActiveArea('publish')
+   setMessage('Selecciona una aplicación registrada para esta empresa y pulsa «Publicar cambios».')
+   return
+  }
+  setPublishingPrompt(true);setError('')
+  try{
+   const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId:appId.trim()})
+   setPublicationPrompt(null)
+   setSavedArea('')
+   setMessage(`Cambios publicados correctamente (revisión ${r.revision}). Android recibirá la nueva versión.`)
+  }catch(e){
+   setError('La configuración se guardó, pero no se pudo publicar: '+(e instanceof Error?e.message:'Error inesperado'))
+  }finally{setPublishingPrompt(false)}
+ }
  const act=async(fn:()=>Promise<void>)=>{setLoading(true);setError('');setMessage('');try{await fn()}catch(e){setError(e instanceof Error?e.message:'Error inesperado')}finally{setLoading(false)}}
  useEffect(()=>{if(embeddedSession){setSession(embeddedSession);setTenantId(scopedTenantId??embeddedSession.tenantId??'');return}void api<Session>('/api/admin/me').then(s=>{setSession(s);setTenantId(s.tenantId||'')}).catch(()=>{})},[embeddedSession,scopedTenantId])
  useEffect(()=>{if(!session)return;if(session.role==='SUPER_ADMIN'&&!embeddedSession)void api<{tenants:Tenant[]}>('/api/admin/tenants').then(r=>setTenants(r.tenants)).catch(e=>setError(e.message))},[session])
@@ -176,8 +203,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   if(apps.status==='fulfilled'){
    const current=apps.value.items.find(x=>x.app_id===appId)??(appId===''&&apps.value.items.length===1?apps.value.items[0]:undefined)
    if(current&&appId==='')setAppId(current.app_id)
+   setRegisteredAppIds(apps.value.items.map(a=>a.app_id))
    setComplaintsBookUrl(current?.complaints_book_url||'')
-  }else warnings.push('Aplicaciones')
+  }else{setRegisteredAppIds([]);warnings.push('Aplicaciones')}
   if(checkout.status==='fulfilled'){
    setPaymentWaitMinutes(checkout.value.paymentWaitMinutes)
    setReminderCount(checkout.value.reminderCount)
@@ -338,7 +366,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   })
   const next={...store,id:saved.id,code:saved.code}
   setStore(next);setStoreBaseline(JSON.stringify(next))
-  await refresh();setStoreSavedNotice(true)
+  await refresh();setStoreSavedNotice(true);requestPublication('configuración de la sede')
  })
  const renderStoreEditor=()=>storeEditorOpen&&<div className="ops-sede-editor" id={store.id?`sede-editor-${store.id}`:'sede-editor-new'}>
   <div className="ops-inline"><h3>{store.id?(
@@ -404,6 +432,25 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  return <div className="ops-wrapper">
   <div className="ops-top"><div><p className="eyebrow">ADMINISTRACIÓN DE EMPRESAS Y SEDES</p><h1>{session.role==='SUPER_ADMIN'?tenants.find(t=>t.id===tenantId)?.name||'Administrador de empresas':'Administrador de tu empresa'}</h1><p>Selecciona un local para identificar rápidamente qué configuración estás editando.</p></div>{!embeddedSession&&<button className="button button-secondary" onClick={()=>void act(async()=>{await api('/api/admin/logout','POST');setSession(null);setTenantId('');setTenants([])})}>Cerrar sesión</button>}</div>
   {error&&<div className="ops-error" role="alert">{error}</div>}
+  {publicationPrompt&&<div className="ops-publish-scrim" role="presentation">
+   <section className="ops-publish-dialog" role="dialog" aria-modal="true" aria-labelledby="ops-publish-heading" aria-describedby="ops-publish-description">
+    <div className="ops-publish-symbol"><Send size={23} aria-hidden="true"/></div>
+    <h2 id="ops-publish-heading">¿Deseas publicar los cambios ahora?</h2>
+    <p id="ops-publish-description">Se guardó correctamente la {publicationPrompt.label}.
+     {publicationPrompt.target==='notice'
+      ?' Los avisos comerciales se publican desde su propio módulo y no con el catálogo de Android.'
+      :registeredAppIds.includes(appId.trim())
+       ?' Si confirmas, se actualizará el catálogo público de la aplicación.'
+       :' Para publicar tendrás que seleccionar o registrar la aplicación correspondiente.'}
+    </p>
+    <div className="ops-publish-dialog-actions">
+     <button type="button" className="button button-secondary" disabled={publishingPrompt} onClick={()=>setPublicationPrompt(null)}>Ahora no</button>
+     <button type="button" className="button button-primary" disabled={publishingPrompt} onClick={()=>void confirmPublication()}>
+      {publishingPrompt?'Publicando…':publicationPrompt.target==='notice'||!registeredAppIds.includes(appId.trim())?'Ir a publicar':'Sí, publicar ahora'}
+     </button>
+    </div>
+   </section>
+  </div>}
    {toast&&<div className={`ops-floating-toast${toast.closing?' ops-floating-toast--leaving':''}`} role="status" aria-live="polite" aria-atomic="true">
     <Check size={17} aria-hidden="true"/><span>{toast.text}</span>
    </div>}
@@ -470,7 +517,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      </div>
      <p className="ops-hint">No se configuran horarios ni anticipaciones de reserva. El cliente propone una fecha y hora futuras; el agente conectado a TU VERSO acepta o rechaza la solicitud. El tiempo de preparación no inicia un temporizador de atención al agente.</p>
      <button className="button button-primary" disabled={loading||reservationLoading||!tenantId}
-      onClick={()=>void act(async()=>{const saved=await api<ReservationSettings>(`/api/admin/tenants/${tenantId}/stores/${reservationStoreId}/reservation-settings`,'POST',reservationSettings);setReservationSettings(saved);setReservationFlags(current=>({...current,[reservationStoreId]:saved.enabled}));setSavedArea('reservations')})}>Guardar configuración de reservas</button>
+      onClick={()=>void act(async()=>{const saved=await api<ReservationSettings>(`/api/admin/tenants/${tenantId}/stores/${reservationStoreId}/reservation-settings`,'POST',reservationSettings);setReservationSettings(saved);setReservationFlags(current=>({...current,[reservationStoreId]:saved.enabled}));setSavedArea('reservations');requestPublication('configuración de reservas')})}>Guardar configuración de reservas</button>
      {savedNext('reservations')}
     </>)}
    </section>)}
@@ -553,7 +600,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
         ...product,pricePen:Number(product.pricePen)
        })
        await refresh()
-       setProduct(blankProduct());setProductEditorOpen(false);setSavedArea('products')
+       setProduct(blankProduct());setProductEditorOpen(false);setSavedArea('products');requestPublication('producto')
       })}>{product.id?'Guardar cambios':'Crear producto'}</button>
      <button type="button" className="button button-secondary" disabled={loading}
       onClick={()=>{setProduct(blankProduct());setProductEditorOpen(false)}}>Cancelar</button>
@@ -592,7 +639,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    <label className="ops-check"><input type="checkbox" checked={vacancy.active} onChange={e=>setVacancy({...vacancy,active:e.target.checked})}/>Vacante activa (visible al publicar)</label>
    <div className="ops-inline">
     <button className="button button-primary" disabled={loading||!vacancy.title.trim()||!vacancy.whatsappPhone.trim()||vacancy.storeIds.length===0}
-     onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/vacancies`,'POST',vacancy);await refresh();setSavedArea('vacancies')})}>Guardar vacante</button>
+     onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/vacancies`,'POST',vacancy);await refresh();setSavedArea('vacancies');requestPublication('vacante')})}>Guardar vacante</button>
     <button className="button button-secondary" onClick={()=>setVacancy(emptyVacancy())}>Nueva vacante</button>
    </div>
    {savedNext('vacancies')}
@@ -626,7 +673,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
         <button type="button" className="button button-secondary" disabled={loading}
          onClick={()=>void act(async()=>{
           await api(`/api/admin/tenants/${tenantId}/promotions`,'POST',{id:p.id,active:!p.active})
-          setPromotionsReload(v=>v+1);setSavedArea('promotions')
+          setPromotionsReload(v=>v+1);setSavedArea('promotions');requestPublication('estado de promoción')
          })}>{p.active?'Desactivar':'Activar'}</button>
        </div>
       </div>)}
@@ -683,7 +730,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
         ...(promotionEditingId?{id:promotionEditingId}:{}),title:promotionTitle.trim(),productId:promotionProductId,active:promotionEnabled,startDate:promoStartDate,
         endDate:promoEndDate,startTime:promoStartTime,endTime:promoEndTime,weekdays:promoDays
        })
-       clearPromotionForm();setPromotionsReload(v=>v+1);setSavedArea('promotions')
+       clearPromotionForm();setPromotionsReload(v=>v+1);setSavedArea('promotions');requestPublication('promoción')
       })}>{promotionEditingId?'Guardar cambios':'Crear promoción'}</button>
     </div>
     <p className="ops-hint">La franja horaria pertenece a cada día marcado (hora de inicio anterior a la de fin). La aplicación aplica la hora local de la empresa. Una promoción guardada no aparecerá hasta publicarla.</p>
@@ -759,14 +806,14 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
      const policy=await api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string;reminder2Title:string;reminder2Message:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`,'POST',{
       paymentWaitMinutes,reminderCount,remindersEnabled,reminderTitle,reminderMessage,reminder2Title,reminder2Message
      })
-     setPaymentWaitMinutes(policy.paymentWaitMinutes);setSavedArea('payments')
+     setPaymentWaitMinutes(policy.paymentWaitMinutes);setSavedArea('payments');requestPublication('formas de pago')
     })}>Guardar formas de pago</button>
    <p className="ops-hint">Las imágenes se comparten por empresa; habilitar un método no verifica cobros ni conecta Izipay como pasarela. Publica cambios para actualizar el catálogo de la aplicación.</p>
   </section>)}
   {activeArea==='settings'&&(<section className="ops-panel"><h2>Libro de Reclamaciones · Enlace oficial</h2>
   <p>Ingresa únicamente la URL HTTPS del Libro de Reclamaciones real de la empresa seleccionada. La aplicación mostrará el botón de acceso después de publicar los cambios. Este campo no crea ni recibe reclamaciones.</p>
   <label>Dirección HTTPS del Libro de Reclamaciones<input type="url" value={complaintsBookUrl} placeholder="https://..." onChange={e=>setComplaintsBookUrl(e.target.value)} /></label>
-  <button className="button button-secondary" disabled={loading||!tenantId} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/complaints`,'POST',{appId,url:complaintsBookUrl.trim()});setSavedArea('settings')})}>Guardar enlace</button>{savedNext('settings')}
+  <button className="button button-secondary" disabled={loading||!tenantId} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/complaints`,'POST',{appId,url:complaintsBookUrl.trim()});setSavedArea('settings');requestPublication('enlace del Libro de Reclamaciones')})}>Guardar enlace</button>{savedNext('settings')}
   <p className="ops-hint">Debe corresponder al Libro auténtico del proveedor y permitir obtener constancia del reclamo. Si está vacío, la aplicación informará que el acceso digital aún no está configurado; no simulará registros.</p>
  </section>)}
  {activeArea==='commercial-notifications'&&(<section className="ops-panel ops-marketing-panel">
@@ -815,7 +862,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
        const saved=await api<CompanyNotice>(`/api/admin/tenants/${tenantId}/mobile-notifications`,'POST',{
         action:'save',...(noticeId?{id:noticeId}:{}),title:noticeTitle,message:noticeMessage,imageUrl:noticeImage,
         startDate:noticeStarts,endDate:noticeExpires,runTime:noticeRunTime,weekdays:noticeWeekdays
-       });setNoticeId(saved.id);setNoticesReload(x=>x+1);setMessage(saved.status==='PUBLISHED'?'Frecuencia del aviso publicado actualizada. Los envíos anteriores permanecen registrados.':'Borrador guardado. Revisa la vista previa y luego publícalo.')
+       });setNoticeId(saved.id);setNoticesReload(x=>x+1);setMessage(saved.status==='PUBLISHED'?'Frecuencia del aviso publicado actualizada. Los envíos anteriores permanecen registrados.':'Borrador guardado. Revisa la vista previa y luego publícalo.');if(saved.status!=='PUBLISHED')requestPublication('aviso comercial','notice')
       })}>{noticeEditStatus==='PUBLISHED'?'Guardar cambios':'Guardar borrador'}</button>
      <button type="button" className="button button-secondary" onClick={()=>{
       setNoticeId('');setNoticeTitle('');setNoticeMessage('');setNoticeImage('');setNoticeStarts('');setNoticeExpires('');setNoticeRunTime('');setNoticeWeekdays([]);setNoticeEditStatus('DRAFT')
