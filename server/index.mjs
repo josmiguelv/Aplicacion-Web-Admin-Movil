@@ -1,5 +1,6 @@
 import {integrationRoutes} from './integrations.mjs'
 import {validatePromotionSchedule,promotionVisible} from './promotion-schedule.mjs'
+import {indexedPromotionProducts} from './promotion-product-projection.mjs'
 import {adminApiKeyRoutes,serviceCatalogRoute} from './service-api-keys.mjs'
 import {createMobileOrderAvailabilityRoutes} from './mobile-order-availability.mjs'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
@@ -110,12 +111,7 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
   pickup:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='pickup'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]])),
   reservation:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='reservation'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]]))
  },
- paymentOptions:publicPaymentOptions(payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode]?.push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),sharedPaymentImageMap)})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows.map(p=>{
-  const product=products.rows.find(item=>item.id===p.productId)
-  return {...p,productId:product?.id??p.productId??null,
-   product:product?{id:product.id,name:product.name,description:product.description,category:product.category,
-    pricePen:Number(product.price_pen),imageUrl:product.image_url}:null}
- }).filter(p=>p.productId===null||p.product!==null),vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ paymentOptions:publicPaymentOptions(payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode]?.push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),sharedPaymentImageMap)})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:indexedPromotionProducts(products.rows,promos.rows),vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[],notifications:[]},true);const commercial=await publicCommercialNotifications(pool,appId).catch(error=>{if(error.code==='42P01')return {items:[]};throw error});return json(res,200,{ready:true,revision:q.rows[0].revision,notifications:commercial.items,...q.rows[0].payload,timeZone:DEFAULT_TENANT_TZ,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
  ...withLiveHours(s,DEFAULT_TENANT_TZ),
