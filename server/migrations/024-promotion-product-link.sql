@@ -2,6 +2,7 @@
 -- Existing promotions are preserved with NULL; newly created scheduled promotions require a product in the API.
 BEGIN;
 ALTER TABLE promotions ADD COLUMN IF NOT EXISTS product_id UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS products_id_tenant_promotion_ref_idx ON products(id,tenant_id);
 CREATE INDEX IF NOT EXISTS promotions_tenant_product_idx ON promotions(tenant_id,product_id);
 -- The write route validates same-tenant and active product; this constraint also prevents cross-tenant links.
 DO $$
