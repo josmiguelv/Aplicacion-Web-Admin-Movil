@@ -10,6 +10,7 @@ const weekdays = [{id:'mon',label:'Lunes'},{id:'tue',label:'Martes'},{id:'wed',l
 type StoreRow = { delivery_preparation_minutes:number|null;pickup_preparation_minutes:number|null;code: string; opening_hours: OpeningHours|null; consult_order_availability: boolean; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
 type ReservationSettings = {enabled:boolean;preparationMinutes:number|null}
 const blankReservation = ():ReservationSettings => ({enabled:false,preparationMinutes:null})
+type PromotionRow = {id:string;title:string;active:boolean;productId:string|null;startDate:string|null;endDate:string|null;startTime:string|null;endTime:string|null;weekdays:number[]|null;productName:string|null;productPricePen:number|null;productImageUrl:string|null;productActive:boolean|null}
 type ProductRow = {id:string;name:string;description:string;category:string;price_pen:number;image_url:string|null;active:boolean}
 type CompanyNotice = {id:string;title:string;message:string;imageUrl:string|null;scheduledAt:string;expiresAt:string;startDate:string;endDate:string;weekdays:number[]|null;runTime:string|null;status:'DRAFT'|'PUBLISHED'|'DISABLED';pushSentAt:string|null;pushError:string|null}
 const limaDatetime=(iso:string)=>{const date=new Date(iso);if(Number.isNaN(date.getTime()))return '';const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Lima',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(date).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`}
@@ -70,6 +71,11 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [newTenantEmail,setNewTenantEmail]=useState(''),[newTenantPassword,setNewTenantPassword]=useState('')
  const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false)
  const [promotionProductId,setPromotionProductId]=useState('')
+ const [promotions,setPromotions]=useState<PromotionRow[]>([])
+ const [promotionsLoading,setPromotionsLoading]=useState(false)
+ const [promotionsError,setPromotionsError]=useState('')
+ const [promotionEditingId,setPromotionEditingId]=useState('')
+ const [promotionsReload,setPromotionsReload]=useState(0)
  const [promoStartDate,setPromoStartDate]=useState(''),[promoEndDate,setPromoEndDate]=useState('')
  const [promoStartTime,setPromoStartTime]=useState(''),[promoEndTime,setPromoEndTime]=useState('')
  const [promoDays,setPromoDays]=useState<number[]>([])
@@ -184,6 +190,25 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   setModuleWarnings(warnings)
  }
 
+ useEffect(()=>{
+  if(!session||!tenantId||activeArea!=='promotions')return
+  let cancelled=false
+  setPromotionsLoading(true);setPromotionsError('')
+  void api<{items:PromotionRow[]}>(`/api/admin/tenants/${tenantId}/promotions`)
+   .then(r=>{if(!cancelled)setPromotions(r.items)})
+   .catch(e=>{if(!cancelled)setPromotionsError(e instanceof Error?e.message:'No se pudieron consultar promociones')})
+   .finally(()=>{if(!cancelled)setPromotionsLoading(false)})
+  return()=>{cancelled=true}
+ },[session,tenantId,activeArea,promotionsReload])
+ const clearPromotionForm=()=>{
+  setPromotionEditingId('');setPromotionTitle('');setPromotionProductId('');setPromotionEnabled(false)
+  setPromoStartDate('');setPromoEndDate('');setPromoStartTime('');setPromoEndTime('');setPromoDays([])
+ }
+ const editPromotion=(p:PromotionRow)=>{
+  setPromotionEditingId(p.id);setPromotionTitle(p.title);setPromotionProductId(p.productId||'')
+  setPromotionEnabled(p.active);setPromoStartDate(p.startDate||'');setPromoEndDate(p.endDate||'')
+  setPromoStartTime(p.startTime||'');setPromoEndTime(p.endTime||'');setPromoDays(p.weekdays||[])
+ }
  useEffect(()=>{if(session&&tenantId){setStoresLoaded(false);setModuleWarnings([]);setError('');void refresh(tenantId).catch(e=>setError(e.message))}},[tenantId,session])
  useEffect(()=>{
     if(activeArea!=='reservations'||!tenantId||!reservationStoreId)return
@@ -583,6 +608,31 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   {activeArea==='promotions'&&(<section className="ops-panel ops-promo-panel">
     <p className="ops-global-note" role="status">Promociones compartidas de la empresa. No se restringen automáticamente a la sede desde la que accediste.</p>
     <h2>Promociones de la aplicación</h2>
+    <h3>Promociones registradas</h3>
+    {promotionsLoading?<p role="status">Cargando promociones...</p>:
+     promotionsError?<div className="ops-error" role="alert">{promotionsError} <button type="button" onClick={()=>setPromotionsReload(v=>v+1)}>Reintentar</button></div>:
+     promotions.length===0?<p>Aún no hay promociones registradas.</p>:
+     <div className="ops-promotion-maintenance">
+      {promotions.map(p=><div key={p.id} className="ops-promotion-item">
+       {p.productImageUrl&&<img src={p.productImageUrl} alt="" className="ops-promotion-thumb"/>}
+       <div className="ops-promotion-detail">
+        <strong>{p.title}</strong>
+        <small>{p.productName||'Producto sin asociar'}{p.productPricePen!==null?' · S/ '+Number(p.productPricePen).toFixed(2):''}</small>
+        <small>{p.startDate||'Sin fecha'} — {p.endDate||'Sin fecha'} · {p.startTime||'--:--'}–{p.endTime||'--:--'} · {p.weekdays?.length?p.weekdays.length+' días/semana':'Programación antigua'}</small>
+        <span className={p.active?'ops-state ops-state--yes':'ops-state ops-state--no'}>{p.active?'Activa':'Inactiva'}{p.productActive===false?' · Producto desactivado':''}</span>
+       </div>
+       <div className="ops-promotion-actions">
+        <button type="button" className="button button-secondary" disabled={loading} onClick={()=>editPromotion(p)}>Editar</button>
+        <button type="button" className="button button-secondary" disabled={loading}
+         onClick={()=>void act(async()=>{
+          await api(`/api/admin/tenants/${tenantId}/promotions`,'POST',{id:p.id,active:!p.active})
+          setPromotionsReload(v=>v+1);setSavedArea('promotions')
+         })}>{p.active?'Desactivar':'Activar'}</button>
+       </div>
+      </div>)}
+     </div>}
+    <h3>{promotionEditingId?'Editar promoción':'Nueva promoción'}</h3>
+    {promotionEditingId&&<button type="button" className="button button-secondary" onClick={clearPromotionForm}>Cancelar edición</button>}
     <p className="ops-hint">Elige un periodo de fechas, las horas de actividad y los días de la semana. La promoción no será visible hasta publicar los cambios. Android recibirá el título y los datos del producto o combo seleccionado.</p>
     <label>Producto o combo relacionado
      <select value={promotionProductId} onChange={e=>setPromotionProductId(e.target.value)}>
@@ -630,12 +680,11 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       promoStartTime>=promoEndTime||promoDays.length===0}
       onClick={()=>void act(async()=>{
        await api(`/api/admin/tenants/${tenantId}/promotions`,'POST',{
-        title:promotionTitle.trim(),productId:promotionProductId,active:promotionEnabled,startDate:promoStartDate,
+        ...(promotionEditingId?{id:promotionEditingId}:{}),title:promotionTitle.trim(),productId:promotionProductId,active:promotionEnabled,startDate:promoStartDate,
         endDate:promoEndDate,startTime:promoStartTime,endTime:promoEndTime,weekdays:promoDays
        })
-       setPromotionTitle('');setPromotionProductId('');setPromotionEnabled(false);setPromoStartDate('');setPromoEndDate('')
-       setPromoStartTime('');setPromoEndTime('');setPromoDays([]);setSavedArea('promotions')
-      })}>Guardar promoción</button>
+       clearPromotionForm();setPromotionsReload(v=>v+1);setSavedArea('promotions')
+      })}>{promotionEditingId?'Guardar cambios':'Crear promoción'}</button>
     </div>
     <p className="ops-hint">La franja horaria pertenece a cada día marcado (hora de inicio anterior a la de fin). La aplicación aplica la hora local de la empresa. Una promoción guardada no aparecerá hasta publicarla.</p>
     {savedNext('promotions')}
