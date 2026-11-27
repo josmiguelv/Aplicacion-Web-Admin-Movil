@@ -4,7 +4,7 @@ export function applySecurityHeaders(res) {
  res.setHeader('Referrer-Policy','strict-origin-when-cross-origin')
  res.setHeader('X-Frame-Options','DENY')
  res.setHeader('Permissions-Policy','camera=(), microphone=(), payment=()')
- res.setHeader('Cross-Origin-Resource-Policy','cross-origin')
+ res.setHeader('Cross-Origin-Resource-Policy','same-origin')
 }
 // Local per-process throttle: not a substitute for a shared gateway limiter.
 const attempts = new Map()
