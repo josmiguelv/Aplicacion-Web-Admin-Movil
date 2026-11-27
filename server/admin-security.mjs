@@ -11,12 +11,18 @@ const attempts = new Map()
 export function limitAdminLogin({address, email, now=Date.now()}) {
  if(attempts.size>10000)attempts.clear()
  const ip=String(address||'unknown').slice(0,128)
- const key=ip+'|'+String(email||'').trim().toLowerCase().slice(0,254)
- const bucket=attempts.get(key)
- if(!bucket||now-bucket.start>=60000){
-  attempts.set(key,{start:now,count:1})
-  return true
+ const key='account:'+ip+'|'+String(email||'').trim().toLowerCase().slice(0,254)
+ const check=(bucketKey,max)=>{
+  const bucket=attempts.get(bucketKey)
+  if(!bucket||now-bucket.start>=60000){
+   attempts.set(bucketKey,{start:now,count:1})
+   return true
+  }
+  bucket.count++
+  return bucket.count<=max
  }
- bucket.count++
- return bucket.count<=8
+ // Two limits: changing an email cannot bypass the per-IP cap.
+ const ipAllowed=check('ip:'+ip,40)
+ const accountAllowed=check(key,8)
+ return ipAllowed&&accountAllowed
 }
