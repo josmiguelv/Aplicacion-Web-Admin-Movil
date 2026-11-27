@@ -82,6 +82,12 @@ function sanitizedData(kind,json){
     createdAt:typeof e.createdAt==='string'?e.createdAt:null})),
    nextCursor:data.nextCursor??null,hasMore:data.hasMore}
  }
+ if(kind==='close'){
+  if(!id(data.interactionId)||!id(data.conversationId)||data.closed!==true||
+     typeof data.replayed!=='boolean')return null
+  return {interactionId:data.interactionId,conversationId:data.conversationId,
+   closed:true,replayed:data.replayed}
+ }
  if(kind==='message'){
   if(!id(data.messageId)||typeof data.created!=='boolean')return null
   return {messageId:data.messageId,created:data.created}
@@ -181,6 +187,15 @@ export async function sendMobileInteractionMessage(token,interactionId,{idempote
  return perform(token,'message',`/api/v1/conversations/${interactionId}/messages`,{
   method:'POST',idempotencyKey,
   requestBody:isForm?{type:'FORM',form}:type==='TEXT'?{type:'TEXT',text}:{text},
+ })
+}
+/** Explicit S2S transport release; never sends text or closes agent capacity. */
+export async function closeMobileInteractionCommunication(token,interactionId,{eventId,reason='CLIENT_CANCELLED'}){
+ if(!id(interactionId)||!id(eventId)||!['CLIENT_ENDED','CLIENT_CANCELLED','FLOW_FINISHED'].includes(reason))
+  throw Error('TUVERSO_COMMUNICATION_CLOSE_INVALID')
+ return perform(token,'close',`/api/v1/conversations/${interactionId}/close`,{
+  method:'POST',idempotencyKey:eventId,
+  requestBody:{version:1,type:'CONVERSATION_CLOSE',eventId,interactionId,reason},
  })
 }
 export const mobileInteractionMode=()=>mode()?'LIVE':'DISABLED'
