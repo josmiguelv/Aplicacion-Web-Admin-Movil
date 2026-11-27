@@ -367,6 +367,18 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  const m=url.pathname.match(/^\/api\/admin\/tenants\/([0-9a-f-]+)\/(stores|products|promotions|payments|apps|publish|vacancies|complaints)$/);
  if(!m)throw bad(404,'Ruta no encontrada');const tenantId=m[1],resource=m[2];await tenantOf(user,tenantId);
  if(req.method==='GET'){
+  if(resource==='promotions'){
+   const x=await sql(`SELECT p.id,p.title,p.active,p.product_id AS "productId",
+    to_char(p.starts_on,'YYYY-MM-DD') AS "startDate",
+    to_char(p.ends_on,'YYYY-MM-DD') AS "endDate",
+    to_char(p.active_from,'HH24:MI') AS "startTime",
+    to_char(p.active_until,'HH24:MI') AS "endTime",
+    p.active_weekdays AS weekdays,
+    pr.name AS "productName",pr.price_pen AS "productPricePen",pr.image_url AS "productImageUrl",pr.active AS "productActive"
+    FROM promotions p LEFT JOIN products pr ON pr.id=p.product_id AND pr.tenant_id=p.tenant_id
+    WHERE p.tenant_id=$1 ORDER BY p.starts_on DESC NULLS LAST,p.title,p.id`,[tenantId]);
+   return json(res,200,{items:x.rows});
+  }
   if(resource==='vacancies'){
    const x=await sql(`SELECT j.*,
       COALESCE((SELECT array_agg(vs.store_id ORDER BY vs.store_id)
@@ -436,26 +448,29 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   if(!word(b.name,180)||!safeNumber(b.pricePen)||b.pricePen<0||!bool(b.active)||b.imageUrl&&(!/^https:\/\//.test(b.imageUrl)&&!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/.test(b.imageUrl)||b.imageUrl.length>1024))throw bad(400,'Producto inválido');const args=[tenantId,b.name,b.description||'',b.category||'',b.pricePen,b.imageUrl||null,b.active];
   result=b.id&&uuid(b.id)?await client.query(`UPDATE products SET name=$2,description=$3,category=$4,price_pen=$5,image_url=$6,active=$7,updated_at=now() WHERE tenant_id=$1 AND id=$8 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO products(tenant_id,name,description,category,price_pen,image_url,active) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,args)
  }else if(resource==='promotions'){
-  if(!word(b.title,180)||!bool(b.active))throw bad(400,'Promoción inválida');
-  if(b.productId!==undefined){
-   if(!uuid(b.productId))throw bad(400,'Selecciona un producto o combo válido');
+  if(b.id!==undefined&&!uuid(b.id))throw bad(400,'Promoción inválida');
+  const existing=b.id?await client.query('SELECT id,product_id FROM promotions WHERE id=$1 AND tenant_id=$2 FOR UPDATE',[b.id,tenantId]):null;
+  if(b.id&&!existing.rowCount)throw bad(404,'Promoción no encontrada');
+  // A status-only update remains possible for legacy promotions without a product.
+  if(b.id&&Object.keys(b).every(k=>['id','active'].includes(k))){
+   if(!bool(b.active))throw bad(400,'Estado de promoción inválido');
+   result=await client.query('UPDATE promotions SET active=$3 WHERE tenant_id=$1 AND id=$2 RETURNING *',
+    [tenantId,b.id,b.active]);
+  }else{
+   if(!word(b.title,180)||!bool(b.active))throw bad(400,'Promoción inválida');
+   if(!validatePromotionSchedule(b))
+    throw bad(400,'Completa fechas, horas y al menos un día activo. La hora de fin debe ser posterior a la de inicio.');
+   if(!uuid(b.productId))throw bad(400,'Selecciona un producto o combo para esta promoción');
    const chosen=await client.query('SELECT id FROM products WHERE tenant_id=$1 AND id=$2 AND active=true',[tenantId,b.productId]);
    if(chosen.rowCount!==1)throw bad(400,'El producto seleccionado no está activo o no pertenece a la empresa');
-  }
-  if(b.startDate!==undefined||b.endDate!==undefined||b.startTime!==undefined||
-    b.endTime!==undefined||b.weekdays!==undefined){
-   if(!validatePromotionSchedule(b))throw bad(400,'Completa fechas, horas y al menos un día activo. La hora de fin debe ser posterior a la de inicio.');
-   if(!uuid(b.productId))throw bad(400,'Selecciona un producto o combo para esta promoción');
-   result=await client.query(`INSERT INTO promotions(
+   const args=[tenantId,b.title.trim(),b.startDate,b.endDate,b.startTime,b.endTime,b.weekdays,b.active,b.productId];
+   result=b.id?await client.query(`UPDATE promotions SET title=$2,starts_on=$3::date,ends_on=$4::date,
+    active_from=$5::time,active_until=$6::time,active_weekdays=$7::integer[],active=$8,product_id=$9
+    WHERE tenant_id=$1 AND id=$10 RETURNING *`,[...args,b.id]):
+    await client.query(`INSERT INTO promotions(
     tenant_id,title,starts_on,ends_on,active_from,active_until,active_weekdays,active,product_id)
     VALUES($1,$2,$3::date,$4::date,$5::time,$6::time,$7::integer[],$8,$9)
-    RETURNING *`,
-    [tenantId,b.title,b.startDate,b.endDate,b.startTime,b.endTime,b.weekdays,b.active,b.productId]);
-  }else{
-   // Keep the preexisting timestamp contract available for older integrations.
-   const args=[tenantId,b.title,b.startsAt||null,b.endsAt||null,b.active];
-   result=await client.query(`INSERT INTO promotions(tenant_id,title,starts_at,ends_at,active)
-    VALUES($1,$2,$3,$4,$5) RETURNING *`,args);
+    RETURNING *`,args);
   }
  }else if(resource==='payments'){
   if(!uuid(b.storeId)||!mode(b.mode))throw bad(400,'Pago inválido');
