@@ -436,7 +436,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    <section className="ops-publish-dialog" role="dialog" aria-modal="true" aria-labelledby="ops-publish-heading" aria-describedby="ops-publish-description">
     <div className="ops-publish-symbol"><Send size={23} aria-hidden="true"/></div>
     <h2 id="ops-publish-heading">¿Deseas publicar los cambios ahora?</h2>
-    <p id="ops-publish-description">Se guardó correctamente la {publicationPrompt.label}.
+    <p id="ops-publish-description">Se guardaron los cambios de {publicationPrompt.label}.
      {publicationPrompt.target==='notice'
       ?' Los avisos comerciales se publican desde su propio módulo y no con el catálogo de Android.'
       :registeredAppIds.includes(appId.trim())
@@ -976,7 +976,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    })}>Guardar recordatorios de pago</button>
   <p className="ops-hint">Guardar no envía avisos inmediatamente. El servicio automático sigue controlado por el backend; nunca se envía una notificación grupal. No se modifica el tiempo de espera de TU VERSO.</p>
  </section>)}
- {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div><p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
+ {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setRegisteredAppIds(v=>[...new Set([...v,appId.trim()])]);setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div><p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
   </>}
  </div>
 }
