@@ -75,7 +75,7 @@ function sanitizedData(kind,json){
  if(kind==='events'){
   if(!Array.isArray(data.events)||data.events.length>100||
      data.events.some(e=>!id(e.id)||!id(e.interactionId)||
-      !['REQUEST_CREATED','REQUEST_ACCEPTED','REQUEST_REJECTED','REQUEST_EXPIRED','MESSAGE_OUTBOUND'].includes(e.kind))||
+      !['REQUEST_CREATED','REQUEST_ACCEPTED','REQUEST_REJECTED','REQUEST_EXPIRED','MESSAGE_OUTBOUND','COMMUNICATION_CLOSED'].includes(e.kind))||
      data.nextCursor!==null&&data.nextCursor!==undefined&&!id(data.nextCursor)||
      typeof data.hasMore!=='boolean')return null
   return {events:data.events.map(e=>({id:e.id,interactionId:e.interactionId,kind:e.kind,
