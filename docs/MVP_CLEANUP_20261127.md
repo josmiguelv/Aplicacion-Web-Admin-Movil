@@ -38,7 +38,7 @@ La reducción aproximada del CSS fuente es de **42 197 bytes**. No implica por s
 5. Los documentos anteriores reflejan etapas históricas; no deben sustituir la verificación del código y despliegue actual.
 
 ## Consolidación posterior: cinco mejoras del MVP
-- **Guardar → Publicar:** nueva consulta autenticada `GET /api/admin/tenants/{tenantId}/publication-status?appId=...` que utiliza la revisión publicada y eventos de auditoría para mostrar si hay cambios pendientes. El diálogo de publicación se aisló en `PublicationConfirmDialog.tsx`. No reemplaza los controles del endpoint de publicación.
+- **Guardar → Publicar:** nueva consulta autenticada `GET /api/admin/tenants/{tenantId}/publication-status?appId=...` que utiliza la revisión publicada y eventos de auditoría para mostrar si hay cambios pendientes. El diálogo de publicación se aisló en `PublicationConfirmDialog.tsx` y ahora se mantiene un aviso visible de cambios pendientes hasta publicarlos. No reemplaza los controles del endpoint de publicación.
 - **Backend:** la función que construye el snapshot público salió de `server/index.mjs` a `server/catalog-publisher.mjs`; la unión de promociones y productos se indexa en `server/promotion-product-projection.mjs`.
 - **Frontend:** los loaders comerciales están aislados en `useCommercialEditorData.ts`; la carga de productos, vacantes y políticas de seguimiento se hace cuando corresponde a la pantalla activa.
 - **Seguridad:** límites locales para login, headers por defecto, lectura segura del Host, datos comerciales de UI vinculados al tenant, y exclusiones explícitas de media pública. Ver `ADMIN_SECURITY_REVIEW_20261127.md`.
