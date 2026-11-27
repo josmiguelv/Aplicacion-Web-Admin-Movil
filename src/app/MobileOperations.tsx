@@ -11,6 +11,7 @@ const weekdays = [{id:'mon',label:'Lunes'},{id:'tue',label:'Martes'},{id:'wed',l
 type StoreRow = { delivery_preparation_minutes:number|null;pickup_preparation_minutes:number|null;code: string; opening_hours: OpeningHours|null; consult_order_availability: boolean; id: string; name: string; address: string; active: boolean; delivery_enabled: boolean; pickup_enabled: boolean; dine_in_enabled: boolean; latitude: number | null; longitude: number | null; radius_km: number | null; delivery_rate_per_km_pen: number | null; delivery_fee_pen: number | null; delivery_pricing_mode: 'PER_KM'|'FIXED' }
 type ReservationSettings = {enabled:boolean;preparationMinutes:number|null}
 const blankReservation = ():ReservationSettings => ({enabled:false,preparationMinutes:null})
+type PublicationStatus = {registered:boolean;hasPublished:boolean;pending:boolean;revision:number;publishedAt:string|null}
 type PromotionRow = {id:string;title:string;active:boolean;productId:string|null;startDate:string|null;endDate:string|null;startTime:string|null;endTime:string|null;weekdays:number[]|null;productName:string|null;productPricePen:number|null;productImageUrl:string|null;productActive:boolean|null}
 type ProductRow = {id:string;name:string;description:string;category:string;price_pen:number;image_url:string|null;active:boolean}
 type CompanyNotice = {id:string;title:string;message:string;imageUrl:string|null;scheduledAt:string;expiresAt:string;startDate:string;endDate:string;weekdays:number[]|null;runTime:string|null;status:'DRAFT'|'PUBLISHED'|'DISABLED';pushSentAt:string|null;pushError:string|null}
@@ -84,6 +85,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [registeredAppIds,setRegisteredAppIds]=useState<string[]>([])
  const [publicationPrompt,setPublicationPrompt]=useState<PublicationPrompt|null>(null)
  const [publishingPrompt,setPublishingPrompt]=useState(false)
+ const [publicationStatus,setPublicationStatus]=useState<PublicationStatus|null>(null)
+ const [publicationStatusReload,setPublicationStatusReload]=useState(0)
+ const [publicationStatusLoading,setPublicationStatusLoading]=useState(false)
   const [reservationStoreId,setReservationStoreId]=useState('')
  const [selectedStoreId,setSelectedStoreId]=useState('')
  const [storeFocus,setStoreFocus]=useState<'details'|'hours'|'delivery'|'pickup'>('details')
@@ -152,7 +156,10 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   if(activeArea==='stores'&&hasUnsavedStoreChanges&&!window.confirm('Tienes cambios sin guardar en el local. ¿Quieres salir sin guardarlos?'))return
   setActiveArea(area);setSavedArea('');setStoreSavedNotice(false);setError('');setMessage('')
  }
- const requestPublication=(label:string,target:'catalog'|'notice'='catalog')=>setPublicationPrompt({label,target})
+ const requestPublication=(label:string,target:'catalog'|'notice'='catalog')=>{
+  setPublicationStatusReload(v=>v+1)
+  setPublicationPrompt({label,target})
+ }
  const confirmPublication=async()=>{
   if(!publicationPrompt||publishingPrompt)return
   const target=publicationPrompt.target
@@ -171,6 +178,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId:appId.trim()})
    setPublicationPrompt(null)
    setSavedArea('')
+   setPublicationStatusReload(v=>v+1)
    setMessage(`Cambios publicados correctamente (revisión ${r.revision}). Android recibirá la nueva versión.`)
   }catch(e){
    setError('La configuración se guardó, pero no se pudo publicar: '+(e instanceof Error?e.message:'Error inesperado'))
@@ -219,6 +227,18 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   setModuleWarnings(warnings)
  }
 
+ useEffect(()=>{
+  if(!session||!tenantId||!appId.trim()||(!publicationPrompt&&activeArea!=='publish')){
+   setPublicationStatus(null);setPublicationStatusLoading(false);return
+  }
+  let alive=true
+  setPublicationStatusLoading(true)
+  void api<PublicationStatus>(`/api/admin/tenants/${tenantId}/publication-status?appId=${encodeURIComponent(appId.trim())}`)
+   .then(result=>{if(alive)setPublicationStatus(result)})
+   .catch(()=>{if(alive)setPublicationStatus(null)})
+   .finally(()=>{if(alive)setPublicationStatusLoading(false)})
+  return()=>{alive=false}
+ },[session,tenantId,appId,activeArea,publicationPrompt,publicationStatusReload])
  useEffect(()=>{
   if(!session||!tenantId||activeArea!=='promotions')return
   let cancelled=false
@@ -962,7 +982,10 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    })}>Guardar recordatorios de pago</button>
   <p className="ops-hint">Guardar no envía avisos inmediatamente. El servicio automático sigue controlado por el backend; nunca se envía una notificación grupal. No se modifica el tiempo de espera de TU VERSO.</p>
  </section>)}
- {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setRegisteredAppIds(v=>[...new Set([...v,appId.trim()])]);setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div><p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
+ {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setRegisteredAppIds(v=>[...new Set([...v,appId.trim()])]);setPublicationStatusReload(v=>v+1);setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setPublicationStatusReload(v=>v+1);setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div>{appId.trim()&&(publicationStatusLoading?<p role="status" className="ops-hint">Comprobando estado de publicación…</p>:
+   publicationStatus?<p className="ops-hint" role="status">Estado: <strong>{!publicationStatus.registered?'Aplicación no registrada':!publicationStatus.hasPublished?'Nunca publicada':publicationStatus.pending?'Cambios pendientes de publicar':'Catálogo actualizado'}</strong>{publicationStatus.hasPublished?` · Revisión ${publicationStatus.revision}`:''}</p>:
+   <p className="ops-hint">No se pudo consultar el estado. Verifica el servidor antes de confirmar la publicación.</p>)}
+<p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
   </>}
  </div>
 }
