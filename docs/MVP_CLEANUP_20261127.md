@@ -19,7 +19,7 @@
 | `TODO.md`, `plan.md` | Planes de prototipo no operativos | La documentación técnica activa vive en `docs/` y documentos operativos |
 | Reglas de estilo del prototipo en `src/styles/global.css` | Clases de vistas y navegación eliminadas | Se conservaron base/reset, controles compartidos y estilos `ops-*` del portal real |
 
-También se retiró el envoltorio `BrowserRouter` de `src/main.tsx` al comprobar que ningún módulo activo consume la API de React Router. La dependencia `react-router-dom` se conserva en el manifiesto y lockfile hasta una regeneración y build local verificables.
+También se retiró el envoltorio `BrowserRouter` de `src/main.tsx` al comprobar que ningún módulo activo consume la API de React Router. La dependencia `react-router-dom` fue eliminada del manifiesto y las entradas exclusivas del lockfile; queda pendiente verificar `pnpm install --frozen-lockfile` y `pnpm build` en el entorno local.
 
 La reducción aproximada del CSS fuente es de **42 197 bytes**. No implica por sí sola una reducción equivalente del bundle comprimido.
 
@@ -37,11 +37,23 @@ La reducción aproximada del CSS fuente es de **42 197 bytes**. No implica por s
 4. Confirmar las variables necesarias de producción, permisos de tenant, origen/cookie HTTPS, integración autorizada, observabilidad y contratos Android antes de declarar GO.
 5. Los documentos anteriores reflejan etapas históricas; no deben sustituir la verificación del código y despliegue actual.
 
+## Consolidación posterior: cinco mejoras del MVP
+- **Guardar → Publicar:** nueva consulta autenticada `GET /api/admin/tenants/{tenantId}/publication-status?appId=...` que utiliza la revisión publicada y eventos de auditoría para mostrar si hay cambios pendientes. El diálogo de publicación se aisló en `PublicationConfirmDialog.tsx`. No reemplaza los controles del endpoint de publicación.
+- **Backend:** la función que construye el snapshot público salió de `server/index.mjs` a `server/catalog-publisher.mjs`; la unión de promociones y productos se indexa en `server/promotion-product-projection.mjs`.
+- **Frontend:** los loaders comerciales están aislados en `useCommercialEditorData.ts`; la carga de productos, vacantes y políticas de seguimiento se hace cuando corresponde a la pantalla activa.
+- **Seguridad:** límites locales para login, headers por defecto, lectura segura del Host, datos comerciales de UI vinculados al tenant, y exclusiones explícitas de media pública. Ver `ADMIN_SECURITY_REVIEW_20261127.md`.
+- **Estilos y dependencias:** limpieza del CSS legado y eliminación de React Router no utilizado. Ninguna base de datos ni migración sufrió cambios.
+
+## Pruebas de esta ronda
+Verificación estática de sintaxis de módulos JS mediante parser de V8: aprobada. Se ejecutaron 18 aserciones de comportamiento puro de limitador, headers, proyección de promociones y lectura de estado con pool simulado. **No se ejecutó compilación TypeScript/Vite, Node test ni E2E**, porque esta sesión no dispone del checkout local ni del servicio de BD del usuario. Los cambios permanecen aislados.
+
 ## Pruebas focales requeridas (no ejecutadas en esta sesión)
 En una copia local de la rama, con dependencias instaladas:
 ```powershell
-pnpm build
+pnpm install --frozen-lockfile
+node --test server/mvp-cleanup.test.mjs
 node --check server/index.mjs
+pnpm build
 ```
 Inspecciones manuales estrictamente ligadas a esta limpieza:
 - Verificar apertura de login real, acceso al portal por rol y carga de operaciones comerciales.
