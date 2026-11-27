@@ -349,3 +349,9 @@
 .ops-publish-dialog p{font-size:13px;color:#536477;line-height:1.6;margin:0}
 .ops-publish-dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:23px;flex-wrap:wrap}
 @media(max-width:480px){.ops-publish-dialog{padding:21px}.ops-publish-dialog-actions .button{flex:1}}
+
+/* Persistent publication state, separate from the post-save confirmation dialog. */
+.ops-publication-pending{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0 16px;padding:12px 15px;border:1px solid #e4d7ba;border-radius:10px;background:#fffdf8;color:#5e4e2c;font-size:12px;line-height:1.5}
+.ops-publication-pending strong{font-weight:700}
+.ops-publication-pending .button{flex:none}
+@media(max-width:480px){.ops-publication-pending .button{width:100%}}
