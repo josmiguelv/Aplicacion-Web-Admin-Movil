@@ -13,7 +13,8 @@ export async function getCatalogPublicationStatus(pool,tenantId,appId){
   WHERE a.tenant_id=$1 AND a.app_id=$2`,[
    tenantId,appId,
    ['STORES_WRITE','PRODUCTS_WRITE','PROMOTIONS_WRITE','VACANCIES_WRITE',
-    'PAYMENTS_WRITE','COMPLAINTS_WRITE','STORE_RESERVATION_SETTINGS_UPDATED',
+    'PAYMENTS_WRITE','COMPLAINTS_WRITE','APPS_WRITE',
+    'STORE_RESERVATION_SETTINGS_UPDATED','CHECKOUT_POLICY_UPDATED',
     'PAYMENT_IMAGES_UPDATED']
   ])
  const row=result.rows[0]
