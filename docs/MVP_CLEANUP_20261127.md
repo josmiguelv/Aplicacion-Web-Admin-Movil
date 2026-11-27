@@ -19,6 +19,8 @@
 | `TODO.md`, `plan.md` | Planes de prototipo no operativos | La documentación técnica activa vive en `docs/` y documentos operativos |
 | Reglas de estilo del prototipo en `src/styles/global.css` | Clases de vistas y navegación eliminadas | Se conservaron base/reset, controles compartidos y estilos `ops-*` del portal real |
 
+También se retiró el envoltorio `BrowserRouter` de `src/main.tsx` al comprobar que ningún módulo activo consume la API de React Router. La dependencia `react-router-dom` se conserva en el manifiesto y lockfile hasta una regeneración y build local verificables.
+
 La reducción aproximada del CSS fuente es de **42 197 bytes**. No implica por sí sola una reducción equivalente del bundle comprimido.
 
 ## Componentes conservados deliberadamente
