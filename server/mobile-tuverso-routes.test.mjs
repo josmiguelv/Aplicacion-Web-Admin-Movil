@@ -18,6 +18,7 @@ const catalogs={
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
   decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,closeEnabled=false,closeFailure=false,upstream={}}={}){
  const queries=[],remote=[]
+ let communicationCloseEnabled=closeEnabled
  const createdIds=new Map()
  const terminalSessions=new Map()
  let referenceForTest=''
@@ -55,7 +56,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   json:(res,code,payload)=>{res.reply={code,payload}},
   storeOpen:()=>open,checkMode:()=>enabled?'LIVE':'DISABLED',
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
-  enableCommunicationClose:()=>closeEnabled,
+  enableCommunicationClose:()=>communicationCloseEnabled,
   closeCommunication:async(token,id,value)=>{remote.push({operation:'close',id,value});return closeFailure?{ok:false,httpStatus:503}:{ok:true,data:{interactionId:id,conversationId:randomUUID(),closed:true,replayed:false}}},
   decrypt:()=> 'private-credential',
   availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return upstream.availability?{result:null,httpStatus:upstream.availability,errorCode:'UPSTREAM_'+upstream.availability}:{result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
@@ -84,7 +85,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   assert.equal(handled,undefined)
   return res.reply
  }
- return {call,queries,remote,setReference:value=>{referenceForTest=value}}
+ return {call,queries,remote,setReference:value=>{referenceForTest=value},setCloseEnabled:v=>{communicationCloseEnabled=v}}
 }
 const endpoint=(id=storeA,app=appA)=>'/api/v1/mobile/stores/'+id+'/agent-availability?appId='+app
 const createBody=(extra={})=>({appId:appA,storeId:storeA,quoteRevision:4,customerExternalId:'anonymous-123',items:[{productId:product,quantity:2}],...extra})
@@ -772,4 +773,45 @@ test('no remote close event needed when advisor already finalized the conversati
  })
  assert.equal(done.code,200)
  assert.equal(h.remote.filter(item=>item.operation==='close').length,0)
+})
+
+test('public communication-close requires a confirmed cancellation notice and reuses mobile authorization',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness()
+ const url='/api/v1/mobile/interactions/'+id
+ const body={appId:appA,storeId:storeA,reason:'CLIENT_CANCELLED'}
+ const headers={'x-order-access-key':key}
+ const ref=createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48)
+ h.setReference('mobile:'+ref)
+ const early=await h.call('POST',url+'/communication-close',{headers,payload:body})
+ assert.equal(early.code,409)
+ assert.equal(h.remote.filter(x=>x.operation==='close').length,0)
+ const cancelled=await h.call('POST',url+'/cancel',{headers,payload:{appId:appA,storeId:storeA,reason:'CANCEL'}})
+ assert.equal(cancelled.code,200)
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1)
+ h.setCloseEnabled(true)
+ const done=await h.call('POST',url+'/communication-close',{headers,payload:body})
+ assert.equal(done.code,200)
+ assert.equal(done.payload.communicationStatus,'CLOSED')
+ assert.equal(done.payload.status,'CANCELLED')
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,1,'the second request must not send text again')
+ const close=h.remote.find(x=>x.operation==='close')
+ assert.equal(close.value.reason,'CLIENT_CANCELLED')
+ assert.match(close.value.eventId,/^[a-f0-9-]{36}$/i)
+ const again=await h.call('POST',url+'/communication-close',{headers,payload:body})
+ assert.equal(again.code,200)
+ assert.equal(h.remote.filter(x=>x.operation==='close').length,2,'upstream idempotency handles retry')
+ assert.equal(h.remote.filter(x=>x.operation==='close')[1].value.eventId,close.value.eventId)
+})
+test('public close rejects wrong access, other store, arbitrary reason and closed-state mismatch',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true})
+ const path='/api/v1/mobile/interactions/'+id+'/communication-close'
+ for(const request of [
+  {headers:{'x-order-access-key':'invalid'},payload:{appId:appA,storeId:storeA}},
+  {headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeB}},
+  {headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'FLOW_FINISHED'}},
+ ]){
+  const answer=await h.call('POST',path,request)
+  assert.ok(answer.code===403||answer.code===400||answer.code===409)
+ }
+ assert.equal(h.remote.filter(x=>x.operation==='close').length,0)
 })
