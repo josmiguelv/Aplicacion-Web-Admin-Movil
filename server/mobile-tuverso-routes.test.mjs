@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,upstream={}}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,closeEnabled=false,closeFailure=false,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  const terminalSessions=new Map()
@@ -66,6 +66,8 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   receiptBaseUrl:()=> 'https://admin.example.com',
   storeOpen:()=>open,checkMode:()=>enabled?'LIVE':'DISABLED',
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
+  enableCommunicationClose:()=>closeEnabled,
+  closeCommunication:async(token,id,value)=>{remote.push({operation:'close',id,value});return closeFailure?{ok:false,httpStatus:503}:{ok:true,data:{interactionId:id,conversationId:randomUUID(),closed:true,replayed:false}}},
   decrypt:()=> 'private-credential',
   availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return upstream.availability?{result:null,httpStatus:upstream.availability,errorCode:'UPSTREAM_'+upstream.availability}:{result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
   createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});
@@ -856,4 +858,32 @@ test('payment receipt accepts ten independent fields while keeping imageUrl sepa
  assert.equal(h.remote[1].value.form.imageUrl,imageUrl)
  const invalid=await h.call('POST',path,{headers,payload:{...payload,form:{...payload.form,fields:[...fields,{variable:'Dato 11',value:'Extra'}]}}})
  assert.equal(invalid.code,400)
+})
+
+test('optional MOBILE_APP close follows cancellation text and never closes agent attention',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const uri='/api/v1/mobile/interactions/'+id
+ const input={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ const response=await h.call('POST',uri+'/cancel',input)
+ assert.equal(response.code,200)
+ const writes=h.remote.filter(x=>x.operation==='cancel'||x.operation==='close')
+ assert.deepEqual(writes.map(x=>x.operation),['cancel','close'])
+ assert.equal(writes[1].value.reason,'CLIENT_CANCELLED')
+ assert.equal(writes[1].value.eventId.length,36)
+ assert.notEqual(writes[1].value.eventId,key)
+ const n=h.remote.length
+ assert.equal((await h.call('POST',uri+'/cancel',input)).code,200)
+ assert.equal(h.remote.length,n)
+})
+test('TU VERSO close failure does not falsely confirm cancellation; retry keeps event id',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true,closeFailure:true})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const uri='/api/v1/mobile/interactions/'+id+'/cancel'
+ const input={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ assert.equal((await h.call('POST',uri,input)).code,503)
+ assert.equal((await h.call('POST',uri,input)).code,503)
+ const ids=h.remote.filter(x=>x.operation==='close').map(x=>x.value.eventId)
+ assert.equal(ids.length,2)
+ assert.equal(ids[0],ids[1])
 })
