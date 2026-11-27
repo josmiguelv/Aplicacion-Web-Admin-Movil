@@ -117,7 +117,7 @@ Las migraciones no se ejecutan automáticamente al iniciar la API. Son exclusiva
 - La moneda del catálogo es `PEN`; el huso horario usa configuración de tenant con fallback `America/Lima`.
 - Algunos limitadores son en memoria por proceso; no son cuotas distribuidas entre réplicas.
 - `server/index.mjs` concentra muchas rutas y reglas, lo que aumenta el riesgo de efectos laterales al editarlo.
-- El frontend `src/app/App.tsx` es prototipo legado; el portal autenticado parte de `AdminPortal.tsx`.
+- La interfaz de administración vigente se monta desde `src/main.tsx` y `src/app/AdminPortal.tsx`; la antigua SPA de demostración fue retirada en la rama MVP.
 
 ## 9. Secuencia de análisis para una nueva funcionalidad
 
