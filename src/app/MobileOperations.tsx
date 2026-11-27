@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, Bike, Building2, CalendarDays, Check, Clock3, Copy, CreditCard, MapPin, Package, Send, ShoppingBag, Store, Smartphone, Tag, Settings2, Bell, Star } from 'lucide-react'
 import {SurveyModule,type SurveySummaryEntry} from './SurveyModule'
+import PublicationConfirmDialog,{type PublicationPrompt} from './PublicationConfirmDialog'
 
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
@@ -81,7 +82,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [promoDays,setPromoDays]=useState<number[]>([])
  const [appId,setAppId]=useState('')
  const [registeredAppIds,setRegisteredAppIds]=useState<string[]>([])
- const [publicationPrompt,setPublicationPrompt]=useState<{label:string;target:'catalog'|'notice'}|null>(null)
+ const [publicationPrompt,setPublicationPrompt]=useState<PublicationPrompt|null>(null)
  const [publishingPrompt,setPublishingPrompt]=useState(false)
   const [reservationStoreId,setReservationStoreId]=useState('')
  const [selectedStoreId,setSelectedStoreId]=useState('')
@@ -432,25 +433,10 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  return <div className="ops-wrapper">
   <div className="ops-top"><div><p className="eyebrow">ADMINISTRACIÓN DE EMPRESAS Y SEDES</p><h1>{session.role==='SUPER_ADMIN'?tenants.find(t=>t.id===tenantId)?.name||'Administrador de empresas':'Administrador de tu empresa'}</h1><p>Selecciona un local para identificar rápidamente qué configuración estás editando.</p></div>{!embeddedSession&&<button className="button button-secondary" onClick={()=>void act(async()=>{await api('/api/admin/logout','POST');setSession(null);setTenantId('');setTenants([])})}>Cerrar sesión</button>}</div>
   {error&&<div className="ops-error" role="alert">{error}</div>}
-  {publicationPrompt&&<div className="ops-publish-scrim" role="presentation">
-   <section className="ops-publish-dialog" role="dialog" aria-modal="true" aria-labelledby="ops-publish-heading" aria-describedby="ops-publish-description">
-    <div className="ops-publish-symbol"><Send size={23} aria-hidden="true"/></div>
-    <h2 id="ops-publish-heading">¿Deseas publicar los cambios ahora?</h2>
-    <p id="ops-publish-description">Se guardaron los cambios de {publicationPrompt.label}.
-     {publicationPrompt.target==='notice'
-      ?' Los avisos comerciales se publican desde su propio módulo y no con el catálogo de Android.'
-      :registeredAppIds.includes(appId.trim())
-       ?' Si confirmas, se actualizará el catálogo público de la aplicación.'
-       :' Para publicar tendrás que seleccionar o registrar la aplicación correspondiente.'}
-    </p>
-    <div className="ops-publish-dialog-actions">
-     <button type="button" className="button button-secondary" disabled={publishingPrompt} onClick={()=>setPublicationPrompt(null)}>Ahora no</button>
-     <button type="button" className="button button-primary" disabled={publishingPrompt} onClick={()=>void confirmPublication()}>
-      {publishingPrompt?'Publicando…':publicationPrompt.target==='notice'||!registeredAppIds.includes(appId.trim())?'Ir a publicar':'Sí, publicar ahora'}
-     </button>
-    </div>
-   </section>
-  </div>}
+  {publicationPrompt&&<PublicationConfirmDialog prompt={publicationPrompt} busy={publishingPrompt}
+   canPublish={registeredAppIds.includes(appId.trim())}
+   onDismiss={()=>setPublicationPrompt(null)}
+   onConfirm={()=>void confirmPublication()}/>}
    {toast&&<div className={`ops-floating-toast${toast.closing?' ops-floating-toast--leaving':''}`} role="status" aria-live="polite" aria-atomic="true">
     <Check size={17} aria-hidden="true"/><span>{toast.text}</span>
    </div>}
