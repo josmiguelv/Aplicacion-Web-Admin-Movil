@@ -1,7 +1,7 @@
 # Pollos B3 — preparación para Railway
 
 ## Estado y límites
-Esta rama prepara el empaquetado y los controles básicos de arranque. **No se ha desplegado** ni se ha certificado para clientes. La Web Admin administra el catálogo y la configuración; **no recibe pedidos reales, no procesa pagos y no se integra todavía con TU VERSO**.
+Esta rama prepara el empaquetado y los controles básicos de arranque. **No se ha desplegado** ni se ha certificado para clientes. La Web Admin administra el catálogo y la configuración y contiene APIs de interacciones, validación, reservas y mensajes con TU VERSO. La presencia del código **no demuestra su despliegue ni certificación de extremo a extremo**. El Administrador no es una pasarela de cobro ni reemplaza a TU VERSO.
 
 Mantener este sistema separado de TU VERSO: proyecto Railway propio y PostgreSQL 17 propio. No reutilizar la base de datos, redes internas con secretos ni variables de TU VERSO. Namecheap puede gestionar el DNS del subdominio que se elija posteriormente.
 
@@ -31,7 +31,7 @@ Mantener este sistema separado de TU VERSO: proyecto Railway propio y PostgreSQL
 8. Aplicar controles de producción pendientes: rate limiting distribuido ante ataques a login/API, revisión de seguridad del proxy/CSRF, políticas y pruebas de restauración de backups, supervisión y alertas, cuotas Google Routes, revisión de seguridad y cumplimiento legal.
 
 ## No-GO explícitos
-- No utilizar la Web Admin como gestor de pedidos/pagos reales: endpoints inexistentes.
+- No interpretar una interacción o un FORM como pedido confirmado o pago capturado; los endpoints existentes no sustituyen validaciones ni cobros externos.
 - No exponer PostgreSQL a Internet público.
 - No conectar datos de otras empresas ni datos reales hasta revisar controles multitenant.
 - No conectarla al proyecto productivo `marvelous-acceptance` de TU VERSO.
