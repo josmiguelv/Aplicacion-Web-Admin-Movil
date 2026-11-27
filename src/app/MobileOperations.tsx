@@ -43,6 +43,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
  const [stores,setStores]=useState<StoreRow[]>([]),[products,setProducts]=useState<ProductRow[]>([]),[vacancies,setVacancies]=useState<VacancyRow[]>([])
  const [storesLoaded,setStoresLoaded]=useState(false)
+ const [catalogReload,setCatalogReload]=useState(0)
  const [moduleWarnings,setModuleWarnings]=useState<string[]>([])
  const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPreparationMinutes:'',pickupPreparationMinutes:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,consultOrderAvailability:false,openingHours:{} as OpeningHours})
  const [store,setStore]=useState(emptyStore)
@@ -189,12 +190,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  useEffect(()=>{if(!session)return;if(session.role==='SUPER_ADMIN'&&!embeddedSession)void api<{tenants:Tenant[]}>('/api/admin/tenants').then(r=>setTenants(r.tenants)).catch(e=>setError(e.message))},[session])
  const refresh=async(id=tenantId)=>{
   if(!id)return
-  const [st,pr,jobs,apps,checkout]=await Promise.allSettled([
+  const [st,apps]=await Promise.allSettled([
    api<{items:StoreRow[]}>(`/api/admin/tenants/${id}/stores`),
-   api<{items:ProductRow[]}>(`/api/admin/tenants/${id}/products`),
-   api<{items:VacancyRow[]}>(`/api/admin/tenants/${id}/vacancies`),
-   api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`),
-   api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string;reminder2Title:string;reminder2Message:string}>(`/api/admin/tenants/${id}/checkout-settings`)
+   api<{items:{app_id:string;complaints_book_url:string|null}[]}>(`/api/admin/tenants/${id}/apps`)
   ])
   const warnings:string[]=[]
   if(st.status==='fulfilled'){
@@ -205,27 +203,46 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    setStoresLoaded(false)
    setError('No se pudieron cargar los locales. '+(st.reason instanceof Error?st.reason.message:'Revisa el servidor del Administrador.'))
   }
-  if(pr.status==='fulfilled')setProducts(pr.value.items)
-  else warnings.push('Productos')
-  if(jobs.status==='fulfilled')setVacancies(jobs.value.items)
-  else warnings.push('Empleo / Vacantes (revisar migración 015)')
   if(apps.status==='fulfilled'){
    const current=apps.value.items.find(x=>x.app_id===appId)??(appId===''&&apps.value.items.length===1?apps.value.items[0]:undefined)
    if(current&&appId==='')setAppId(current.app_id)
    setRegisteredAppIds(apps.value.items.map(a=>a.app_id))
    setComplaintsBookUrl(current?.complaints_book_url||'')
   }else{setRegisteredAppIds([]);warnings.push('Aplicaciones')}
-  if(checkout.status==='fulfilled'){
-   setPaymentWaitMinutes(checkout.value.paymentWaitMinutes)
-   setReminderCount(checkout.value.reminderCount)
-   setRemindersEnabled(checkout.value.remindersEnabled)
-   setReminderTitle(checkout.value.reminderTitle)
-   setReminderMessage(checkout.value.reminderMessage)
-   setReminder2Title(checkout.value.reminder2Title)
-   setReminder2Message(checkout.value.reminder2Message)
-  }else warnings.push('Notificaciones / Seguimiento de pago (revisar migración 007)')
   setModuleWarnings(warnings)
  }
+ useEffect(()=>{
+  if(!session||!tenantId||!['products','promotions','vacancies'].includes(activeArea))return
+  let alive=true
+  if(activeArea==='vacancies'){
+   void api<{items:VacancyRow[]}>(`/api/admin/tenants/${tenantId}/vacancies`)
+    .then(result=>{if(alive)setVacancies(result.items)})
+    .catch(e=>{if(alive)setError('No se pudieron cargar las vacantes: '+(e instanceof Error?e.message:'Error desconocido'))})
+  }else{
+   void api<{items:ProductRow[]}>(`/api/admin/tenants/${tenantId}/products`)
+    .then(result=>{if(alive)setProducts(result.items)})
+    .catch(e=>{if(alive)setError('No se pudieron cargar los productos: '+(e instanceof Error?e.message:'Error desconocido'))})
+  }
+  return()=>{alive=false}
+ },[session,tenantId,activeArea,catalogReload])
+ useEffect(()=>{
+  if(!session||!tenantId||!['payments','commercial-notifications'].includes(activeArea))return
+  let alive=true
+  void api<{paymentWaitMinutes:number;reminderCount:number;remindersEnabled:boolean;reminderTitle:string;reminderMessage:string;reminder2Title:string;reminder2Message:string}>(`/api/admin/tenants/${tenantId}/checkout-settings`)
+   .then(value=>{
+    if(!alive)return
+    setPaymentWaitMinutes(value.paymentWaitMinutes)
+    setReminderCount(value.reminderCount)
+    setRemindersEnabled(value.remindersEnabled)
+    setReminderTitle(value.reminderTitle)
+    setReminderMessage(value.reminderMessage)
+    setReminder2Title(value.reminder2Title)
+    setReminder2Message(value.reminder2Message)
+   })
+   .catch(e=>{if(alive)setError('No se pudo cargar la configuración de seguimiento: '+(e instanceof Error?e.message:'Error desconocido'))})
+  return()=>{alive=false}
+ },[session,tenantId,activeArea])
+ useEffect(()=>{setProducts([]);setVacancies([])},[tenantId])
 
  useEffect(()=>{
   if(!session||!tenantId||!appId.trim()||(!publicationPrompt&&activeArea!=='publish')){
@@ -605,7 +622,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
        await api(`/api/admin/tenants/${tenantId}/products`,'POST',{
         ...product,pricePen:Number(product.pricePen)
        })
-       await refresh()
+       setCatalogReload(v=>v+1)
        setProduct(blankProduct());setProductEditorOpen(false);setSavedArea('products');requestPublication('producto')
       })}>{product.id?'Guardar cambios':'Crear producto'}</button>
      <button type="button" className="button button-secondary" disabled={loading}
@@ -645,7 +662,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    <label className="ops-check"><input type="checkbox" checked={vacancy.active} onChange={e=>setVacancy({...vacancy,active:e.target.checked})}/>Vacante activa (visible al publicar)</label>
    <div className="ops-inline">
     <button className="button button-primary" disabled={loading||!vacancy.title.trim()||!vacancy.whatsappPhone.trim()||vacancy.storeIds.length===0}
-     onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/vacancies`,'POST',vacancy);await refresh();setSavedArea('vacancies');requestPublication('vacante')})}>Guardar vacante</button>
+     onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/vacancies`,'POST',vacancy);setCatalogReload(v=>v+1);setSavedArea('vacancies');requestPublication('vacante')})}>Guardar vacante</button>
     <button className="button button-secondary" onClick={()=>setVacancy(emptyVacancy())}>Nueva vacante</button>
    </div>
    {savedNext('vacancies')}
