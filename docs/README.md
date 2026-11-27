@@ -21,13 +21,15 @@ Este conjunto documenta el repositorio `josmiguelv/Aplicacion-Web-Admin-Movil`. 
 - **Cambiar aislamiento de empresas:** revisar `tenantOf`, consultas SQL, claves foráneas compuestas y pruebas con tenants distintos.
 - **Preparar una ejecución local:** seguir la sección de instalación de `MOBILE_ORDER_AVAILABILITY_API.md` y usar solo la base local del Administrador.
 
-## Estado documentado al 20-11-2026
+## Estado histórico documentado al 20-11-2026 (no representa el estado actual de la rama MVP)
 
 - El portal y el backend están en desarrollo; este repositorio no se considera certificado para producción.
 - El contrato de validación de disponibilidad está implementado en la rama `feat/multitenant-mobile-order-availability`. La compilación de CI y las pruebas focalizadas registradas para esa rama aprobaron.
 - La migración 006 y el arranque local con PostgreSQL no se han verificado en el equipo del usuario. No hay evidencia de una prueba E2E con TU VERSO ni de integración de una aplicación móvil.
 - El módulo TU VERSO del Administrador y las APIs públicas comerciales pertenecen a este repositorio. TU VERSO mantiene su propio repositorio, base y despliegue; este conjunto no describe ni modifica ese proyecto.
 - Las claves S2S de catálogo del Administrador (`ib2g_sk_v1_`) son distintas de las credenciales de TU VERSO. Ninguna clave privada debe ir en APK, navegador, logs ni repositorio.
+
+Para la limpieza aislada y los pendientes del MVP, ver [Auditoría MVP 2026-11-27](MVP_CLEANUP_20261127.md). Este índice reúne documentos de distintas fechas y debe cotejarse con el código de la rama correspondiente.
 
 ## Cómo mantener esta documentación
 
