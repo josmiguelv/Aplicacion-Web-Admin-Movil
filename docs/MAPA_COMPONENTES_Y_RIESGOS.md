@@ -16,7 +16,6 @@ Este mapa corresponde únicamente a `Aplicacion-Web-Admin-Movil`. El repositorio
 | Contratos y tipos compartidos del frontend | `src/domain/types.ts` | DTOs reales en `server/index.mjs`, payload publicado y consumidores externos. |
 | Esquema de una base nueva | `server/schema.sql` | Para una base existente, aplicar las migraciones correspondientes; no usar el esquema completo como migración. |
 | Sesión, aislamiento por tenant, catálogo, entrega, imágenes y health checks | `server/index.mjs` | SQL parametrizado, tablas relacionadas, variables de entorno, APIs públicas y controles del gateway. |
-| Prototipo visual anterior | `src/app/App.tsx` | No es el portal autenticado activo. No implementar aquí administración real sin confirmar primero el punto de entrada. |
 
 El backend está concentrado en `server/index.mjs`; la lógica con contratos propios se extrae a módulos. Al tocar una ruta central, verificar el orden de enrutamiento y que las rutas públicas no hereden por accidente cookies/CORS de las rutas administrativas.
 
@@ -27,7 +26,6 @@ El backend está concentrado en `server/index.mjs`; la lógica con contratos pro
 - `AdminPortal.tsx` es el portal activo para acceso, identidad de sesión, contexto de tenant y navegación de operaciones.
 - `MobileOperations.tsx` configura datos comerciales por empresa. Los cambios se guardan en PostgreSQL como configuración del tenant; la acción de publicar genera una nueva revisión consumible por `appId`.
 - `TuVersoIntegrations.tsx` permite al Super Administrador guardar una integración por empresa y vincular sedes. Las asociaciones externas son configuración manual autorizada, no una certificación automática de datos en TU VERSO.
-- `App.tsx` conserva el prototipo anterior. No debe usarse como referencia de autorización o persistencia.
 - `src/domain/types.ts` mantiene tipos frontend; no reemplaza validaciones del servidor ni el contrato publicado.
 
 ### Backend y rutas
@@ -124,7 +122,7 @@ Ejecutar solo las pruebas relacionadas con el cambio. Las pruebas unitarias simu
 | Rate limit en memoria | Cada proceso/réplica mantiene su propio contador | Agregar limitador distribuido/gateway antes de escalar exposición pública. |
 | Moneda y operaciones de negocio limitadas | Total incorrecto para un tenant con otra moneda; la aprobación no equivale a pedido | No prometer multimoneda, reserva, pago o creación de orden. |
 | `server/index.mjs` centraliza rutas y negocio | Cambios aparentemente locales pueden afectar catálogo, sesiones y APIs | Revisar el router completo y ejecutar pruebas focalizadas por ruta afectada. |
-| `App.tsx` es prototipo legado | Una mejora allí podría no aparecer en el portal activo | Confirmar siempre el entry point desde `src/main.tsx` y `AdminPortal.tsx`. |
+| Creación de pantallas fuera del portal activo | UI inalcanzable, lógica duplicada y deuda técnica | Mantener como única entrada `src/main.tsx` → `AdminPortal.tsx`; no reintroducir maquetas con estados locales ficticios. |
 | Despliegue no certificado | La rama local/CI no demuestra que el entorno tenga esquema o variables | Informar por separado implementación, migración, arranque y E2E; no llamar “desplegado” al código de una rama. |
 
 ## Lista de revisión para cada cambio futuro
