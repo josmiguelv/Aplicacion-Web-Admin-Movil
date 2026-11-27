@@ -1,8 +1,9 @@
 import {createHash,timingSafeEqual} from 'node:crypto'
 import {decryptCredential} from './integration-crypto.mjs'
 import {checkAvailability,connectionMode} from './tuverso-client.mjs'
-import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
+import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,closeMobileInteractionCommunication,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
+import {relayMobileCommunicationStream} from './mobile-communication-stream-relay.mjs'
 import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -137,7 +138,11 @@ function authorizedHour(store,storeOpen){
 export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  availability=checkAvailability,createInteraction=createMobileInteraction,
  readInteraction=readMobileInteraction,readMessages=readMobileInteractionMessages,
- sendMessage=sendMobileInteractionMessage,decrypt=decryptCredential,
+ sendMessage=sendMobileInteractionMessage,closeCommunication=closeMobileInteractionCommunication,
+ enableCommunicationClose=()=>process.env.TUVERSO_MOBILE_COMM_CLOSE_ENABLED==='true',
+ relayCommunication=relayMobileCommunicationStream,
+ enableCommunicationStream=()=>process.env.TUVERSO_MOBILE_COMM_STREAM_ENABLED==='true',
+ decrypt=decryptCredential,
  checkMode=connectionMode,interactionMode=mobileInteractionMode,rateLimit=throttled}){
  async function context(appId,storeId,requireOpen=true){
   const result=await pool.query(`SELECT p.tenant_id,p.revision,p.payload
@@ -179,7 +184,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  return async function route({req,res,url}){
   const match=url.pathname.match(/^\/api\/v1\/mobile\/stores\/([0-9a-f-]{36})\/agent-availability$/i)
   const creating=url.pathname==='/api/v1/mobile/interactions'
-  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
+  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment|stream)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
   if(!match&&!creating&&!statusMatch&&!messageMatch)return false
   try{
@@ -197,8 +202,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    }
    if(statusMatch){
     const interactionId=statusMatch[1],operation=statusMatch[2]
-    if(req.method!==(operation==='status'?'GET':'POST')&&!(operation==='payment'&&req.method==='GET'))throw fail(405,'Método no permitido')
-    const input=(operation==='status'||operation==='payment'&&req.method==='GET')?Object.fromEntries(url.searchParams):await body(req)
+    if(req.method!==(['status','stream'].includes(operation)?'GET':'POST')&&!(operation==='payment'&&req.method==='GET'))throw fail(405,'Método no permitido')
+    const input=(['status','stream'].includes(operation)||operation==='payment'&&req.method==='GET')?Object.fromEntries(url.searchParams):await body(req)
     if(!plainObject(input)||Object.keys(input).some(k=>!['appId','storeId','fcmToken','reason'].includes(k))||
        (operation!=='device'&&input.fcmToken!==undefined)||
        (operation!=='cancel'&&input.reason!==undefined)||
@@ -211,6 +216,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // delivering new messages, independently of TU VERSO availability.
     const closed=await checkoutSessionState(pool,owner)
     if(['CANCELLED','EXPIRED','FINISHED'].includes(closed)){
+     if(operation==='stream')throw fail(410,'La comunicación ya terminó')
      if(operation==='status')return json(res,200,{interactionId,storeId:input.storeId,
       status:closed,agentMessages:[],messagesAvailable:false})
      if(operation==='cancel'&&closed==='CANCELLED')return json(res,200,{interactionId,status:'CANCELLED'})
@@ -225,6 +231,15 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     if(!equals(remote.data?.externalReference,expected)||
        remote.data?.externalLocationId!==integration.external_location_id||
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
+    const terminateRemoteCommunication=async()=>{
+     if(!enableCommunicationClose())return
+     const ended=await closeCommunication(integration.token,interactionId,{
+      eventId:orderMessageIdempotency('communication-close:'+access,interactionId),
+      reason:'CLIENT_CANCELLED',
+     })
+     if(!ended.ok||ended.data?.closed!==true||ended.data?.interactionId!==interactionId)
+      throw fail(ended.httpStatus===409?409:remoteAuthStatus(ended),'TU VERSO no confirmó el cierre de la comunicación')
+    }
     if(operation==='device')return json(res,200,await bindPersonalDevice(pool,owner,input.fcmToken))
     if(operation==='payment'){
      const data=req.method==='GET'?await readCheckoutPayment(pool,owner):await beginCheckoutPayment(pool,owner)
@@ -237,6 +252,12 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // Absence of an operational status is UNKNOWN, never inferred from assignment.
     const conversationState=['CLOSED','RESOLVED'].includes(operationalConversationStatus)?
      'CLOSED':operationalConversationStatus==='OPEN'?'OPEN':'UNKNOWN'
+    if(operation==='stream'){
+     if(!enableCommunicationStream())throw fail(503,'Canal de eventos móvil todavía no habilitado')
+     if(conversationState==='CLOSED')throw fail(410,'La comunicación ya terminó')
+     await relayCommunication(integration.token,interactionId,{req,res})
+     return
+    }
     if(operation==='cancel'&&conversationState==='CLOSED'){
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
@@ -254,14 +275,16 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const messages=messagesAvailable?history.data.messages:[]
     const cancelled=messages.some(m=>m.direction==='INBOUND'&&(m.text===CANCEL_NOTICE||m.text===CANCEL_PURCHASE_NOTICE))
     if(operation==='cancel'){
-     if(cancelled){await closeCheckoutPayment(pool,owner);return json(res,200,{interactionId,status:'CANCELLED'})}
+     if(cancelled){await terminateRemoteCommunication();await closeCheckoutPayment(pool,owner);return json(res,200,{interactionId,status:'CANCELLED'})}
      if(remote.data.status==='EXPIRED')throw fail(409,'La interacción ya expiró')
      const sent=await sendMessage(integration.token,interactionId,{idempotencyKey:access,text:input.reason==='CANCEL'?CANCEL_PURCHASE_NOTICE:CANCEL_NOTICE})
      if(!sent.ok)throw fail(sent.httpStatus===409?409:remoteAuthStatus(sent),'No se pudo notificar la cancelación')
+     await terminateRemoteCommunication()
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,status:'CANCELLED'})
     }
     if(cancelled){
+     await terminateRemoteCommunication()
      await closeCheckoutPayment(pool,owner)
      return json(res,200,{interactionId,storeId:input.storeId,
       status:'CANCELLED',agentMessages:[],messagesAvailable:false})
