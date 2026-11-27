@@ -79,7 +79,7 @@ function withLiveHours(store,timeZone,at=new Date()){return {...store,...storeHo
 async function publish(tx,tenantId,appId){const [stores,products,promos,payments,vacancies,appSettings,sharedPaymentImages,checkoutSettings]=await Promise.all([
  tx.query('SELECT s.id,s.name,s.address,s.latitude,s.longitude,s.radius_km,s.delivery_fee_pen,s.delivery_rate_per_km_pen,s.delivery_pricing_mode,s.delivery_preparation_minutes,s.pickup_preparation_minutes,s.active,s.delivery_enabled,s.pickup_enabled,s.dine_in_enabled,s.opening_hours,s.consult_order_availability, r.enabled AS reservation_enabled, r.preparation_minutes AS reservation_preparation_minutes FROM stores s LEFT JOIN store_reservation_settings r ON r.tenant_id=s.tenant_id AND r.store_id=s.id WHERE s.tenant_id=$1 AND s.active=true ORDER BY s.name',[tenantId]),
  tx.query('SELECT id,name,description,category,price_pen,image_url FROM products WHERE tenant_id=$1 AND active=true ORDER BY name',[tenantId]),
- tx.query(`SELECT id,title,starts_at,ends_at,
+ tx.query(`SELECT id,title,product_id AS "productId",starts_at,ends_at,
   to_char(starts_on,'YYYY-MM-DD') AS "startDate",
   to_char(ends_on,'YYYY-MM-DD') AS "endDate",
   to_char(active_from,'HH24:MI') AS "startTime",
@@ -110,7 +110,12 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
   pickup:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='pickup'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]])),
   reservation:Object.fromEntries(payments.rows.filter(p=>p.store_id===s.id&&p.mode==='reservation'&&p.method!=='cash'&&sharedPaymentImageMap[p.method]).map(p=>[p.method,sharedPaymentImageMap[p.method]]))
  },
- paymentOptions:publicPaymentOptions(payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode]?.push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),sharedPaymentImageMap)})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows,vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
+ paymentOptions:publicPaymentOptions(payments.rows.filter(p=>p.store_id===s.id).reduce((a,p)=>(a[p.mode]?.push(p.method),a),{delivery:[],pickup:[],dine_in:[],reservation:[]}),sharedPaymentImageMap)})),products:products.rows.map(p=>({...p,pricePen:Number(p.price_pen)})),promotions:promos.rows.map(p=>{
+  const product=products.rows.find(item=>item.id===p.productId)
+  return {...p,productId:product?.id??p.productId??null,
+   product:product?{id:product.id,name:product.name,description:product.description,category:product.category,
+    pricePen:Number(product.price_pen),imageUrl:product.image_url}:null}
+ }).filter(p=>p.productId===null||p.product!==null),vacancies:vacancies.rows,complaintsBookUrl:appSettings.rows[0]?.complaints_book_url||null};
  const v=await tx.query('UPDATE mobile_apps SET published_revision=published_revision+1,enabled=true WHERE tenant_id=$1 AND app_id=$2 RETURNING published_revision',[tenantId,appId]);if(!v.rowCount)throw bad(404,'Aplicación no registrada');const revision=v.rows[0].published_revision;await tx.query(`INSERT INTO published_catalogs(app_id,tenant_id,revision,payload) VALUES($1,$2,$3,$4) ON CONFLICT(app_id) DO UPDATE SET revision=EXCLUDED.revision,payload=EXCLUDED.payload,published_at=now()`,[appId,tenantId,revision,JSON.stringify(payload)]);return{revision,payload}}
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[],notifications:[]},true);const commercial=await publicCommercialNotifications(pool,appId).catch(error=>{if(error.code==='42P01')return {items:[]};throw error});return json(res,200,{ready:true,revision:q.rows[0].revision,notifications:commercial.items,...q.rows[0].payload,timeZone:DEFAULT_TENANT_TZ,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
  ...withLiveHours(s,DEFAULT_TENANT_TZ),
@@ -432,14 +437,20 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
   result=b.id&&uuid(b.id)?await client.query(`UPDATE products SET name=$2,description=$3,category=$4,price_pen=$5,image_url=$6,active=$7,updated_at=now() WHERE tenant_id=$1 AND id=$8 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO products(tenant_id,name,description,category,price_pen,image_url,active) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,args)
  }else if(resource==='promotions'){
   if(!word(b.title,180)||!bool(b.active))throw bad(400,'Promoción inválida');
+  if(b.productId!==undefined){
+   if(!uuid(b.productId))throw bad(400,'Selecciona un producto o combo válido');
+   const chosen=await client.query('SELECT id FROM products WHERE tenant_id=$1 AND id=$2 AND active=true',[tenantId,b.productId]);
+   if(chosen.rowCount!==1)throw bad(400,'El producto seleccionado no está activo o no pertenece a la empresa');
+  }
   if(b.startDate!==undefined||b.endDate!==undefined||b.startTime!==undefined||
     b.endTime!==undefined||b.weekdays!==undefined){
    if(!validatePromotionSchedule(b))throw bad(400,'Completa fechas, horas y al menos un día activo. La hora de fin debe ser posterior a la de inicio.');
+   if(!uuid(b.productId))throw bad(400,'Selecciona un producto o combo para esta promoción');
    result=await client.query(`INSERT INTO promotions(
-    tenant_id,title,starts_on,ends_on,active_from,active_until,active_weekdays,active)
-    VALUES($1,$2,$3::date,$4::date,$5::time,$6::time,$7::integer[],$8)
+    tenant_id,title,starts_on,ends_on,active_from,active_until,active_weekdays,active,product_id)
+    VALUES($1,$2,$3::date,$4::date,$5::time,$6::time,$7::integer[],$8,$9)
     RETURNING *`,
-    [tenantId,b.title,b.startDate,b.endDate,b.startTime,b.endTime,b.weekdays,b.active]);
+    [tenantId,b.title,b.startDate,b.endDate,b.startTime,b.endTime,b.weekdays,b.active,b.productId]);
   }else{
    // Keep the preexisting timestamp contract available for older integrations.
    const args=[tenantId,b.title,b.startsAt||null,b.endsAt||null,b.active];
