@@ -1,0 +1,28 @@
+name: Admin B3 MOBILE_APP communication release focal
+on:
+  pull_request:
+    paths:
+      - 'server/tuverso-mobile-connector.mjs'
+      - 'server/tuverso-mobile-connector.test.mjs'
+      - 'server/mobile-tuverso-routes.mjs'
+      - 'server/mobile-tuverso-routes.test.mjs'
+      - '.github/workflows/admin-mobile-communication-release-focal.yml'
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check only changed modules
+        run: |
+          node --check server/tuverso-mobile-connector.mjs
+          node --check server/mobile-tuverso-routes.mjs
+          node --check server/tuverso-mobile-connector.test.mjs
+          node --check server/mobile-tuverso-routes.test.mjs
+      - name: Focused order cancellation and TU VERSO S2S tests
+        run: node --test server/tuverso-mobile-connector.test.mjs server/mobile-tuverso-routes.test.mjs
