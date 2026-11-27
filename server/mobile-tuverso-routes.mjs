@@ -184,7 +184,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  return async function route({req,res,url}){
   const match=url.pathname.match(/^\/api\/v1\/mobile\/stores\/([0-9a-f-]{36})\/agent-availability$/i)
   const creating=url.pathname==='/api/v1/mobile/interactions'
-  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment|stream)$/i)
+  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|communication-close|device|payment|stream)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
   if(!match&&!creating&&!statusMatch&&!messageMatch)return false
   try{
@@ -206,7 +206,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const input=(['status','stream'].includes(operation)||operation==='payment'&&req.method==='GET')?Object.fromEntries(url.searchParams):await body(req)
     if(!plainObject(input)||Object.keys(input).some(k=>!['appId','storeId','fcmToken','reason'].includes(k))||
        (operation!=='device'&&input.fcmToken!==undefined)||
-       (operation!=='cancel'&&input.reason!==undefined)||
+       (!['cancel','communication-close'].includes(operation)&&input.reason!==undefined)||
+       (operation==='communication-close'&&input.reason!==undefined&&input.reason!=='CLIENT_CANCELLED')||
        !APP.test(input.appId||'')||!VALID_UUID.test(input.storeId||''))throw fail(400,'Identificadores de seguimiento inválidos')
     const access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
@@ -215,6 +216,28 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // A cancelled B3 order stays locally closed without polling upstream or
     // delivering new messages, independently of TU VERSO availability.
     const closed=await checkoutSessionState(pool,owner)
+    // Android may request transport release only AFTER /cancel was acknowledged:
+    // the durable CANCELLED tombstone is proof that the notification stage finished.
+    // No client-supplied message or upstream credential is accepted by this route.
+    if(operation==='communication-close'){
+     if(closed!=='CANCELLED')throw fail(409,'Primero confirma la cancelación del pedido')
+     if(!enableCommunicationClose())throw fail(503,'Cierre de comunicación todavía no habilitado')
+     if(interactionMode()!=='LIVE')throw fail(503,'Seguimiento de TU VERSO no disponible')
+     const integration=await binding(ctx.tenantId,input.appId,input.storeId)
+     const remote=await readInteraction(integration.token,interactionId)
+     if(!remote.ok)throw fail(remote.httpStatus===404?404:remoteAuthStatus(remote),'No se pudo verificar la interacción')
+     const expected=reference(ctx.tenantId,input.appId,input.storeId,access)
+     if(!equals(remote.data?.externalReference,expected)||
+        remote.data?.externalLocationId!==integration.external_location_id||
+        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
+     const ended=await closeCommunication(integration.token,interactionId,{
+      eventId:orderMessageIdempotency('communication-close:'+access,interactionId),
+      reason:'CLIENT_CANCELLED',
+     })
+     if(!ended.ok||ended.data?.closed!==true||ended.data?.interactionId!==interactionId)
+      throw fail(ended.httpStatus===409?409:remoteAuthStatus(ended),'TU VERSO no confirmó el cierre de la comunicación')
+     return json(res,200,{interactionId,status:'CANCELLED',communicationStatus:'CLOSED',replayed:ended.data.replayed===true})
+    }
     if(['CANCELLED','EXPIRED','FINISHED'].includes(closed)){
      if(operation==='stream')throw fail(410,'La comunicación ya terminó')
      if(operation==='status')return json(res,200,{interactionId,storeId:input.storeId,
