@@ -8,7 +8,7 @@ DO $$
 BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='promotions_product_same_tenant_fkey') THEN
   ALTER TABLE promotions ADD CONSTRAINT promotions_product_same_tenant_fkey
-   FOREIGN KEY (tenant_id,product_id) REFERENCES products(tenant_id,id);
+   FOREIGN KEY (product_id,tenant_id) REFERENCES products(id,tenant_id);
  END IF;
 END $$;
 COMMIT;
