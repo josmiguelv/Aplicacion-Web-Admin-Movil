@@ -337,3 +337,12 @@
 .ops-promotion-detail .ops-state{align-self:flex-start}
 .ops-promotion-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 @media(max-width:680px){.ops-promotion-item{align-items:flex-start;flex-wrap:wrap}.ops-promotion-detail{flex:1 1 170px}.ops-promotion-actions{width:100%;justify-content:flex-end}}
+
+/* Confirm publication after successful saves; neutral, accessible modal. */
+.ops-publish-scrim{position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.46);display:flex;align-items:center;justify-content:center;padding:18px}
+.ops-publish-dialog{width:min(100%,450px);background:#fff;border:1px solid #e0e7ef;border-radius:18px;box-shadow:0 22px 70px rgba(10,26,46,.23);padding:26px;color:#1d2939}
+.ops-publish-symbol{display:flex;align-items:center;justify-content:center;width:47px;height:47px;border-radius:13px;background:#eef5f2;color:#176b53;margin-bottom:15px}
+.ops-publish-dialog h2{font-size:19px;line-height:1.35;margin:0 0 10px}
+.ops-publish-dialog p{font-size:13px;color:#536477;line-height:1.6;margin:0}
+.ops-publish-dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:23px;flex-wrap:wrap}
+@media(max-width:480px){.ops-publish-dialog{padding:21px}.ops-publish-dialog-actions .button{flex:1}}
