@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,upstream={}}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,closeEnabled=false,closeFailure=false,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  const terminalSessions=new Map()
@@ -55,6 +55,8 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   json:(res,code,payload)=>{res.reply={code,payload}},
   storeOpen:()=>open,checkMode:()=>enabled?'LIVE':'DISABLED',
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
+  enableCommunicationClose:()=>closeEnabled,
+  closeCommunication:async(token,id,value)=>{remote.push({operation:'close',id,value});return closeFailure?{ok:false,httpStatus:503}:{ok:true,data:{interactionId:id,conversationId:randomUUID(),closed:true,replayed:false}}},
   decrypt:()=> 'private-credential',
   availability:async(token,binding)=>{remote.push({operation:'capacity',token,binding});return upstream.availability?{result:null,httpStatus:upstream.availability,errorCode:'UPSTREAM_'+upstream.availability}:{result:capacity,providerCheckedAt:'2026-11-20T16:00:00Z'}},
   createInteraction:async(token,binding,input)=>{remote.push({operation:'interaction',token,binding,input});
@@ -732,4 +734,42 @@ test('TU VERSO explicit OPEN is recognized while absence remains UNKNOWN',async(
  assert.equal(missing.payload.conversationState,'UNKNOWN')
  assert.equal(Object.hasOwn(missing.payload,'operationalConversationStatus'),false)
  assert.equal(missing.payload.messagesAvailable,false)
+})
+
+test('opt-in transport release happens after last cancellation message',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const uri='/api/v1/mobile/interactions/'+id
+ const input={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ const done=await h.call('POST',uri+'/cancel',input)
+ assert.equal(done.code,200)
+ const writes=h.remote.filter(item=>item.operation==='cancel'||item.operation==='close')
+ assert.deepEqual(writes.map(item=>item.operation),['cancel','close'])
+ assert.equal(writes[1].value.reason,'CLIENT_CANCELLED')
+ assert.equal(writes[1].value.eventId.length,36)
+ assert.notEqual(writes[1].value.eventId,key)
+ const before=h.remote.length
+ assert.equal((await h.call('POST',uri+'/cancel',input)).code,200)
+ assert.equal(h.remote.length,before,'second cancellation must not create new event')
+})
+test('remote close failure leaves local session retryable and event id stable',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true,closeFailure:true})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const uri='/api/v1/mobile/interactions/'+id+'/cancel'
+ const input={headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA,reason:'CANCEL'}}
+ assert.equal((await h.call('POST',uri,input)).code,503)
+ assert.equal(h.queries.filter(q=>q.sql.startsWith('INSERT INTO mobile_checkout_followups')&&q.sql.includes('state,agent_notice_sent')).length,0)
+ assert.equal((await h.call('POST',uri,input)).code,503)
+ const ids=h.remote.filter(item=>item.operation==='close').map(item=>item.value.eventId)
+ assert.equal(ids.length,2)
+ assert.equal(ids[0],ids[1])
+})
+test('no remote close event needed when advisor already finalized the conversation',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true,operationalConversationStatus:'CLOSED'})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const done=await h.call('POST','/api/v1/mobile/interactions/'+id+'/cancel',{
+  headers:{'x-order-access-key':key},payload:{appId:appA,storeId:storeA},
+ })
+ assert.equal(done.code,200)
+ assert.equal(h.remote.filter(item=>item.operation==='close').length,0)
 })

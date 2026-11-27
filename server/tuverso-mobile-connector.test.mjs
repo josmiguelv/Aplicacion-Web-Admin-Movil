@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {randomUUID} from 'node:crypto'
 import {test} from 'node:test'
 import {createMobileInteraction,readMobileInteraction,pollMobileInteractionEvents,
- sendMobileInteractionMessage,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
+ sendMobileInteractionMessage,closeMobileInteractionCommunication,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 const token='tuverso_'+'a'.repeat(64)
 const binding={external_location_id:'sede-b3-001',purpose:'ORDER_REQUEST'}
 const input={customerExternalId:'cliente-externo-123',externalReference:'pedido-externo-789',
@@ -221,5 +221,55 @@ test('MOBILE_APP FORM posts exact server-side typed fields; rejects cross-conten
    ['target','TUVERSO_INTERACTIONS_TEST_URL']]){
    if(env[key]===undefined)delete process.env[name];else process.env[name]=env[key]
   }
+ }
+})
+
+test('explicit communication close uses a separate event, strict S2S response and no text',async()=>{
+ const prior=process.env.TUVERSO_LIVE_REQUESTS_ENABLED
+ process.env.TUVERSO_LIVE_REQUESTS_ENABLED='true'
+ const eventId=randomUUID()
+ try{
+  await withFetch(async(url,options)=>{
+   assert.equal(String(url),'https://api.tuverso.integra-b2g.com/api/v1/conversations/'+xid+'/close')
+   assert.equal(options.method,'POST')
+   assert.equal(options.headers.Authorization,'Bearer '+token)
+   assert.equal(options.headers['Idempotency-Key'],eventId)
+   assert.equal(options.headers.Cookie,undefined)
+   assert.equal(options.headers.Origin,undefined)
+   assert.deepEqual(JSON.parse(options.body),{
+    version:1,type:'CONVERSATION_CLOSE',eventId,interactionId:xid,reason:'CLIENT_CANCELLED',
+   })
+   return ok({interactionId:xid,conversationId:randomUUID(),closed:true,replayed:false},200)
+  },async()=>{
+   const r=await closeMobileInteractionCommunication(token,xid,{eventId})
+   assert.equal(r.ok,true)
+   assert.equal(r.data.closed,true)
+  })
+  await withFetch(()=>ok({interactionId:xid,closed:true},200),async()=>{
+   assert.equal((await closeMobileInteractionCommunication(token,xid,{eventId})).errorCode,'INVALID_RESPONSE')
+  })
+  await withFetch(()=>{throw Error('INVALID MUST NOT REACH NETWORK')},async()=>{
+   await assert.rejects(()=>closeMobileInteractionCommunication(token,xid,{eventId:'invalid'}))
+   await assert.rejects(()=>closeMobileInteractionCommunication(token,xid,{eventId,reason:'arbitrary text'}))
+  })
+ }finally{
+  if(prior===undefined)delete process.env.TUVERSO_LIVE_REQUESTS_ENABLED
+  else process.env.TUVERSO_LIVE_REQUESTS_ENABLED=prior
+ }
+})
+test('explicit communication termination is recognized by the existing event reader',async()=>{
+ const prior=process.env.TUVERSO_LIVE_REQUESTS_ENABLED
+ process.env.TUVERSO_LIVE_REQUESTS_ENABLED='true'
+ try{
+  await withFetch(async()=>ok({events:[{
+   id:randomUUID(),interactionId:xid,kind:'COMMUNICATION_CLOSED',createdAt:new Date().toISOString(),
+  }],nextCursor:null,hasMore:false},200),async()=>{
+   const result=await pollMobileInteractionEvents(token)
+   assert.equal(result.ok,true)
+   assert.equal(result.data.events[0].kind,'COMMUNICATION_CLOSED')
+  })
+ }finally{
+  if(prior===undefined)delete process.env.TUVERSO_LIVE_REQUESTS_ENABLED
+  else process.env.TUVERSO_LIVE_REQUESTS_ENABLED=prior
  }
 })
