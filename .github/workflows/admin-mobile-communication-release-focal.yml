@@ -5,6 +5,8 @@ on:
       - 'server/tuverso-mobile-connector.mjs'
       - 'server/tuverso-mobile-connector.test.mjs'
       - 'server/mobile-tuverso-routes.mjs'
+      - 'server/mobile-communication-stream-relay.mjs'
+      - 'server/mobile-communication-stream-relay.test.mjs'
       - 'server/mobile-tuverso-routes.test.mjs'
       - '.github/workflows/admin-mobile-communication-release-focal.yml'
 permissions:
@@ -22,7 +24,9 @@ jobs:
         run: |
           node --check server/tuverso-mobile-connector.mjs
           node --check server/mobile-tuverso-routes.mjs
+          node --check server/mobile-communication-stream-relay.mjs
+          node --check server/mobile-communication-stream-relay.test.mjs
           node --check server/tuverso-mobile-connector.test.mjs
           node --check server/mobile-tuverso-routes.test.mjs
       - name: Focused order cancellation and TU VERSO S2S tests
-        run: node --test server/tuverso-mobile-connector.test.mjs server/mobile-tuverso-routes.test.mjs
+        run: node --test server/tuverso-mobile-connector.test.mjs server/mobile-tuverso-routes.test.mjs server/mobile-communication-stream-relay.test.mjs
