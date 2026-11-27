@@ -40,8 +40,10 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [session,setSession]=useState<Session|null>(embeddedSession??null)
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('')
  const [tenants,setTenants]=useState<Tenant[]>([]),[tenantId,setTenantId]=useState(scopedTenantId??embeddedSession?.tenantId??''),[companyName,setCompanyName]=useState('')
- const [stores,setStores]=useState<StoreRow[]>([])
- const [storesLoaded,setStoresLoaded]=useState(false)
+ const [storeData,setStoreData]=useState<{tenantId:string;items:StoreRow[]}>({tenantId:'',items:[]})
+ const [storesRawLoaded,setStoresRawLoaded]=useState(false)
+ const stores=storeData.tenantId===tenantId?storeData.items:[]
+ const storesLoaded=storesRawLoaded&&storeData.tenantId===tenantId
  const [catalogReload,setCatalogReload]=useState(0)
  const [moduleWarnings,setModuleWarnings]=useState<string[]>([])
  const emptyStore=()=>({id:'',code:'',name:'',address:'',latitude:'',longitude:'',radiusKm:'',deliveryRatePerKmPen:'',deliveryFeePen:'',deliveryPreparationMinutes:'',pickupPreparationMinutes:'',deliveryPricingMode:'PER_KM' as 'PER_KM'|'FIXED',active:false,delivery_enabled:false,pickup_enabled:false,dine_in_enabled:false,consultOrderAvailability:false,openingHours:{} as OpeningHours})
@@ -73,7 +75,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [newTenantEmail,setNewTenantEmail]=useState(''),[newTenantPassword,setNewTenantPassword]=useState('')
  const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false)
  const [promotionProductId,setPromotionProductId]=useState('')
- const [promotions,setPromotions]=useState<PromotionRow[]>([])
+ const [promotionData,setPromotionData]=useState<{tenantId:string;items:PromotionRow[]}>({tenantId:'',items:[]})
+ const promotions=promotionData.tenantId===tenantId?promotionData.items:[]
  const [promotionsLoading,setPromotionsLoading]=useState(false)
  const [promotionsError,setPromotionsError]=useState('')
  const [promotionEditingId,setPromotionEditingId]=useState('')
@@ -82,7 +85,8 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const [promoStartTime,setPromoStartTime]=useState(''),[promoEndTime,setPromoEndTime]=useState('')
  const [promoDays,setPromoDays]=useState<number[]>([])
  const [appId,setAppId]=useState('')
- const [registeredAppIds,setRegisteredAppIds]=useState<string[]>([])
+ const [registeredApps,setRegisteredApps]=useState<{tenantId:string;ids:string[]}>({tenantId:'',ids:[]})
+ const registeredAppIds=registeredApps.tenantId===tenantId?registeredApps.ids:[]
  const [publicationPrompt,setPublicationPrompt]=useState<PublicationPrompt|null>(null)
  const [publishingPrompt,setPublishingPrompt]=useState(false)
  const [publicationStatus,setPublicationStatus]=useState<PublicationStatus|null>(null)
@@ -196,19 +200,19 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   ])
   const warnings:string[]=[]
   if(st.status==='fulfilled'){
-   setStores(st.value.items);setStoresLoaded(true)
+   setStoreData({tenantId:id,items:st.value.items});setStoresRawLoaded(true)
    setReservationStoreId(previous=>st.value.items.some(local=>local.id===previous)?previous:st.value.items[0]?.id||'')
    setSelectedStoreId(previous=>st.value.items.some(local=>local.id===previous)?previous:'')
   }else{
-   setStoresLoaded(false)
+   setStoresRawLoaded(false)
    setError('No se pudieron cargar los locales. '+(st.reason instanceof Error?st.reason.message:'Revisa el servidor del Administrador.'))
   }
   if(apps.status==='fulfilled'){
-   const current=apps.value.items.find(x=>x.app_id===appId)??(appId===''&&apps.value.items.length===1?apps.value.items[0]:undefined)
-   if(current&&appId==='')setAppId(current.app_id)
-   setRegisteredAppIds(apps.value.items.map(a=>a.app_id))
+   const current=apps.value.items.find(x=>x.app_id===appId)??(apps.value.items.length===1?apps.value.items[0]:undefined)
+   setAppId(current?.app_id??'')
+   setRegisteredApps({tenantId:id,ids:apps.value.items.map(a=>a.app_id)})
    setComplaintsBookUrl(current?.complaints_book_url||'')
-  }else{setRegisteredAppIds([]);warnings.push('Aplicaciones')}
+  }else{setRegisteredApps({tenantId:id,ids:[]});warnings.push('Aplicaciones')}
   setModuleWarnings(warnings)
  }
  useEffect(()=>{
@@ -246,7 +250,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   let cancelled=false
   setPromotionsLoading(true);setPromotionsError('')
   void api<{items:PromotionRow[]}>(`/api/admin/tenants/${tenantId}/promotions`)
-   .then(r=>{if(!cancelled)setPromotions(r.items)})
+   .then(r=>{if(!cancelled)setPromotionData({tenantId,items:r.items})})
    .catch(e=>{if(!cancelled)setPromotionsError(e instanceof Error?e.message:'No se pudieron consultar promociones')})
    .finally(()=>{if(!cancelled)setPromotionsLoading(false)})
   return()=>{cancelled=true}
@@ -260,7 +264,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   setPromotionEnabled(p.active);setPromoStartDate(p.startDate||'');setPromoEndDate(p.endDate||'')
   setPromoStartTime(p.startTime||'');setPromoEndTime(p.endTime||'');setPromoDays(p.weekdays||[])
  }
- useEffect(()=>{if(session&&tenantId){setStoresLoaded(false);setModuleWarnings([]);setError('');void refresh(tenantId).catch(e=>setError(e.message))}},[tenantId,session])
+ useEffect(()=>{if(session&&tenantId){setStoresRawLoaded(false);setModuleWarnings([]);setError('');void refresh(tenantId).catch(e=>setError(e.message))}},[tenantId,session])
  useEffect(()=>{
     if(activeArea!=='reservations'||!tenantId||!reservationStoreId)return
     let active=true
@@ -984,7 +988,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    })}>Guardar recordatorios de pago</button>
   <p className="ops-hint">Guardar no envía avisos inmediatamente. El servicio automático sigue controlado por el backend; nunca se envía una notificación grupal. No se modifica el tiempo de espera de TU VERSO.</p>
  </section>)}
- {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setRegisteredAppIds(v=>[...new Set([...v,appId.trim()])]);setPublicationStatusReload(v=>v+1);setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setPublicationStatusReload(v=>v+1);setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div>{appId.trim()&&(publicationStatusLoading?<p role="status" className="ops-hint">Comprobando estado de publicación…</p>:
+ {activeArea==='publish'&&(<section className="ops-panel"><h2><Smartphone size={19}/> Aplicación y publicación</h2><div className="ops-inline"><input aria-label="Identificador de aplicación" placeholder="Identificador de la aplicación" value={appId} onChange={e=>setAppId(e.target.value)}/><button className="button button-secondary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{await api(`/api/admin/tenants/${tenantId}/apps`,'POST',{appId});setRegisteredApps(v=>({tenantId,ids:[...new Set([...(v.tenantId===tenantId?v.ids:[]),appId.trim()])]}));setPublicationStatusReload(v=>v+1);setMessage('Aplicación registrada para esta empresa.')})}>Registrar aplicación</button><button className="button button-primary" disabled={loading||!appId.trim()} onClick={()=>void act(async()=>{const r=await api<{revision:number}>(`/api/admin/tenants/${tenantId}/publish`,'POST',{appId});setSavedArea('');setPublicationStatusReload(v=>v+1);setMessage(`Cambios publicados correctamente (revisión ${r.revision}). La aplicación ya puede consultar esta versión.`)})}><Send size={15}/> Publicar cambios</button></div>{appId.trim()&&(publicationStatusLoading?<p role="status" className="ops-hint">Comprobando estado de publicación…</p>:
    publicationStatus?<p className="ops-hint" role="status">Estado: <strong>{!publicationStatus.registered?'Aplicación no registrada':!publicationStatus.hasPublished?'Nunca publicada':publicationStatus.pending?'Cambios pendientes de publicar':'Catálogo actualizado'}</strong>{publicationStatus.hasPublished?` · Revisión ${publicationStatus.revision}`:''}</p>:
    <p className="ops-hint">No se pudo consultar el estado. Verifica el servidor antes de confirmar la publicación.</p>)}
 <p className="ops-hint">El servidor bloquea la publicación a otra empresa o a una aplicación no registrada. No se envían pedidos ni se cobran pagos hasta completar ese módulo.</p></section>)}
