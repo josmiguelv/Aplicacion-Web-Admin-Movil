@@ -69,6 +69,7 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
    methods:{...current[mode].methods,[method]:enabled}}}))
  const [newTenantEmail,setNewTenantEmail]=useState(''),[newTenantPassword,setNewTenantPassword]=useState('')
  const [promotionTitle,setPromotionTitle]=useState(''),[promotionEnabled,setPromotionEnabled]=useState(false)
+ const [promotionProductId,setPromotionProductId]=useState('')
  const [promoStartDate,setPromoStartDate]=useState(''),[promoEndDate,setPromoEndDate]=useState('')
  const [promoStartTime,setPromoStartTime]=useState(''),[promoEndTime,setPromoEndTime]=useState('')
  const [promoDays,setPromoDays]=useState<number[]>([])
@@ -582,7 +583,20 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   {activeArea==='promotions'&&(<section className="ops-panel ops-promo-panel">
     <p className="ops-global-note" role="status">Promociones compartidas de la empresa. No se restringen automáticamente a la sede desde la que accediste.</p>
     <h2>Promociones de la aplicación</h2>
-    <p className="ops-hint">Elige un periodo de fechas, las horas de actividad y los días de la semana. La promoción no será visible hasta publicar los cambios. Solo se mostrará el título aprobado.</p>
+    <p className="ops-hint">Elige un periodo de fechas, las horas de actividad y los días de la semana. La promoción no será visible hasta publicar los cambios. Android recibirá el título y los datos del producto o combo seleccionado.</p>
+    <label>Producto o combo relacionado
+     <select value={promotionProductId} onChange={e=>setPromotionProductId(e.target.value)}>
+      <option value="">Selecciona un producto activo del catálogo</option>
+      {products.filter(p=>p.active).map(p=><option key={p.id} value={p.id}>{p.name} — S/ {Number(p.price_pen).toFixed(2)}</option>)}
+     </select>
+    </label>
+    {promotionProductId&&products.some(p=>p.id===promotionProductId)&&(()=>{
+      const p=products.find(p=>p.id===promotionProductId)!
+      return <div className="ops-global-note" role="status">
+       {p.image_url&&<img src={p.image_url} alt={p.name} style={{maxWidth:96,maxHeight:96,objectFit:'contain',verticalAlign:'middle',marginRight:12}}/>}
+       <strong>{p.name}</strong> · S/ {Number(p.price_pen).toFixed(2)}{p.description?' · '+p.description:''}
+      </div>
+    })()}
     <div className="ops-promo-fields">
      <label>Nombre de la promoción<input placeholder="Ej. Promoción del fin de semana"
       value={promotionTitle} onChange={e=>setPromotionTitle(e.target.value)}/></label>
@@ -611,15 +625,15 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     <div className="ops-promo-actions"><label className="ops-check">
      <input type="checkbox" checked={promotionEnabled} onChange={e=>setPromotionEnabled(e.target.checked)}/>
      Promoción activa</label>
-     <button className="button button-primary" disabled={loading||!promotionTitle.trim()||!promoStartDate||
+     <button className="button button-primary" disabled={loading||!promotionProductId||!promotionTitle.trim()||!promoStartDate||
       !promoEndDate||promoStartDate>promoEndDate||!promoStartTime||!promoEndTime||
       promoStartTime>=promoEndTime||promoDays.length===0}
       onClick={()=>void act(async()=>{
        await api(`/api/admin/tenants/${tenantId}/promotions`,'POST',{
-        title:promotionTitle.trim(),active:promotionEnabled,startDate:promoStartDate,
+        title:promotionTitle.trim(),productId:promotionProductId,active:promotionEnabled,startDate:promoStartDate,
         endDate:promoEndDate,startTime:promoStartTime,endTime:promoEndTime,weekdays:promoDays
        })
-       setPromotionTitle('');setPromotionEnabled(false);setPromoStartDate('');setPromoEndDate('')
+       setPromotionTitle('');setPromotionProductId('');setPromotionEnabled(false);setPromoStartDate('');setPromoEndDate('')
        setPromoStartTime('');setPromoEndTime('');setPromoDays([]);setSavedArea('promotions')
       })}>Guardar promoción</button>
     </div>
