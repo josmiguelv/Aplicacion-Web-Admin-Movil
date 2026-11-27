@@ -20,7 +20,7 @@ Repositorio de la plataforma administrativa multitenant y sus APIs comerciales. 
 - **Backend:** `server/index.mjs` y módulos `server/integrations.mjs`, `server/service-api-keys.mjs`, `server/mobile-order-availability.mjs`.
 - **Base de datos:** `server/schema.sql` para una base vacía; `server/migrations/` para cambios aditivos en bases existentes.
 
-`src/app/App.tsx` es un prototipo anterior y no es la entrada del portal autenticado. Confirma el mapa de componentes antes de implementar una pantalla para evitar editar el prototipo.
+**MVP:** la única interfaz activa es el portal autenticado (`src/main.tsx` → `AdminPortal.tsx`). Se retiró la maqueta visual anterior; no quedan rutas demostrativas en el frontend. Las simulaciones de Postman y los tests se conservan como herramientas de validación, sin desplegarse en la aplicación.
 
 ## Estado y límites conocidos
 
