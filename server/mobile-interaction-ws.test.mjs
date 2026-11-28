@@ -46,9 +46,9 @@ async function connect(port,interactionId,key,extra={}){
  const ws=new WebSocket('ws://127.0.0.1:'+port+path,{headers:{
   'X-Order-Access-Key':key,...extra
  }})
- await Promise.race([once(ws,'open'),once(ws,'error').then(([error])=>{throw error})])
  const incoming=[]
  ws.on('message',data=>incoming.push(JSON.parse(data.toString())))
+ await once(ws,'open')
  return {ws,incoming}
 }
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))
@@ -99,8 +99,10 @@ test('foreign key and missing key do not establish a subscription',async()=>{
     '/events/ws?appId='+app+'&storeId='+store
    const headers=key?{'X-Order-Access-Key':key}:{}
    const ws=new WebSocket(url,{headers})
-   const result=await Promise.race([once(ws,'unexpected-response').then(([_,res])=>res.statusCode),
-    once(ws,'error').then(()=> 'error')])
+   const result=await new Promise(resolve=>{
+    ws.once('unexpected-response',(_req,response)=>resolve(response.statusCode))
+    ws.once('error',()=>resolve('error'))
+   })
    assert.ok(result===403||result==='error')
    ws.terminate()
   }
