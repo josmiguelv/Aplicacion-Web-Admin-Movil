@@ -17,8 +17,7 @@ export function mapReservationSettings(row){
  return {enabled:row.enabled===true,preparationMinutes:row.preparation_minutes??null};
 }
 export function publishedReservationSettings(row){
- const settings=mapReservationSettings(row);
- return {...settings,acceptingRequests:settings.enabled};
+ return mapReservationSettings(row);
 }
 export async function readStoreReservationSettings(pool,tenantId,storeId){
  const owned=await pool.query('SELECT id FROM stores WHERE tenant_id=$1 AND id=$2',[tenantId,storeId]);
