@@ -20,6 +20,10 @@ const migrations=await Promise.all(files.map(async name=>{
 function guard(ok,message){if(!ok)throw Error('NO-GO: '+message)}
 guard(files.length===23,'expected exactly 23 historical migration files (001,003..024)')
 guard(files[0].startsWith('001-')&&files.at(-1).startsWith('024-'),'unexpected migration range')
+guard(!/^\\s*(?:BEGIN|COMMIT)\\s*;\\s*$/gmi.test(schema),
+ 'baseline must not contain transaction commands: outer rollback must be atomic')
+guard(migrations.every(m=>!/^\\s*(?:BEGIN|COMMIT)\\s*;\\s*$/gmi.test(m.sql)),
+ 'migration contains unremoved transaction commands')
 guard(schema.includes('CREATE TABLE IF NOT EXISTS mobile_scheduled_orders'),
  'schema baseline lacks scheduled orders')
 guard(schema.includes('CREATE TABLE IF NOT EXISTS published_catalogs'),
