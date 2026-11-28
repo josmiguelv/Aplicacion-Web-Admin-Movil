@@ -245,6 +245,55 @@ test('optional email is forwarded in structured customer; unverified flags never
  assert.equal(old.code,201)
  assert.equal('customer' in legacy.remote[0].input,false)
 })
+test('four requested modalities create scoped mobile identity in E.164, unverified, without address for pickup',async()=>{
+ const cases=[
+  {name:'Delivery inmediato Peru',phone:'+51912345678',mode:'delivery'},
+  {name:'Delivery programado Colombia',phone:'+573001234567',mode:'delivery'},
+  {name:'Recojo inmediato Peru',phone:'+51987654321',mode:'pickup'},
+  {name:'Recojo programado Ecuador',phone:'+593987654321',mode:'pickup'},
+ ]
+ for(const c of cases){
+  const h=harness(),key=randomUUID(),identity={firstName:'Cliente',lastName:'Ejemplo',
+   phone:c.phone,mode:c.mode,...(c.mode==='delivery'?{address:'Avenida Lima 123',district:'Lima'}:{})}
+  const payload=createBody({customer:identity})
+  const first=await h.call('POST','/api/v1/mobile/interactions',{headers:{'idempotency-key':key},payload})
+  const repeated=await h.call('POST','/api/v1/mobile/interactions',{headers:{'idempotency-key':key},payload})
+  assert.equal(first.code,201,c.name);assert.equal(repeated.code,201,c.name)
+  assert.equal(first.payload.interactionId,repeated.payload.interactionId)
+  assert.equal(h.remote[0].binding.external_location_id,'location-a')
+  assert.equal(h.remote[0].input.idempotencyKey,key)
+  assert.equal(h.remote[0].input.externalReference,h.remote[1].input.externalReference)
+  assert.equal(h.remote[0].input.customerExternalId,payload.customerExternalId)
+  assert.deepEqual(h.remote[0].input.customer,{firstName:'Cliente',lastName:'Ejemplo',
+   phone:c.phone,phoneVerified:false,emailVerified:false})
+  assert.ok(!JSON.stringify(h.remote[0].input.customer).includes('address'))
+  h.setReference(first.payload.externalReference)
+  const form=await h.call('POST','/api/v1/mobile/interactions/'+first.payload.interactionId+'/message',{
+   headers:{'x-order-access-key':key},payload:{...payload,type:'FORM'}})
+  assert.equal(form.code,200,c.name)
+  const delivered=h.remote.find(x=>x.operation==='orderForm').value.form
+  assert.equal(delivered.fields.length,4)
+  assert.equal(delivered.fields[2].value,c.mode==='pickup'?'Recojo en tienda': 'Delivery · Avenida Lima 123 · Lima')
+ }
+})
+test('legacy Peru nine digits gain one +51; foreign E.164 is not rewritten and unsafe formats fail',async()=>{
+ for(const [phone,expected] of [['912345678','+51912345678'],
+  ['+51912345678','+51912345678'],['+573001234567','+573001234567'],
+  ['+593987654321','+593987654321']]){
+  const h=harness()
+  const r=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),
+   payload:createBody({customer:{firstName:'Ana',lastName:'Flores',phone,mode:'pickup'}})})
+  assert.equal(r.code,201)
+  assert.equal(h.remote[0].input.customer.phone,expected)
+ }
+ for(const bad of ['573001234567','++51912345678','+5191234567 8','+0001234567','+123456','+1234567890123456']){
+  const h=harness()
+  const r=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),
+   payload:createBody({customer:{firstName:'Ana',lastName:'Flores',phone:bad,mode:'pickup'}})})
+  assert.equal(r.code,400)
+  assert.equal(h.remote.length,0)
+ }
+})
 test('replaying both steps uses one conversation ID and one deterministic message key',async()=>{
  const h=harness(),key=randomUUID()
  let id=null,messageKey=null
@@ -474,7 +523,13 @@ test('contact injection, invalid cellphone and client price fields are rejected 
   {...customer,firstName:'Ana'+String.fromCharCode(10)+'aceptado'},
   {...customer,phone:'99999'},
   {...customer,address:''},
-  {...customer,mode:'pickup'},
+  {...customer,mode:'invalid'},
+  {...customer,phone:'++51912345678'},
+  {...customer,phone:'+57300 1234567'},
+  {...customer,phone:'+0001234567'},
+  {...customer,phone:'123456789'},
+  {...customer,phone:'+123456'},
+  {...customer,phone:'+1234567890123456'},
   {...customer,reference:'A'.repeat(181)},
   {...customer,subtotal:0},
   {...customer,email:'invalid-email'},
