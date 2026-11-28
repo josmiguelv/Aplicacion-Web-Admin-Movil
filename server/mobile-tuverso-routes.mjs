@@ -4,7 +4,7 @@ import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,closeMobileInteractionCommunication,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
 import {validReceiptImageUrl} from './payment-receipt-validation.mjs'
-import {receiptCapabilityPath,receiptIdFromCapabilityUrl} from './receipt-access.mjs'
+import {receiptCapabilityPath,receiptIdFromCapabilityUrl,receiptSignature} from './receipt-access.mjs'
 import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -371,6 +371,9 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Comprobante no autorizado')
     if(!receiptCommunicationAllowed(remote.data))throw fail(409,'La interacción no permite recibir comprobantes')
     if(typeof imageBody!=='function'||typeof imageMime!=='function')throw fail(503,'Carga de comprobantes no disponible')
+    // Fail before persisting a receipt if the production signing key is absent.
+    try{receiptSignature(interactionId,receiptMasterKey())}
+    catch{throw fail(503,'Firma privada de comprobantes no configurada')}
     const bytes=await imageBody(req)
     const mime=imageMime(bytes)
     if(!mime)throw fail(415,'Solo imágenes JPEG, PNG y WebP reales')
