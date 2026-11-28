@@ -14,6 +14,7 @@ import {commercialNotificationsAdmin,publicCommercialNotifications,dispatchComme
 import {createServer} from 'node:http'
 import {attachMobileInteractionWebSocket} from './mobile-interaction-ws.mjs'
 import {createAdminLoginLimiter} from './admin-login-security.mjs'
+import {validateRequiredStoreFields} from './store-required-fields.mjs'
 import {changeOwnPassword,validatePasswordChange} from './admin-change-password.mjs'
 import {verifyReceiptCapability} from './receipt-access.mjs'
 import {serveStatic} from './safe-static.mjs'
@@ -420,6 +421,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    if(!existing.rowCount)throw bad(404,'Sede no encontrada');
    if(b.code!==undefined&&b.code!==existing.rows[0].code)throw bad(400,'El ID de la sede no se puede modificar');
   }
+  validateRequiredStoreFields(b,{creating:!b.id});
   const storeCode=b.code??('sede-'+randomUUID());
   const consultOrderAvailability=b.delivery_enabled===true||b.pickup_enabled===true;
   const validPreparation=v=>v==null||Number.isInteger(v)&&v>=1&&v<=240;

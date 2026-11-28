@@ -353,6 +353,12 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
  const saveStore=()=>void act(async()=>{
   if(!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(store.code)||store.code.length<2||store.code.length>80)
    throw new Error('Completa el ID de la sede con minúsculas, números y guiones (2 a 80 caracteres)')
+  if(!store.name.trim())throw new Error('Completa el nombre del local')
+  if(!store.address.trim())throw new Error('Completa la dirección del local')
+  if(!store.latitude.trim()||!Number.isFinite(Number(store.latitude))||Number(store.latitude)<-90||Number(store.latitude)>90)
+   throw new Error('Completa la latitud GPS con un valor válido entre -90 y 90')
+  if(!store.longitude.trim()||!Number.isFinite(Number(store.longitude))||Number(store.longitude)<-180||Number(store.longitude)>180)
+   throw new Error('Completa la longitud GPS con un valor válido entre -180 y 180')
   const saved=await api<StoreRow>(`/api/admin/tenants/${tenantId}/stores`,'POST',{
    ...store,
    openingHours:Object.keys(store.openingHours).length?store.openingHours:null,
@@ -379,15 +385,16 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
   </div>
   {hasUnsavedStoreChanges&&<p className="ops-unsaved" role="status">Tienes cambios sin guardar en esta sede.</p>}
   {storeFocus==='details'&&<section id="ops-store-details">
+   <p className="ops-hint">Los campos marcados con * son obligatorios. Puedes guardar la sede activa o inactiva según su configuración.</p>
    <div className="ops-grid">
-    <div className="ops-store-code"><label>ID de sede<input value={store.code} readOnly={!!store.id}
+    <div className="ops-store-code"><label>ID de sede *<input required value={store.code} readOnly={!!store.id}
      maxLength={80} onChange={e=>setStore({...store,code:e.target.value})}/></label>
      <button type="button" className="button button-secondary" disabled={!store.code} onClick={()=>void copyStoreCode(store.code)}><Copy size={15}/> Copiar ID</button>
     </div>
-    <label>Nombre del local<input value={store.name} onChange={e=>setStore({...store,name:e.target.value})}/></label>
-    <label>Dirección<input value={store.address} onChange={e=>setStore({...store,address:e.target.value})}/></label>
-    <label>Latitud GPS<input inputMode="decimal" value={store.latitude} onChange={e=>setStore({...store,latitude:e.target.value})}/></label>
-    <label>Longitud GPS<input inputMode="decimal" value={store.longitude} onChange={e=>setStore({...store,longitude:e.target.value})}/></label>
+    <label>Nombre del local *<input required maxLength={180} value={store.name} onChange={e=>setStore({...store,name:e.target.value})}/></label>
+    <label>Dirección *<input required maxLength={300} value={store.address} onChange={e=>setStore({...store,address:e.target.value})}/></label>
+    <label>Latitud GPS *<input required type="number" step="any" min="-90" max="90" inputMode="decimal" value={store.latitude} onChange={e=>setStore({...store,latitude:e.target.value})}/></label>
+    <label>Longitud GPS *<input required type="number" step="any" min="-180" max="180" inputMode="decimal" value={store.longitude} onChange={e=>setStore({...store,longitude:e.target.value})}/></label>
    </div>
    <div className="ops-switches">
     <label><input type="checkbox" checked={store.active} onChange={e=>setStore({...store,active:e.target.checked})}/> Local activo</label>
