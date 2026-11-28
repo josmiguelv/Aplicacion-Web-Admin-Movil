@@ -563,7 +563,19 @@ const apiServer=createServer(async(req,res)=>{const url=new URL(req.url||'/',`ht
  if(url.pathname==='/health/live'&&req.method==='GET')return json(res,200,{status:'ok'});
  if(url.pathname==='/health/ready'&&req.method==='GET'){
   let databaseReady=false;
-  try{await sql('SELECT 1');databaseReady=true}catch{}
+  try{
+   if(prod){
+    // PostgreSQL connectivity alone must not make an uninitialized Admin DB ready.
+    const check=await sql(`SELECT
+     (SELECT count(*)>=24 FROM admin_schema_migrations) AND
+     to_regclass('public.admin_users') IS NOT NULL AND
+     to_regclass('public.published_catalogs') IS NOT NULL AND
+     to_regclass('public.mobile_scheduled_orders') IS NOT NULL AND
+     to_regclass('public.mobile_order_surveys') IS NOT NULL AND
+     to_regclass('public.mobile_payment_receipt_images') IS NOT NULL AS ready`);
+    databaseReady=check.rows[0]?.ready===true
+   }else{await sql('SELECT 1');databaseReady=true}
+  }catch{}
   return json(res,databaseReady?200:503,{status:databaseReady?'ready':'unavailable'});
  }
 
