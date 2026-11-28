@@ -2,6 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {randomUUID,createHash} from 'node:crypto'
 import {createMobileTuVersoRoutes} from './mobile-tuverso-routes.mjs'
+import {receiptCapabilityPath} from './receipt-access.mjs'
+const receiptTestMasterKey=Buffer.alloc(32,9).toString('base64')
+const receiptUrl=id=>'https://admin.example.com'+receiptCapabilityPath(id,receiptTestMasterKey)
 
 const tenantA='11111111-1111-4111-8111-111111111111'
 const tenantB='22222222-2222-4222-8222-222222222222'
@@ -64,6 +67,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   json:(res,code,payload)=>{res.reply={code,payload}},
   imageBody:async req=>req.rawImage||Buffer.from('ffd8ffe0','hex'),imageMime:()=> 'image/jpeg',
   receiptBaseUrl:()=> 'https://admin.example.com',
+  receiptMasterKey:()=>receiptTestMasterKey,
   storeOpen:()=>open,checkMode:()=>enabled?'LIVE':'DISABLED',
   interactionMode:()=>requests?'LIVE':'DISABLED',rateLimit:()=>{},
   enableCommunicationClose:()=>closeEnabled,
@@ -888,7 +892,7 @@ test('payment receipt sends exactly one image FORM for an active authorized orde
  const h=harness({remoteStatus:'PENDING'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
  const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',
-  subtitle:'Comprobante de pago Yape',imageUrl:'https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999',
+  subtitle:'Comprobante de pago Yape',imageUrl:receiptUrl('99999999-9999-4999-8999-999999999999'),
   fields:[{variable:'Pedido',value:'B3-1025'},{variable:'Método',value:'Yape'}]}}
  const result=await h.call('POST','/api/v1/mobile/interactions/'+id+'/payment-receipt',{
   headers:{'x-order-access-key':access,'idempotency-key':messageKey},payload})
@@ -909,7 +913,7 @@ test('payment receipt rejects invalid image, missing idempotency and wrong acces
  const bad=await h.call('POST',path,{headers:{'x-order-access-key':access,'idempotency-key':key},payload})
  assert.equal(bad.code,400)
  assert.equal(h.remote.length,0)
- payload.form.imageUrl='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ payload.form.imageUrl=receiptUrl('99999999-9999-4999-8999-999999999999')
  const noKey=await h.call('POST',path,{headers:{'x-order-access-key':access},payload})
  assert.equal(noKey.code,400)
  const forbidden=await h.call('POST',path,{headers:{'x-order-access-key':randomUUID(),'idempotency-key':key},payload})
@@ -917,14 +921,14 @@ test('payment receipt rejects invalid image, missing idempotency and wrong acces
  assert.deepEqual(h.remote.map(x=>x.operation),['read'])
 })
 
-test('receipt upload stores image for the authorized technical PENDING order and returns a public URL',async()=>{
+test('receipt upload stores image for the authorized technical PENDING order and returns an authorized capability URL',async()=>{
  const access=randomUUID(),interactionId=randomUUID(),h=harness({remoteStatus:'PENDING'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
  const url='/api/v1/mobile/interactions/'+interactionId+'/payment-receipt/upload?appId='+appA+'&storeId='+storeA
  const result=await h.call('POST',url,{headers:{'x-order-access-key':access,'content-type':'image/jpeg'}})
  assert.equal(result.code,201)
  assert.equal(result.payload.imageId,'99999999-9999-4999-8999-999999999999')
- assert.equal(result.payload.imageUrl,'https://admin.example.com/api/v1/mobile/payment-receipts/images/'+result.payload.imageId)
+ assert.equal(result.payload.imageUrl,receiptUrl(result.payload.imageId))
  assert.deepEqual(h.remote.map(x=>x.operation),['read'])
  assert.equal(h.queries.some(x=>x.sql.startsWith('INSERT INTO mobile_payment_receipt_images')),true)
 })
@@ -940,7 +944,7 @@ test('receipt upload rejects mismatched access key before storage',async()=>{
 test('both receipt routes block rejected, expired and closed chats without storage or relay',async()=>{
  const access=randomUUID(),interactionId=randomUUID(),idempotencyKey=randomUUID()
  const reference='mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48)
- const media='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ const media=receiptUrl('99999999-9999-4999-8999-999999999999')
  for(const settings of [
   {remoteStatus:'REJECTED'},
   {remoteStatus:'EXPIRED'},
@@ -978,7 +982,7 @@ test('payment receipt accepts ten independent fields while keeping imageUrl sepa
  const h=harness({remoteStatus:'PENDING'})
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,access].join(':')).digest('hex').slice(0,48))
  const fields=Array.from({length:10},(_,i)=>({variable:'Dato '+(i+1),value:'Valor '+(i+1)}))
- const imageUrl='https://admin.example.com/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999'
+ const imageUrl=receiptUrl('99999999-9999-4999-8999-999999999999')
  const path='/api/v1/mobile/interactions/'+interactionId+'/payment-receipt'
  const payload={appId:appA,storeId:storeA,form:{title:'Validación de pago',imageUrl,fields}}
  const headers={'x-order-access-key':access,'idempotency-key':messageKey}

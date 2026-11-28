@@ -1,9 +1,9 @@
 name: Admin Railway release gate (isolated)
 on:
   push:
-    branches: [chore/railway-production-readiness-20261128]
+    branches: [chore/railway-production-readiness-20261128, fix/admin-web-security-hardening-20261128]
   pull_request:
-    branches: [feat/b3-admin-mobile-ws-event-notify-20261128]
+    branches: [feat/b3-admin-mobile-ws-event-notify-20261128, chore/railway-production-readiness-20261128]
   workflow_dispatch:
 
 jobs:
@@ -44,6 +44,8 @@ jobs:
           node scripts/railway-preflight.mjs
           node scripts/bootstrap-empty-admin-db.mjs
           node --test server/mobile-interaction-ws.test.mjs
+          node --test server/admin-web-security.test.mjs
+          node --test --test-name-pattern='receipt|payment receipt' server/mobile-tuverso-routes.test.mjs
       - name: Bootstrap isolated EMPTY PostgreSQL 17 and verify schema
         env:
           ADMIN_DATABASE_BOOTSTRAP_CONFIRM: INIT_EMPTY_ADMIN_DATABASE
@@ -67,6 +69,7 @@ jobs:
           TUVERSO_LIVE_REQUESTS_ENABLED: 'false'
           PORT: '47820'
         run: |
+          BOOTSTRAP_ADMIN_EMAIL=ci-security-admin@invalid.example BOOTSTRAP_ADMIN_PASSWORD='CI-Only-Strong-Secret-2026!' node server/bootstrap-admin.mjs
           node server/index.mjs > /tmp/admin-railway-gate.log 2>&1 &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
@@ -77,5 +80,29 @@ jobs:
           done
           if [ "$ready" -ne 1 ]; then cat /tmp/admin-railway-gate.log; exit 1; fi
           curl --fail --silent http://127.0.0.1:47820/health/live | grep -q '"status":"ok"'
+          # HTTP security wiring, no real clients or orders.
+          curl --fail --silent -D /tmp/admin-security-headers -o /tmp/admin-ui http://127.0.0.1:47820/
+          grep -qi '^content-security-policy:' /tmp/admin-security-headers
+          grep -qi '^x-frame-options: DENY' /tmp/admin-security-headers
+          grep -qi '^referrer-policy: no-referrer' /tmp/admin-security-headers
+          # Valid admin login must still work with strict, Secure session cookies.
+          curl --silent -D /tmp/admin-login-headers -o /tmp/admin-login-body \
+            -H 'Origin: https://admin.example.test' -H 'Content-Type: application/json' \
+            -d '{"email":"ci-security-admin@invalid.example","password":"CI-Only-Strong-Secret-2026!"}' \
+            http://127.0.0.1:47820/api/admin/login
+          grep -q '"role":"SUPER_ADMIN"' /tmp/admin-login-body
+          grep -Ei '^set-cookie: b3sid=.*HttpOnly; SameSite=Strict;.*Secure' /tmp/admin-login-headers >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:47820/.env)" = 403
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:47820/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999)" = 403
+          for i in $(seq 1 8); do
+            test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              -H 'Origin: https://admin.example.test' -H 'Content-Type: application/json' \
+              -d '{"email":"security@example.test","password":"incorrect-password"}' \
+              http://127.0.0.1:47820/api/admin/login)" = 401
+          done
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            -H 'Origin: https://admin.example.test' -H 'Content-Type: application/json' \
+            -d '{"email":"security@example.test","password":"incorrect-password"}' \
+            http://127.0.0.1:47820/api/admin/login)" = 429
       - name: Docker packaging
         run: docker build -t integra-admin-railway-ci .
