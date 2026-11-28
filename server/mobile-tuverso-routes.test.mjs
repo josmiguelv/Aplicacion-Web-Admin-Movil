@@ -16,7 +16,7 @@ const catalogs={
  [appB]:{tenant_id:tenantB,revision:9,payload:{stores:[{id:storeB,active:true,consultOrderAvailability:true}],products:[{id:product,name:'Pollo B',pricePen:40,active:true}]}}
 }
 function harness({capacity='AVAILABLE',scopes=['queue.availability.read','interactions.create','interactions.read','conversations.read','conversations.messages.write'],enabled=true,requests=true,open=true,count=1,
-  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,closeEnabled=false,closeFailure=false,upstream={}}={}){
+  decisionMessage='',decisionMessages=null,remoteStatus='PENDING',operationalConversationStatus=null,cancelled=false,messageFailure=false,historyFailure=false,legacyText=null,closeEnabled=false,closeFailure=false,deliveryEnabled=true,pickupEnabled=true,upstream={}}={}){
  const queries=[],remote=[]
  const createdIds=new Map()
  const terminalSessions=new Map()
@@ -37,7 +37,7 @@ function harness({capacity='AVAILABLE',scopes=['queue.availability.read','intera
   }
   if(sql.includes('FROM stores s JOIN tenants t')){
    const matches=(args[0]===tenantA&&args[1]===storeA)||(args[0]===tenantB&&args[1]===storeB)
-   return {rowCount:matches?1:0,rows:matches?[{active:true,delivery_enabled:true,opening_hours:{},time_zone:'America/Lima'}]:[]}
+   return {rowCount:matches?1:0,rows:matches?[{active:true,delivery_enabled:deliveryEnabled,pickup_enabled:pickupEnabled,opening_hours:{},time_zone:'America/Lima'}]:[]}
   }
   if(sql.includes('FROM integration_bindings b')){
    return {rowCount:count,rows:count?[{integration_id:integration,encrypted_credential:'ciphertext',expires_at:null,suspended:false,scopes,channel_type:'MOBILE_APP',binding_id:bindingId,external_location_id:args[2]===storeA?'location-a':'location-b',purpose:'ORDER_REQUEST'}]:[]}
@@ -275,6 +275,15 @@ test('four requested modalities create scoped mobile identity in E.164, unverifi
   assert.equal(delivered.fields.length,4)
   assert.equal(delivered.fields[2].value,c.mode==='pickup'?'Recojo en tienda': 'Delivery · Avenida Lima 123 · Lima')
  }
+})
+test('Pickup-only published store can create a phone-identified interaction without delivery',async()=>{
+ const h=harness({deliveryEnabled:false,pickupEnabled:true})
+ const response=await h.call('POST','/api/v1/mobile/interactions',{headers:headers(),
+  payload:createBody({customer:{firstName:'Cliente',lastName:'Recojo',
+   phone:'+573001234567',mode:'pickup'}})})
+ assert.equal(response.code,201)
+ assert.equal(h.remote[0].input.customer.phone,'+573001234567')
+ assert.equal(h.remote[0].binding.external_location_id,'location-a')
 })
 test('legacy Peru nine digits gain one +51; foreign E.164 is not rewritten and unsafe formats fail',async()=>{
  for(const [phone,expected] of [['912345678','+51912345678'],
