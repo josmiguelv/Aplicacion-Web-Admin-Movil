@@ -241,7 +241,7 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
    const q=quoteInput(await body(req)),ctx=await catalog(q.appId);
    const sel=await selection(ctx,q);
    return json(res,200,{...sel,revision:ctx.revision,agentAvailable:true,
-    capacityAvailable:true,provisional:true,acceptingRequests:true},true);
+    capacityAvailable:true,provisional:true},true);
   }
   if(url.pathname==='/api/v1/mobile/reservations'){
    if(req.method!=='POST')throw fail(405,'Método no permitido');
