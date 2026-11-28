@@ -2,6 +2,8 @@ name: Admin Railway release gate (isolated)
 on:
   push:
     branches: [chore/railway-production-readiness-20261128]
+  pull_request:
+    branches: [feat/b3-admin-mobile-ws-event-notify-20261128]
   workflow_dispatch:
 
 jobs:
