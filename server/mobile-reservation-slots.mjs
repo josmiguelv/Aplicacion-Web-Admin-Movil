@@ -84,6 +84,6 @@ export function createMobileReservationSlotsRoute({pool,json,storeHours,now=()=>
   return json(res,200,{storeId,appId,revision:published.revision,date,mode,
    timeZone:'America/Lima',enabled:calculated.enabled,
    slots:calculated.slots,capacityVerified:false,agentAvailable:null,
-   acceptingRequests:false,notice:'Horarios preliminares. Aún no se pueden confirmar reservas.'},true);
+   notice:'Horarios preliminares; la disponibilidad y confirmación se verifican por separado.'},true);
  }
 }
