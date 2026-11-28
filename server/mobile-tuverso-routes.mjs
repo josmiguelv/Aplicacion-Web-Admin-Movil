@@ -4,6 +4,7 @@ import {checkAvailability,connectionMode} from './tuverso-client.mjs'
 import {createMobileInteraction,readMobileInteraction,readMobileInteractionMessages,sendMobileInteractionMessage,closeMobileInteractionCommunication,mobileInteractionMode} from './tuverso-mobile-connector.mjs'
 import {calculateOrderCart} from './mobile-order-availability.mjs'
 import {validReceiptImageUrl} from './payment-receipt-validation.mjs'
+import {receiptCapabilityPath,receiptIdFromCapabilityUrl} from './receipt-access.mjs'
 import {bindPersonalDevice,beginCheckoutPayment,readCheckoutPayment,closeCheckoutPayment,checkoutSessionState} from './mobile-checkout-followups.mjs'
 
 const VALID_UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -165,6 +166,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  enableCommunicationClose=()=>process.env.TUVERSO_MOBILE_COMM_CLOSE_ENABLED==='true',
  decrypt=decryptCredential,
  imageBody=null,imageMime=null,receiptBaseUrl=()=>process.env.PUBLIC_API_BASE_URL,
+ receiptMasterKey=()=>process.env.INTEGRATION_MASTER_KEY,
  checkMode=connectionMode,interactionMode=mobileInteractionMode,rateLimit=throttled}){
  async function context(appId,storeId,requireOpen=true){
   const result=await pool.query(`SELECT p.tenant_id,p.revision,p.payload
@@ -380,7 +382,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
      await client.query('INSERT INTO mobile_payment_receipt_images(image_id,tenant_id,app_id,store_id,interaction_id) VALUES($1,$2,$3,$4,$5)',
       [imageId,ctx.tenantId,appId,storeId,interactionId])
      await client.query('COMMIT')
-     return json(res,201,{imageUrl:publicBase+'/api/v1/mobile/payment-receipts/images/'+imageId,imageId,mime})
+     return json(res,201,{imageUrl:publicBase+receiptCapabilityPath(imageId,receiptMasterKey()),imageId,mime})
     }catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
    }
    if(messageMatch||receiptMatch){
@@ -435,13 +437,12 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
       if(!validReceiptImageUrl(base.origin+'/check')||base.pathname!=='/'||base.search||base.hash)throw Error('BAD_BASE')
       expectedOrigin=base.origin
      }catch{throw fail(503,'Configura PUBLIC_API_BASE_URL con la URL HTTPS pública del Administrador')}
-     const expectedPrefix=expectedOrigin+'/api/v1/mobile/payment-receipts/images/'
      const imageUrl=input.form.imageUrl
-     if(!imageUrl.startsWith(expectedPrefix)||!VALID_UUID.test(imageUrl.slice(expectedPrefix.length)))
-      throw fail(400,'El comprobante debe utilizar la URL generada por el Administrador')
+     const receiptImageId=receiptIdFromCapabilityUrl(imageUrl,expectedOrigin,receiptMasterKey())
+     if(!receiptImageId)throw fail(400,'El comprobante debe utilizar la URL autorizada por el Administrador')
      const stored=await pool.query(`SELECT 1 FROM mobile_payment_receipt_images
       WHERE image_id=$1 AND tenant_id=$2 AND app_id=$3 AND store_id=$4 AND interaction_id=$5`,
-      [imageUrl.slice(expectedPrefix.length),ctx.tenantId,input.appId,input.storeId,interactionId])
+      [receiptImageId,ctx.tenantId,input.appId,input.storeId,interactionId])
      if(stored.rowCount!==1)throw fail(403,'Comprobante no asociado a este pedido')
     }
     let text,form,legacyText
