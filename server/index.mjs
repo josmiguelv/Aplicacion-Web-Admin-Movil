@@ -14,6 +14,7 @@ import {commercialNotificationsAdmin,publicCommercialNotifications,dispatchComme
 import {createServer} from 'node:http'
 import {attachMobileInteractionWebSocket} from './mobile-interaction-ws.mjs'
 import {createAdminLoginLimiter} from './admin-login-security.mjs'
+import {changeOwnPassword,validatePasswordChange} from './admin-change-password.mjs'
 import {verifyReceiptCapability} from './receipt-access.mjs'
 import {serveStatic} from './safe-static.mjs'
 import {applySecurityHeaders} from './web-security-headers.mjs'
@@ -23,6 +24,7 @@ import pg from 'pg'
 
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL, max:10})
 const adminLoginLimiter=createAdminLoginLimiter()
+const passwordChangeLimiter=createAdminLoginLimiter({accountLimit:8,networkLimit:250})
 const port=Number(process.env.PORT||4000)
 const prod=process.env.NODE_ENV==='production'
 if(prod){
@@ -305,6 +307,22 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
    return await adminReservationsRoutes({req,res,url,user})
   if(await adminApiKeyRoutes({req,res,url,user,pool,body,json,tenantOf}))return
  if(await integrationRoutes({req,res,url,user,pool,body,json,tenantOf}))return
+ if(url.pathname==='/api/admin/change-password'){
+  if(req.method!=='POST')throw bad(405,'Método no permitido')
+  const network=req.socket?.remoteAddress||'unknown'
+  if(!passwordChangeLimiter.allowed(user.id,network))throw bad(429,'Demasiados intentos. Vuelve a intentarlo más tarde')
+  const payload=await body(req)
+  const input=validatePasswordChange(payload)
+  try{
+   const result=await changeOwnPassword({pool,userId:user.id,input})
+   passwordChangeLimiter.succeeded(user.id)
+   res.setHeader('Set-Cookie',`b3sid=; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`)
+   return json(res,200,result)
+  }catch(error){
+   if(error.code===403)passwordChangeLimiter.failed(user.id,network)
+   throw error
+  }
+ }
  if(url.pathname==='/api/admin/me'&&req.method==='GET')return json(res,200,{role:user.role,tenantId:user.tenant_id});
  if(url.pathname==='/api/admin/logout'&&req.method==='POST'){await sql('DELETE FROM admin_sessions WHERE token_hash=$1',[digest(cookie(req))]);res.setHeader('Set-Cookie',`b3sid=; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`);return json(res,200,{ok:true})}
  if(url.pathname==='/api/admin/tenants'&&req.method==='GET'){if(user.role!=='SUPER_ADMIN')throw bad(403,'Acceso restringido');const x=await sql('SELECT id,name,active FROM tenants ORDER BY created_at');return json(res,200,{tenants:x.rows})}

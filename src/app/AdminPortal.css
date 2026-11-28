@@ -227,3 +227,14 @@
 .ops-record-row strong{font-size:13px;color:#263b4a}
 .ops-record-row>span:not(.ops-state){font-size:13px;color:#50616f}
 @media(max-width:650px){.ops-record-row{align-items:flex-start}}
+
+/* Mi cuenta: password change remains compact and responsive for all roles. */
+.portal-account{max-width:760px}
+.portal-account-panel{max-width:650px}
+.portal-account-form{max-width:440px;margin-top:20px}
+.portal-account-form label{display:grid;gap:7px;font-size:12px;font-weight:650;color:#303f4b}
+.portal-account-form input{width:100%;min-height:44px;border:1px solid #cbd4dd;border-radius:7px;background:#fff;padding:9px 11px;color:#23313e;font-size:14px}
+.portal-password-guidance{margin:0;line-height:1.5}
+.portal-account-panel>.portal-password-guidance{margin-top:18px}
+.portal-account-submit{display:inline-flex;align-items:center;justify-content:center;gap:9px;max-width:100%;width:fit-content}
+@media(max-width:700px){.portal-account-form{max-width:none}.portal-account-submit{width:100%}.portal-header-right{gap:8px}.portal-header-right .portal-link{font-size:12px}}
