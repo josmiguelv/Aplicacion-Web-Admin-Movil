@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto'
 // Per-account + per-network caps, tracking FAILED attempts only.
 // No database migrations, third-party dependencies, or interference with
 // logged-in sessions. A single-server Railway deployment is the target.
-export function createAdminLoginLimiter({windowMs=15*60_000,accountLimit=8,networkLimit=40,
+export function createAdminLoginLimiter({windowMs=15*60_000,accountLimit=8,networkLimit=250,
  now=()=>Date.now(),maxEntries=10000}={}){
  const account=new Map(),network=new Map()
  const hash=s=>createHash('sha256').update(s).digest('hex')
