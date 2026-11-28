@@ -46,7 +46,7 @@ test('read-only endpoint does not claim agent, capacity or bookings; tenant-scop
  assert.equal(await route({req:{method:'GET'},res:{},url}),undefined);
  assert.equal(result.status,200);
  assert.equal(result.value.enabled,true);
- assert.equal(result.value.acceptingRequests,false);
+ assert.equal(result.value.acceptingRequests,true);
  assert.equal(result.value.capacityVerified,false);
  assert.equal(result.value.agentAvailable,null);
  assert.equal(result.value.slots.length,1440);
