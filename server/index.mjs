@@ -15,6 +15,7 @@ import {createServer} from 'node:http'
 import {attachMobileInteractionWebSocket} from './mobile-interaction-ws.mjs'
 import {createAdminLoginLimiter} from './admin-login-security.mjs'
 import {validateRequiredStoreFields} from './store-required-fields.mjs'
+import {validateRequiredProductFields} from './product-required-fields.mjs'
 import {changeOwnPassword,validatePasswordChange} from './admin-change-password.mjs'
 import {verifyReceiptCapability} from './receipt-access.mjs'
 import {serveStatic} from './safe-static.mjs'
@@ -469,6 +470,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
       SELECT $1,$2,unnest($3::uuid[])`,[tenantId,result.rows[0].id,storeIds]);
   }
  }else if(resource==='products'){
+  validateRequiredProductFields(b);
   if(!word(b.name,180)||!safeNumber(b.pricePen)||b.pricePen<0||!bool(b.active)||b.imageUrl&&(!/^https:\/\//.test(b.imageUrl)&&!/^\/api\/v1\/mobile\/images\/[0-9a-f-]{36}$/.test(b.imageUrl)||b.imageUrl.length>1024))throw bad(400,'Producto inválido');const args=[tenantId,b.name,b.description||'',b.category||'',b.pricePen,b.imageUrl||null,b.active];
   result=b.id&&uuid(b.id)?await client.query(`UPDATE products SET name=$2,description=$3,category=$4,price_pen=$5,image_url=$6,active=$7,updated_at=now() WHERE tenant_id=$1 AND id=$8 RETURNING *`,[...args,b.id]):await client.query(`INSERT INTO products(tenant_id,name,description,category,price_pen,image_url,active) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,args)
  }else if(resource==='promotions'){
