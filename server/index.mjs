@@ -13,12 +13,17 @@ import {publicPaymentOptions} from './payment-public-options.mjs'
 import {commercialNotificationsAdmin,publicCommercialNotifications,dispatchCommercialNotifications} from './company-mobile-notifications.mjs'
 import {createServer} from 'node:http'
 import {attachMobileInteractionWebSocket} from './mobile-interaction-ws.mjs'
+import {createAdminLoginLimiter} from './admin-login-security.mjs'
+import {receiptIdFromCapabilityUrl,verifyReceiptCapability} from './receipt-access.mjs'
+import {serveStatic} from './safe-static.mjs'
+import {applySecurityHeaders} from './web-security-headers.mjs'
 import {readFile,stat} from 'node:fs/promises'
 import {join,normalize,extname} from 'node:path'
 import {randomBytes,scryptSync,timingSafeEqual,createHash,randomUUID} from 'node:crypto'
 import pg from 'pg'
 
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL, max:10})
+const adminLoginLimiter=createAdminLoginLimiter()
 const port=Number(process.env.PORT||4000)
 const prod=process.env.NODE_ENV==='production'
 if(prod){
@@ -256,7 +261,7 @@ async function quote(req,res){
   notice:'Tarifa provisional calculada en línea recta, no distancia por carretera. Importes sujetos a confirmación.'},true)
 }
 async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/admin/login'){
- if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok)throw bad(401,'Credenciales inválidas');const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
+ if(!sameOrigin(req))throw bad(403,'Origen no autorizado');const b=await body(req);if(!word(b.email,254)||!word(b.password,512))throw bad(400,'Credenciales inválidas');const loginNetwork=req.socket?.remoteAddress||'unknown';if(!adminLoginLimiter.allowed(b.email,loginNetwork))throw bad(429,'Demasiados intentos de acceso; vuelve a intentarlo más tarde');const q=await sql('SELECT * FROM admin_users WHERE email=lower($1) AND active=true',[b.email]);const user=q.rows[0];let ok=false;if(user&&typeof user.password_hash==='string'){const parts=user.password_hash.split(':');if(parts.length===3&&parts[0]==='scrypt'){const provided=scryptSync(b.password,parts[1],64),stored=Buffer.from(parts[2],'hex');ok=stored.length===provided.length&&timingSafeEqual(provided,stored)}}if(!ok){adminLoginLimiter.failed(b.email,loginNetwork);throw bad(401,'Credenciales inválidas')}adminLoginLimiter.succeeded(b.email);const token=randomBytes(32).toString('hex');await sql(`INSERT INTO admin_sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval '12 hours')`,[user.id,digest(token)]);res.setHeader('Set-Cookie',`b3sid=${token}; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=43200${secure?'; Secure':''}`);return json(res,200,{id:user.id,role:user.role,tenantId:user.tenant_id})}
  const user=await session(req);if(req.method!=='GET'&&!sameOrigin(req))throw bad(403,'Origen no autorizado');
  if(url.pathname==='/api/admin/mobile/surveys/summary'){
   if(req.method!=='GET')throw bad(405,'Método no permitido');
@@ -538,7 +543,7 @@ async function admin(req,res,url){if(req.method==='POST'&&url.pathname==='/api/a
  if(!result.rowCount&&resource!=='publish')throw bad(404,'Registro no encontrado');await client.query('INSERT INTO admin_audit(tenant_id,actor_user_id,action,target_id) VALUES($1,$2,$3,$4)',[tenantId,user.id,resource.toUpperCase()+'_WRITE',result.rows[0]?.id||b.appId||null]);await client.query('COMMIT');return json(res,200,result.rows[0]);
  }catch(err){await client.query('ROLLBACK');throw err}finally{client.release()}
 }
-async function serve(res,path){const base=join(process.cwd(),'dist');const target=normalize(join(base,path==='/'?'index.html':path));if(!target.startsWith(base+'/')&&target!==base)throw bad(403,'Ruta inválida');let content;try{content=await readFile(target)}catch{content=await readFile(join(base,'index.html'))}const type=({'.html':'text/html','.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'})[extname(target)]||'application/octet-stream';res.writeHead(200,{'Content-Type':type,'X-Content-Type-Options':'nosniff'});res.end(content)}
+async function serve(res,path){return serveStatic(res,path,join(process.cwd(),'dist'))}
 // Marketing push is OFF by default. Enable only with real FCM credentials,
 // app subscription consent and migration 016 installed in this Administrator DB.
 if(process.env.B3_MARKETING_PUSH_ENABLED==='true'){
@@ -559,7 +564,7 @@ if(process.env.B3_CHECKOUT_WORKER_ENABLED==='true'){
  const worker=setInterval(()=>{void tick()},30000)
  worker.unref?.();void tick()
 }
-const apiServer=createServer(async(req,res)=>{const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);try{
+const apiServer=createServer(async(req,res)=>{applySecurityHeaders(res,{production:prod});const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);try{
  if(url.pathname==='/health/live'&&req.method==='GET')return json(res,200,{status:'ok'});
  if(url.pathname==='/health/ready'&&req.method==='GET'){
   let databaseReady=false;
@@ -601,6 +606,9 @@ const apiServer=createServer(async(req,res)=>{const url=new URL(req.url||'/',`ht
  const receiptMedia=url.pathname.match(/^\/api\/v1\/mobile\/payment-receipts\/images\/([0-9a-f-]{36})$/i)
  if(receiptMedia){
   if(req.method!=='GET')throw bad(405,'Método no permitido')
+  if([...url.searchParams.keys()].length!==1||
+     !verifyReceiptCapability(receiptMedia[1],url.searchParams.get('s'),process.env.INTEGRATION_MASTER_KEY))
+    throw bad(403,'Comprobante no autorizado')
   const found=await sql(`SELECT i.mime,i.content FROM mobile_payment_receipt_images r
    JOIN product_images i ON i.id=r.image_id AND i.tenant_id=r.tenant_id
    JOIN tenants t ON t.id=r.tenant_id AND t.active=true
