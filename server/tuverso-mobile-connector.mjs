@@ -33,7 +33,7 @@ const normalizeBinding=b=>{
 function validCustomer(c){
  return c&&typeof c==='object'&&!Array.isArray(c)&&
   Object.keys(c).every(k=>['firstName','lastName','phone','email','phoneVerified','emailVerified'].includes(k))&&
-  field(c.firstName,60)&&field(c.lastName,60)&&/^\+519\d{8}$/.test(c.phone)&&
+  field(c.firstName,60)&&field(c.lastName,60)&&/^\+[1-9][0-9]{6,14}$/.test(c.phone)&&
   (c.email===undefined||(typeof c.email==='string'&&c.email.length<=254&&
    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)))&&
   c.phoneVerified===false&&c.emailVerified===false
