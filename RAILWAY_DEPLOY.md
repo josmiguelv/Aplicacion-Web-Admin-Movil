@@ -44,7 +44,7 @@ No trasladar `.env` local directamente: puede contener URL localhost, claves de 
 
 `server/schema.sql` es un **baseline histórico**, mientras `server/migrations/001-...024-...` incorpora ALTER/constraints y tablas posteriores. El baseline no incluye, por ejemplo, `mobile_order_surveys` (migración 023). **No es suficiente aplicar solo schema.sql.** Tampoco asumir que se pueden ejecutar todas las migraciones a ciegas sobre el baseline (algunas definiciones pueden estar ya incluidas).
 
-**NO-GO hasta definir y ensayar el procedimiento de inicialización exacto** sobre PostgreSQL 17 desechable, inspeccionando las dependencias/constraints y comprobando idempotencia y tablas que usa la versión consolidada. No aplicar SQL en TU VERSO. Mantener un inventario/ledger verificable de SQL aplicado y nunca repetir a ciegas los ALTER. La aplicación no debería publicarse a clientes si una tabla requerida falta aunque `/health/ready` devuelva 200.
+**Existe un inicializador de base vacía en `scripts/bootstrap-empty-admin-db.mjs`**: verifica PostgreSQL 17, exige cero tablas existentes, ejecuta `schema.sql` y las 23 migraciones históricas en una sola transacción con bloqueo advisory, graba hashes en `admin_schema_migrations` y valida estructuras obligatorias. En modo normal solo revisa archivos sin tocar bases. **Su ejecución real sobre PostgreSQL 17 sigue pendiente de certificación CI**. No aplicar SQL en TU VERSO. La aplicación no debe publicarse si falta alguna tabla aunque `/health/ready` devuelva 200.
 
 Crear superadministrador una vez con `node server/bootstrap-admin.mjs` o `pnpm bootstrap:admin`, en ejecución aislada y con `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` efímeras. El bootstrap usa `ON CONFLICT DO NOTHING` y nunca reescribe la contraseña de una cuenta existente.
 
@@ -65,3 +65,31 @@ Crear superadministrador una vez con `node server/bootstrap-admin.mjs` o `pnpm b
 - WebSocket usa un cursor en memoria por integración; reinicios y múltiples réplicas requieren reconciliación REST. Por ahora una réplica; no prometer latencia de 1 segundo.
 - Cualquier despliegue del servicio, creación de BD o cambio de DNS/variables de producción requiere aprobación separada.
 - No crear dependencias nuevas, colas, Redis ni funcionalidades comerciales durante la preparación.
+
+## Inicialización PostgreSQL 17 aislada y prueba CI focalizada
+
+La rama corrige el SQL base que contenía definiciones duplicadas, un bloque de restricciones de pagos malformado y cierres SQL sobrantes. Se conserva únicamente la primera definición completa de cada tabla; las migraciones siguen en archivos históricos y no se editan.
+
+Comprobación local **sin conexión ni cambios SQL**:
+
+```powershell
+node scripts/bootstrap-empty-admin-db.mjs
+node scripts/railway-preflight.mjs
+```
+
+Aplicación **solo a una nueva base de pruebas Administrador, sin tablas** (no TU VERSO, nunca una BD con datos):
+
+```powershell
+$env:DATABASE_URL = '<CONEXION_POSTGRESQL17_DE_PRUEBAS_ADMIN>'
+$env:ADMIN_DATABASE_BOOTSTRAP_CONFIRM = 'INIT_EMPTY_ADMIN_DATABASE'
+node scripts/bootstrap-empty-admin-db.mjs --apply-empty
+Remove-Item Env:ADMIN_DATABASE_BOOTSTRAP_CONFIRM
+```
+
+Si falta una tabla, hay SQL inválido o la BD tiene datos, el inicializador falla y revierte la transacción. Registro esperado: **1 baseline + 23 migraciones = 24**. No se ejecuta desde el arranque del servicio.
+
+Workflow `.github/workflows/admin-railway-release-gate.yml`: instancia PostgreSQL 17 efímera con datos ficticios, verifica el bootstrap, bloquea una segunda inicialización, comprueba WebSocket, compila React y construye Docker. **No se considera certificado hasta obtener un workflow PASS**.
+
+## Consolidación de código verificada
+
+La comparación GitHub entre `fix/b3-mobile-flow-finished-close-20261127` y `feat/b3-admin-mobile-ws-event-notify-20261128` confirma **ahead 14, behind 0**: el WebSocket desciende del arreglo de cierre de pedidos. Respecto de `fix/b3-reservations-public-contract-flow-finished-20261127`, **ahead 7, behind 0**. Por tanto, esas dos correcciones no requieren una fusión adicional. Otros cambios divergentes no se absorben sin revisión.
