@@ -10,7 +10,8 @@ const valid={enabled:true,preparationMinutes:40};
 test('reservation defaults remain disabled until configured',()=>{
  assert.deepEqual(mapReservationSettings(null),DEFAULT_RESERVATION_SETTINGS);
  assert.equal(publishedReservationSettings(null).acceptingRequests,false);
- assert.equal(publishedReservationSettings({enabled:true,preparation_minutes:30}).acceptingRequests,false);
+ assert.equal(publishedReservationSettings({enabled:true,preparation_minutes:30}).acceptingRequests,true);
+ assert.equal(publishedReservationSettings({enabled:false,preparation_minutes:30}).acceptingRequests,false);
 });
 test('enabled reservations require only a valid preparation time',()=>{
  assert.deepEqual(normalizeReservationSettings(valid),valid);
