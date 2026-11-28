@@ -144,22 +144,24 @@ CREATE TABLE IF NOT EXISTS payment_methods (
   method TEXT NOT NULL CHECK(method IN ('yape','plin','card','cash')),
   enabled BOOLEAN NOT NULL DEFAULT false,
   image_url TEXT,
-  CONSTRAINT payment_methods_image_guard CHECK (method='cash' AND image_url IS NULL OR method<>'cash' AND (image_url IS NULL OR image_url ~ '^/api/v1/mobile/images/[0-9a-f-]{36}
-  PRIMARY KEY (tenant_id,store_id,mode,method),
-  FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
-);
-)),
+  CONSTRAINT payment_methods_image_guard CHECK (
+    (method='cash' AND image_url IS NULL) OR
+    (method<>'cash' AND (image_url IS NULL OR image_url ~ '^/api/v1/mobile/images/[0-9a-f-]{36}$'))
+  ),
   PRIMARY KEY (tenant_id,store_id,mode,method),
   FOREIGN KEY(store_id,tenant_id) REFERENCES stores(id,tenant_id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS company_payment_images (
- tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
- method TEXT NOT NULL CHECK(method IN ('yape','plin','card')),
- image_url TEXT,
- updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- PRIMARY KEY(tenant_id,method),
- CONSTRAINT company_payment_images_url_check CHECK (
-  image_url IS NULL OR image_url ~ '^/api/v1/mobile/images/[0-9a-f-]{36}
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  method TEXT NOT NULL CHECK(method IN ('yape','plin','card')),
+  image_url TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY(tenant_id,method),
+  CONSTRAINT company_payment_images_url_check CHECK (
+    image_url IS NULL OR image_url ~ '^/api/v1/mobile/images/[0-9a-f-]{36}$'
+  )
+);
+CREATE TABLE IF NOT EXISTS published_catalogs (
   app_id TEXT PRIMARY KEY REFERENCES mobile_apps(app_id),
   tenant_id UUID NOT NULL REFERENCES tenants(id),
   revision INT NOT NULL,
