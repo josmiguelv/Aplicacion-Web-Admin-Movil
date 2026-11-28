@@ -69,6 +69,7 @@ jobs:
           TUVERSO_LIVE_REQUESTS_ENABLED: 'false'
           PORT: '47820'
         run: |
+          BOOTSTRAP_ADMIN_EMAIL=ci-security-admin@invalid.example BOOTSTRAP_ADMIN_PASSWORD='CI-Only-Strong-Secret-2026!' node server/bootstrap-admin.mjs
           node server/index.mjs > /tmp/admin-railway-gate.log 2>&1 &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
@@ -84,6 +85,13 @@ jobs:
           grep -qi '^content-security-policy:' /tmp/admin-security-headers
           grep -qi '^x-frame-options: DENY' /tmp/admin-security-headers
           grep -qi '^referrer-policy: no-referrer' /tmp/admin-security-headers
+          # Valid admin login must still work with strict, Secure session cookies.
+          curl --silent -D /tmp/admin-login-headers -o /tmp/admin-login-body \
+            -H 'Origin: https://admin.example.test' -H 'Content-Type: application/json' \
+            -d '{"email":"ci-security-admin@invalid.example","password":"CI-Only-Strong-Secret-2026!"}' \
+            http://127.0.0.1:47820/api/admin/login
+          grep -q '"role":"SUPER_ADMIN"' /tmp/admin-login-body
+          grep -Ei '^set-cookie: b3sid=.*HttpOnly; SameSite=Strict;.*Secure' /tmp/admin-login-headers >/dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:47820/.env)" = 403
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:47820/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999)" = 403
           for i in $(seq 1 8); do
