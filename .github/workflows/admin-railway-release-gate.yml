@@ -57,5 +57,25 @@ jobs:
           fi
       - name: Frontend/API production build
         run: pnpm build
+      - name: Production readiness serves HTTP 200 only with initialized Admin schema
+        env:
+          NODE_ENV: production
+          ADMIN_ORIGIN: https://admin.example.test
+          COOKIE_SECURE: 'true'
+          B3_MOBILE_WS_ENABLED: 'false'
+          TUVERSO_LIVE_CHECKS_ENABLED: 'false'
+          TUVERSO_LIVE_REQUESTS_ENABLED: 'false'
+          PORT: '47820'
+        run: |
+          node server/index.mjs > /tmp/admin-railway-gate.log 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:47820/health/ready | grep -q '"status":"ready"'; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then cat /tmp/admin-railway-gate.log; exit 1; fi
+          curl --fail --silent http://127.0.0.1:47820/health/live | grep -q '"status":"ok"'
       - name: Docker packaging
         run: docker build -t integra-admin-railway-ci .
