@@ -1,7 +1,7 @@
 name: Admin Railway release gate (isolated)
 on:
   push:
-    branches: [chore/railway-production-readiness-20261128, fix/admin-web-security-hardening-20261128, deploy/integrador-railway-20261128, feat/integrador-self-service-password-20261128]
+    branches: [chore/railway-production-readiness-20261128, fix/admin-web-security-hardening-20261128, deploy/integrador-railway-20261128, feat/integrador-self-service-password-20261128, fix/integrador-required-store-fields-20261128]
   pull_request:
     branches: [feat/b3-admin-mobile-ws-event-notify-20261128, chore/railway-production-readiness-20261128, fix/admin-web-security-hardening-20261128, deploy/integrador-railway-20261128]
   workflow_dispatch:
@@ -46,6 +46,7 @@ jobs:
           node --test server/mobile-interaction-ws.test.mjs
           node --test server/admin-web-security.test.mjs
           node --test server/admin-change-password.test.mjs
+          node --test server/store-required-fields.test.mjs
           node --test --test-name-pattern='receipt|payment receipt' server/mobile-tuverso-routes.test.mjs
       - name: Bootstrap isolated EMPTY PostgreSQL 17 and verify schema
         env:
