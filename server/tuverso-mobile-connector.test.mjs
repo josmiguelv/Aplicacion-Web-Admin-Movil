@@ -100,6 +100,23 @@ test('S2S create forwards valid structured customer to TU VERSO without adding s
    customer:{...customer,phoneVerified:true}}))
   await assert.rejects(()=>createMobileInteraction(token,binding,{...input,
    customer:{...customer,phone:'912345678'}}))
+  for(const international of ['+573001234567','+593987654321','+51987654321']){
+   await withFetch(async(url,options)=>{
+    const body=JSON.parse(options.body)
+    assert.equal(body.customer.phone,international)
+    assert.equal(body.customer.phoneVerified,false)
+    assert.equal(body.customer.emailVerified,false)
+    assert.equal(body.customerExternalId,input.customerExternalId)
+    assert.equal(options.headers['Idempotency-Key'],input.idempotencyKey)
+    return ok(remote)
+   },async()=>{assert.equal((await createMobileInteraction(token,binding,{...input,
+    customer:{...customer,phone:international}})).ok,true)})
+  }
+  for(const malformed of ['++51912345678','+57300 1234567','+0001234567',
+   '+123456','+1234567890123456','573001234567']){
+   await assert.rejects(()=>createMobileInteraction(token,binding,{...input,
+    customer:{...customer,phone:malformed}}))
+  }
  }finally{
   for(const [key,name] of [['mode','NODE_ENV'],['enabled','TUVERSO_LIVE_REQUESTS_ENABLED'],
    ['target','TUVERSO_INTERACTIONS_TEST_URL']]){
