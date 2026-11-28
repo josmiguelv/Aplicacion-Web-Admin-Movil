@@ -111,7 +111,7 @@ async function publish(tx,tenantId,appId){const [stores,products,promos,payments
 async function publicConfig(req,res,url){if(req.method!=='GET')throw bad(405,'Método no permitido');const appId=url.searchParams.get('appId');if(!word(appId,150))throw bad(400,'appId obligatorio');const q=await sql(`SELECT p.payload,p.revision FROM published_catalogs p JOIN mobile_apps a ON a.app_id=p.app_id AND a.tenant_id=p.tenant_id JOIN tenants t ON t.id=p.tenant_id WHERE p.app_id=$1 AND a.enabled=true AND t.active=true`,[appId]);if(!q.rowCount)return json(res,200,{ready:false,revision:0,stores:[],products:[],promotions:[],vacancies:[],notifications:[]},true);const commercial=await publicCommercialNotifications(pool,appId).catch(error=>{if(error.code==='42P01')return {items:[]};throw error});return json(res,200,{ready:true,revision:q.rows[0].revision,notifications:commercial.items,...q.rows[0].payload,timeZone:DEFAULT_TENANT_TZ,promotions:(q.rows[0].payload.promotions||[]).filter(p=>promotionVisible(p,DEFAULT_TENANT_TZ)),stores:(q.rows[0].payload.stores||[]).map(s=>({
  ...withLiveHours(s,DEFAULT_TENANT_TZ),
  reservationSettings:{...(s.reservationSettings||{}),
-  acceptingRequests:process.env.B3_RESERVATIONS_LIVE_ENABLED==='true'&&s.reservationSettings?.enabled===true}
+  acceptingRequests:s.reservationSettings?.enabled===true}
 }))},true)}
 
 const routesApiKey=process.env.GOOGLE_ROUTES_API_KEY||'';
