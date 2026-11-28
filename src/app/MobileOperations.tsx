@@ -573,9 +573,9 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
       onClick={()=>{setProductEditorOpen(false);setProduct(blankProduct())}}>Volver al catálogo</button>
     </div>
     <div className="ops-grid">
-     <label>Nombre<input maxLength={180} value={product.name} onChange={e=>setProduct({...product,name:e.target.value})}/></label>
-     <label>Categoría<input value={product.category} onChange={e=>setProduct({...product,category:e.target.value})}/></label>
-     <label>Precio S/<input type="number" step="0.01" min="0" value={product.pricePen}
+     <label>Nombre *<input required maxLength={180} value={product.name} onChange={e=>setProduct({...product,name:e.target.value})}/></label>
+     <label>Categoría *<input required maxLength={150} value={product.category} onChange={e=>setProduct({...product,category:e.target.value})}/></label>
+     <label>Precio S/ *<input required type="number" step="0.01" min="0.01" value={product.pricePen}
       onChange={e=>setProduct({...product,pricePen:e.target.value})}/></label>
      <label>Descripción<textarea rows={3} value={product.description}
       onChange={e=>setProduct({...product,description:e.target.value})}/></label>
@@ -600,9 +600,13 @@ export default function MobileOperations({ embeddedSession, scopedTenantId }: { 
     <label className="ops-check"><input type="checkbox" checked={product.active}
      onChange={e=>setProduct({...product,active:e.target.checked})}/>Producto disponible</label>
     <div className="ops-inline">
-     <button type="button" className="button button-primary" disabled={loading||!product.name.trim()||
-      product.pricePen===''||!Number.isFinite(Number(product.pricePen))||Number(product.pricePen)<0}
+     <button type="button" className="button button-primary" disabled={loading||!product.name.trim()||!product.category.trim()||
+      product.pricePen.trim()===''||!Number.isFinite(Number(product.pricePen))||Number(product.pricePen)<=0}
       onClick={()=>void act(async()=>{
+       if(!product.name.trim())throw new Error('Completa el nombre del producto')
+       if(!product.category.trim())throw new Error('Completa la categoría del producto')
+       if(product.pricePen.trim()===''||!Number.isFinite(Number(product.pricePen))||Number(product.pricePen)<=0)
+        throw new Error('El precio debe ser mayor que S/ 0')
        await api(`/api/admin/tenants/${tenantId}/products`,'POST',{
         ...product,pricePen:Number(product.pricePen)
        })
