@@ -23,6 +23,10 @@ function receiptCommunicationAllowed(interaction){
 const counter=new Map()
 const CANCEL_NOTICE='[Pollos B3 · Sistema] El cliente decidió modificar los productos. Esta solicitud de compra queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
 const CANCEL_PURCHASE_NOTICE='[Pollos B3 · Sistema] El cliente canceló su compra antes del pago. Esta solicitud queda cancelada; no preparar ni cobrar. El asesor puede cerrar la atención.'
+// Explicit completion evidence from an actual advisor message, never client-authored.
+const deliveredByAgent=text=>typeof text==='string'&&
+ ['entregado','pedido entregado'].includes(text.normalize('NFD')
+  .replace(/[\u0300-\u036f]/g,'').trim().toLowerCase().replace(/[.!]+$/,'').trim().replace(/\s+/g,' '))
 const reference=(tenantId,appId,storeId,key)=>'mobile:'+createHash('sha256').update([tenantId,appId,storeId,key].join(':')).digest('hex').slice(0,48)
 const orderMessageIdempotency=(key,interactionId)=>{
  const bytes=createHash('sha256').update('b3-order-text:'+key+':'+interactionId).digest().subarray(0,16)
@@ -202,7 +206,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
  return async function route({req,res,url}){
   const match=url.pathname.match(/^\/api\/v1\/mobile\/stores\/([0-9a-f-]{36})\/agent-availability$/i)
   const creating=url.pathname==='/api/v1/mobile/interactions'
-  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment)$/i)
+  const statusMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/(status|cancel|device|payment|communication-close)$/i)
   const messageMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/message$/i)
   const receiptMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt$/i)
   const receiptUploadMatch=url.pathname.match(/^\/api\/v1\/mobile\/interactions\/([0-9a-f-]{36})\/payment-receipt\/upload$/i)
@@ -226,7 +230,8 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     const input=(operation==='status'||operation==='payment'&&req.method==='GET')?Object.fromEntries(url.searchParams):await body(req)
     if(!plainObject(input)||Object.keys(input).some(k=>!['appId','storeId','fcmToken','reason'].includes(k))||
        (operation!=='device'&&input.fcmToken!==undefined)||
-       (operation!=='cancel'&&input.reason!==undefined)||
+       (!['cancel','communication-close'].includes(operation)&&input.reason!==undefined)||
+       (operation==='communication-close'&&!['CLIENT_CANCELLED','ORDER_DELIVERED'].includes(input.reason))||
        !APP.test(input.appId||'')||!VALID_UUID.test(input.storeId||''))throw fail(400,'Identificadores de seguimiento inválidos')
     const access=req.headers['x-order-access-key']
     if(!VALID_UUID.test(access||''))throw fail(403,'Clave de seguimiento inválida')
@@ -235,7 +240,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // A cancelled B3 order stays locally closed without polling upstream or
     // delivering new messages, independently of TU VERSO availability.
     const closed=await checkoutSessionState(pool,owner)
-    if(['CANCELLED','EXPIRED','FINISHED'].includes(closed)){
+    if(['CANCELLED','EXPIRED','FINISHED'].includes(closed)&&operation!=='communication-close'){
      if(operation==='status')return json(res,200,{interactionId,storeId:input.storeId,
       status:closed,agentMessages:[],messagesAvailable:false})
      if(operation==='cancel'&&closed==='CANCELLED')return json(res,200,{interactionId,status:'CANCELLED'})
@@ -252,11 +257,14 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
        remote.data?.purpose!=='ORDER_REQUEST')throw fail(403,'Seguimiento no autorizado')
     // Closing the MOBILE_APP communication is independent of the final text
     // and does not release the advisor's capacity or typify the conversation.
-    const terminateRemoteCommunication=async()=>{
-     if(!enableCommunicationClose())return
+    const terminateRemoteCommunication=async(reason='CLIENT_CANCELLED')=>{
+     if(!enableCommunicationClose()){
+      if(operation==='communication-close')throw fail(503,'Cierre de comunicación no habilitado')
+      return // Preserve opt-in behavior for existing cancellation calls.
+     }
      const ended=await closeCommunication(integration.token,interactionId,{
       eventId:orderMessageIdempotency('communication-close:'+access,interactionId),
-      reason:'CLIENT_CANCELLED',
+      reason,
      })
      if(!ended.ok||ended.data?.closed!==true||ended.data?.interactionId!==interactionId)
       throw fail(ended.httpStatus===409?409:remoteAuthStatus(ended),'TU VERSO no confirmó el cierre de la comunicación')
@@ -289,6 +297,26 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
     // The history is still used when available to recognize earlier notices.
     const messages=messagesAvailable?history.data.messages:[]
     const cancelled=messages.some(m=>m.direction==='INBOUND'&&(m.text===CANCEL_NOTICE||m.text===CANCEL_PURCHASE_NOTICE))
+    if(operation==='communication-close'){
+     if(!enableCommunicationClose())throw fail(503,'Cierre de comunicación no habilitado')
+     if(closed==='EXPIRED')throw fail(409,'La solicitud expiró')
+     if(input.reason==='CLIENT_CANCELLED'){
+      // /cancel delivered the notice first. A second request acknowledges the
+      // same durable S2S closure; never send another notice or change agent state.
+      if(closed!=='CANCELLED'&&!cancelled)throw fail(409,'Cancelación no confirmada')
+      await terminateRemoteCommunication('CLIENT_CANCELLED')
+      return json(res,200,{interactionId,status:'CANCELLED',communicationStatus:'CLOSED'})
+     }
+     // Never trust a mobile-only "delivered" flag. The advisor must have
+     // actually sent the terminal status in this authorized interaction.
+     if(closed==='CANCELLED'||remote.data?.status==='EXPIRED')
+      throw fail(409,'La solicitud no permite cierre por entrega')
+     if(!messagesAvailable)throw fail(503,'No se pudo verificar la entrega en TU VERSO')
+     if(!messages.some(m=>m.direction==='OUTBOUND'&&deliveredByAgent(m.text)))
+      throw fail(409,'La entrega todavía no fue confirmada por el asesor')
+     await terminateRemoteCommunication('FLOW_FINISHED')
+     return json(res,200,{interactionId,communicationStatus:'CLOSED'})
+    }
     if(operation==='cancel'){
      if(cancelled){await terminateRemoteCommunication();await closeCheckoutPayment(pool,owner);return json(res,200,{interactionId,status:'CANCELLED'})}
      if(remote.data.status==='EXPIRED')throw fail(409,'La interacción ya expiró')

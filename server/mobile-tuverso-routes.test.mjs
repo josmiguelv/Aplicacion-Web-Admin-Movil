@@ -708,6 +708,72 @@ test('customer cancellation sends one notice then permanently blocks mobile mess
  assert.equal(message.code,409)
  assert.equal(h.remote.length,callsBefore,'closed backend must never read or send to remote')
 })
+test('completed mobile order closes only communication as FLOW_FINISHED after verified agent delivery',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true,
+  decisionMessages:['En preparación','Pedido entregado']})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const url='/api/v1/mobile/interactions/'+id+'/communication-close'
+ const payload={appId:appA,storeId:storeA,reason:'ORDER_DELIVERED'}
+ const first=await h.call('POST',url,{headers:{'x-order-access-key':key},payload})
+ assert.equal(first.code,200)
+ assert.deepEqual(first.payload,{interactionId:id,communicationStatus:'CLOSED'})
+ const closes=h.remote.filter(x=>x.operation==='close')
+ assert.equal(closes.length,1)
+ assert.equal(closes[0].value.reason,'FLOW_FINISHED')
+ assert.match(closes[0].value.eventId,/^[0-9a-f-]{36}$/)
+ const second=await h.call('POST',url,{headers:{'x-order-access-key':key},payload})
+ assert.equal(second.code,200)
+ assert.equal(h.remote.filter(x=>x.operation==='close').length,2)
+ assert.equal(h.remote.filter(x=>x.operation==='close')[1].value.eventId,closes[0].value.eventId)
+ assert.equal(h.remote.some(x=>['cancel','plainText','orderText','orderForm'].includes(x.operation)),false)
+ assert.equal(h.queries.some(x=>x.sql.includes('UPDATE mobile_checkout_followups')),false)
+})
+test('normal completion refuses client-only claims, unknown scope and unavailable agent history',async()=>{
+ const id=randomUUID(),key=randomUUID(),url='/api/v1/mobile/interactions/'+id+'/communication-close'
+ const payload={appId:appA,storeId:storeA,reason:'ORDER_DELIVERED'}
+ const cases=[
+  {options:{closeEnabled:true},expected:409},
+  {options:{closeEnabled:true,historyFailure:true},expected:503},
+  {options:{closeEnabled:false,decisionMessages:['Entregado']},expected:503},
+  {options:{closeEnabled:true,decisionMessages:['En preparación']},expected:409},
+ ]
+ for(const {options,expected} of cases){
+  const h=harness(options)
+  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+  const r=await h.call('POST',url,{headers:{'x-order-access-key':key},payload})
+  assert.equal(r.code,expected)
+  assert.equal(h.remote.filter(x=>x.operation==='close').length,0)
+ }
+ const h=harness({closeEnabled:true,decisionMessages:['Entregado']})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const unauthorized=await h.call('POST',url,{headers:{'x-order-access-key':randomUUID()},payload})
+ assert.equal(unauthorized.code,403)
+ assert.equal(h.remote.filter(x=>x.operation==='close').length,0)
+ for(const reason of [undefined,'FLOW_FINISHED','arbitrary']){
+  const r=await h.call('POST',url,{headers:{'x-order-access-key':key},
+   payload:{...payload,reason}})
+  assert.equal(r.code,400)
+ }
+})
+test('late Android CLIENT_CANCELLED close retries existing /cancel without extra notice',async()=>{
+ const id=randomUUID(),key=randomUUID(),h=harness({closeEnabled:true})
+ h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
+ const url='/api/v1/mobile/interactions/'+id
+ const headers={'x-order-access-key':key}
+ const cancelled=await h.call('POST',url+'/cancel',{headers,payload:{appId:appA,storeId:storeA,reason:'CANCEL'}})
+ assert.equal(cancelled.code,200)
+ const before=h.remote.filter(x=>x.operation==='cancel').length
+ const close=await h.call('POST',url+'/communication-close',{
+  headers,payload:{appId:appA,storeId:storeA,reason:'CLIENT_CANCELLED'}})
+ assert.equal(close.code,200)
+ assert.deepEqual(close.payload,{interactionId:id,status:'CANCELLED',communicationStatus:'CLOSED'})
+ assert.equal(h.remote.filter(x=>x.operation==='cancel').length,before)
+ const closeEvents=h.remote.filter(x=>x.operation==='close')
+ assert.equal(closeEvents.length,2)
+ assert.equal(closeEvents[0].value.reason,'CLIENT_CANCELLED')
+ assert.equal(closeEvents[1].value.reason,'CLIENT_CANCELLED')
+ assert.equal(closeEvents[0].value.eventId,closeEvents[1].value.eventId)
+})
 test('cancellation without prior notification registration persists a local closed state',async()=>{
  const id=randomUUID(),key=randomUUID(),h=harness()
  h.setReference('mobile:'+createHash('sha256').update([tenantA,appA,storeA,key].join(':')).digest('hex').slice(0,48))
