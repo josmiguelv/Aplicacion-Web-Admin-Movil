@@ -1,7 +1,7 @@
 name: Admin Railway release gate (isolated)
 on:
   push:
-    branches: [chore/railway-production-readiness-20261128]
+    branches: [chore/railway-production-readiness-20261128, fix/admin-web-security-hardening-20261128]
   pull_request:
     branches: [feat/b3-admin-mobile-ws-event-notify-20261128]
   workflow_dispatch:
@@ -44,6 +44,8 @@ jobs:
           node scripts/railway-preflight.mjs
           node scripts/bootstrap-empty-admin-db.mjs
           node --test server/mobile-interaction-ws.test.mjs
+          node --test server/admin-web-security.test.mjs
+          node --test --test-name-pattern='receipt|payment receipt' server/mobile-tuverso-routes.test.mjs
       - name: Bootstrap isolated EMPTY PostgreSQL 17 and verify schema
         env:
           ADMIN_DATABASE_BOOTSTRAP_CONFIRM: INIT_EMPTY_ADMIN_DATABASE
