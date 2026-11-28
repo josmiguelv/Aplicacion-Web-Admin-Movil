@@ -15,7 +15,6 @@ import {UUID,APP,DAY,TIME,fail,sha,ownerHash,externalRef,
 const activeStates=['CREATING','FORM_UNCERTAIN','AWAITING_AGENT','AWAITING_PAYMENT','CONFIRMED'];
 const terminal=['CONFIRMED','REJECTED','CANCELLED','EXPIRED'];
 const methods=['yape','plin','card','cash'];
-const live=()=>process.env.B3_RESERVATIONS_LIVE_ENABLED==='true';
 const safeRemote=e=>[401,403,404,409,429].includes(e?.httpStatus)?503:503;
 const validQuote=q=>q&&typeof q==='object'&&!Array.isArray(q)&&
  Object.keys(q).every(k=>['appId','catalogRevision','mode','date','time','storeId',
@@ -239,15 +238,13 @@ export function createMobileReservationsRoutes({pool,body,json,storeHours,delive
  return async function route({req,res,url}){
   if(url.pathname==='/api/v1/mobile/reservations/quote'){
    if(req.method!=='POST')throw fail(405,'Método no permitido');
-   if(!live())throw fail(503,'Reservas pendientes de habilitación');
    const q=quoteInput(await body(req)),ctx=await catalog(q.appId);
    const sel=await selection(ctx,q);
    return json(res,200,{...sel,revision:ctx.revision,agentAvailable:true,
-    capacityAvailable:true,provisional:true,acceptingRequests:true},true);
+    capacityAvailable:null,provisional:true},true);
   }
   if(url.pathname==='/api/v1/mobile/reservations'){
    if(req.method!=='POST')throw fail(405,'Método no permitido');
-   if(!live())throw fail(503,'Reservas pendientes de habilitación');
    const value=normalizeReserveRequest(await body(req));
    const key=req.headers['idempotency-key'],access=req.headers['x-order-access-key'];
    if(!UUID.test(key||'')||!UUID.test(access||'')||key===access)
