@@ -32,40 +32,52 @@ const orderMessageIdempotency=(key,interactionId)=>{
 }
 const equals=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.length===b.length&&
  timingSafeEqual(Buffer.from(a),Buffer.from(b))
-// Retained only to recognize in-flight TEXT messages sent before the FORM cutover.
+// Only legacy Peruvian nine-digit mobiles get a country prefix. A supplied
+// international phone must already be E.164 and is forwarded unchanged.
+function normalizeMobilePhone(phone){
+ if(typeof phone!=='string')return null
+ if(/^9[0-9]{8}$/.test(phone))return '+51'+phone
+ return /^\+[1-9][0-9]{6,14}$/.test(phone)?phone:null
+}
 function normalizeCustomer(input){
- if(input===undefined)return null // Backward compatibility for already-issued clients.
+ if(input===undefined)return null // Older clients may omit identity: never invent it.
+ const phone=normalizeMobilePhone(input?.phone)
  if(!plainObject(input)||Object.keys(input).some(k=>!['firstName','lastName','phone','email','phoneVerified','emailVerified','address','district','reference','mode'].includes(k))||
-    input.mode!=='delivery'||!validText(input.firstName,60)||input.firstName.trim().length<2||
+    !['delivery','pickup'].includes(input.mode)||
+    !validText(input.firstName,60)||input.firstName.trim().length<2||
     !validText(input.lastName,60)||input.lastName.trim().length<2||
-    typeof input.phone!=='string'||!/^9[0-9]{8}$/.test(input.phone)||
-    !validText(input.address,180)||input.address.trim().length<6||
-    !validText(input.district,80)||input.district.trim().length<2||
+    !phone||
+    (input.mode==='delivery'&&(!validText(input.address,180)||input.address.trim().length<6||
+      !validText(input.district,80)||input.district.trim().length<2))||
+    (input.address!==undefined&&(!validText(input.address,180)||input.address.trim().length<6))||
+    (input.district!==undefined&&(!validText(input.district,80)||input.district.trim().length<2))||
     (input.reference!==undefined&&(typeof input.reference!=='string'||input.reference.length>180||
       /[\x00-\x1f]/.test(input.reference)))||
     (input.email!==undefined&&(typeof input.email!=='string'||input.email.length>254||
       !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)))||
     (input.phoneVerified!==undefined&&input.phoneVerified!==false)||
-    (input.emailVerified!==undefined&&input.emailVerified!==false))throw fail(400,'Datos de contacto o dirección inválidos')
+    (input.emailVerified!==undefined&&input.emailVerified!==false))
+    throw fail(400,'Datos de contacto o dirección inválidos')
  return {firstName:input.firstName.trim(),lastName:input.lastName.trim(),
-  phone:input.phone,email:input.email?.trim().toLowerCase(),
-  phoneVerified:false,emailVerified:false,address:input.address.trim(),district:input.district.trim(),
-  reference:(input.reference||'').trim()}
+   phone,email:input.email?.trim().toLowerCase(),mode:input.mode,
+   phoneVerified:false,emailVerified:false,
+   ...(input.mode==='delivery'?{address:input.address.trim(),district:input.district.trim()}:{}),
+   reference:(input.reference||'').trim()}
 }
+const displayPhone=phone=>phone.replace(/^\+51(9[0-9]{8})$/,'+51 $1')
 function orderSummaryText(cart,store,customer){
  if(!customer)return cart.summary
  const message=[
   'POLLOS B3 - SOLICITUD DE VALIDACION',
   'Sede consultada: '+String(store.name||'Sede').trim(),
   'Cliente (datos ingresados, no verificados): '+customer.firstName+' '+customer.lastName,
-  'Celular: +51 '+customer.phone,
-  'Modalidad: Delivery',
-  'Direccion: '+customer.address,
-  'Distrito: '+customer.district,
+  'Celular: '+displayPhone(customer.phone),
+  'Modalidad: '+(customer.mode==='pickup'?'Recojo':'Delivery'),
+  ...(customer.mode==='delivery'?['Direccion: '+customer.address,'Distrito: '+customer.district]:[]),
   ...(customer.reference?['Referencia: '+customer.reference]:[]),
   'PRODUCTOS: '+cart.summary.replace(/^Solicitud de validación de pedido: /,'').replace(/\. Subtotal [0-9]+\.[0-9]{2}\.$/,''),
   'Subtotal productos: S/ '+cart.subtotal.toFixed(2),
-  'Costo delivery: pendiente tras aceptacion (no cobrar)',
+  ...(customer.mode==='delivery'?['Costo delivery: pendiente tras aceptacion (no cobrar)']:[]),
   'Estado: PENDIENTE DE VALIDACION',
   'Verificar productos y responder SOLO: aceptado o rechazado.'
  ].join('\n')
@@ -94,11 +106,11 @@ function orderForm(cart,store,customer){
   throw fail(422,'El pedido supera el límite de información del formulario. Reduce los productos.')
  const form={
   title:'POLLOS B3 - SOLICITUD DE VALIDACION',
-  subtitle:'Subtotal productos: S/ '+cart.subtotal.toFixed(2)+'. Delivery pendiente. No preparar ni cobrar antes de la confirmación.',
+  subtitle:'Subtotal productos: S/ '+cart.subtotal.toFixed(2)+'. '+(customer.mode==='pickup'?'Recojo en tienda.':'Delivery pendiente.')+' No preparar ni cobrar antes de la confirmación.',
   fields:[
    {variable:'Sede',value:String(store.name||'Sede').trim()},
-   {variable:'Cliente',value:customer.firstName+' '+customer.lastName+' · +51 '+customer.phone+' (sin verificar)'+(customer.email?' · '+customer.email:'')},
-   {variable:'Entrega',value:'Delivery · '+customer.address+' · '+customer.district+(customer.reference?' · Ref.: '+customer.reference:'')},
+   {variable:'Cliente',value:customer.firstName+' '+customer.lastName+' · '+displayPhone(customer.phone)+' (sin verificar)'+(customer.email?' · '+customer.email:'')},
+   {variable:'Entrega',value:customer.mode==='pickup'?'Recojo en tienda':('Delivery · '+customer.address+' · '+customer.district+(customer.reference?' · Ref.: '+customer.reference:''))},
    ...products.map((value,index)=>({variable:products.length===1?'Productos':'Productos ('+(index+1)+'/2)',value})),
   ],
  }
@@ -489,7 +501,7 @@ export function createMobileTuVersoRoutes({pool,body,json,storeOpen,
    const result=await createInteraction(integration.token,{external_location_id:integration.external_location_id,purpose:'ORDER_REQUEST'},{
     customerExternalId:input.customerExternalId,externalReference,summary:listSummary,idempotencyKey,
      ...(customer?{customer:{firstName:customer.firstName,lastName:customer.lastName,
-      phone:'+51'+customer.phone,...(customer.email?{email:customer.email}:{}),
+      phone:customer.phone,...(customer.email?{email:customer.email}:{}),
       phoneVerified:false,emailVerified:false}}:{})
    })
    if(!result.ok)throw fail(result.httpStatus===409?409:result.httpStatus===429?429:remoteAuthStatus(result),'TU VERSO no pudo iniciar la solicitud')
