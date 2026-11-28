@@ -1,0 +1,81 @@
+name: Admin Railway release gate (isolated)
+on:
+  push:
+    branches: [chore/railway-production-readiness-20261128]
+  pull_request:
+    branches: [feat/b3-admin-mobile-ws-event-notify-20261128]
+  workflow_dispatch:
+
+jobs:
+  focused-checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: admin_ci
+          POSTGRES_PASSWORD: isolated_ci_password
+          POSTGRES_DB: admin_railway_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U admin_ci -d admin_railway_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgresql://admin_ci:isolated_ci_password@localhost:5432/admin_railway_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Install exactly locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Focused Node/WebSocket and packaging checks
+        run: |
+          node --check server/index.mjs
+          node --check scripts/bootstrap-empty-admin-db.mjs
+          node scripts/railway-preflight.mjs
+          node scripts/bootstrap-empty-admin-db.mjs
+          node --test server/mobile-interaction-ws.test.mjs
+      - name: Bootstrap isolated EMPTY PostgreSQL 17 and verify schema
+        env:
+          ADMIN_DATABASE_BOOTSTRAP_CONFIRM: INIT_EMPTY_ADMIN_DATABASE
+        run: node scripts/bootstrap-empty-admin-db.mjs --apply-empty
+      - name: Verify ledger, reject accidental second bootstrap
+        run: |
+          node --input-type=module -e "import pg from 'pg';const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();const r=await c.query('SELECT count(*)::int AS n FROM admin_schema_migrations');if(r.rows[0].n!==24)process.exitCode=1;await c.end()"
+          if ADMIN_DATABASE_BOOTSTRAP_CONFIRM=INIT_EMPTY_ADMIN_DATABASE node scripts/bootstrap-empty-admin-db.mjs --apply-empty; then
+            echo "ERROR: second bootstrap must fail on nonempty database"
+            exit 1
+          fi
+      - name: Frontend/API production build
+        run: pnpm build
+      - name: Production readiness serves HTTP 200 only with initialized Admin schema
+        env:
+          NODE_ENV: production
+          ADMIN_ORIGIN: https://admin.example.test
+          COOKIE_SECURE: 'true'
+          B3_MOBILE_WS_ENABLED: 'false'
+          TUVERSO_LIVE_CHECKS_ENABLED: 'false'
+          TUVERSO_LIVE_REQUESTS_ENABLED: 'false'
+          PORT: '47820'
+        run: |
+          node server/index.mjs > /tmp/admin-railway-gate.log 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:47820/health/ready | grep -q '"status":"ready"'; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then cat /tmp/admin-railway-gate.log; exit 1; fi
+          curl --fail --silent http://127.0.0.1:47820/health/live | grep -q '"status":"ok"'
+      - name: Docker packaging
+        run: docker build -t integra-admin-railway-ci .
