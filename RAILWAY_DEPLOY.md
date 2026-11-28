@@ -93,3 +93,13 @@ Workflow `.github/workflows/admin-railway-release-gate.yml`: instancia PostgreSQ
 ## Consolidación de código verificada
 
 La comparación GitHub entre `fix/b3-mobile-flow-finished-close-20261127` y `feat/b3-admin-mobile-ws-event-notify-20261128` confirma **ahead 14, behind 0**: el WebSocket desciende del arreglo de cierre de pedidos. Respecto de `fix/b3-reservations-public-contract-flow-finished-20261127`, **ahead 7, behind 0**. Por tanto, esas dos correcciones no requieren una fusión adicional. Otros cambios divergentes no se absorben sin revisión.
+
+## Security hardening gate — prepublication
+
+- **Sensitive receipt images**: uploader returns `imageUrl` with a HMAC capability query `?s=...`. Native Android can pass the unmodified string to `payment-receipt` FORM, and TU VERSO can display it as an ordinary `<img>` without access headers. Server refuses requests with missing/forged signatures before SQL; FORM relay verifies signature and tenant/app/store/interaction ownership. Do not strip query parameters when relaying or displaying.
+- **Signing key**: `INTEGRATION_MASTER_KEY` is also used to sign receipt capability links (domain-separated). Set a strong canonical 32-byte base64 key before using integrations, do not rotate without planning: existing receipt links become invalid if the key changes. No customer access key or private integration token is exposed in the URL. Treat capability URLs as private data: do not post or log them.
+- **Login**: failures are counted by normalized account and network in memory for 15 minutes; 8 failed attempts per account and a higher network cap reduce brute force. Single instance recommended. For multiple replicas introduce shared rate-limit storage in a later, explicitly authorized infrastructure change.
+- **Frontend**: only allowed public assets under `dist/` are served; valid extensionless React routes still fall back to `index.html`. Directory traversals, symlinks leaving dist, dotfiles and unsupported file types fail.
+- **HTTP**: CSP + HSTS in production, nosniff, DENY framing, no-referrer and restricted browser permissions. Google Fonts and inline React styles remain allowed. WebSocket access and normal cross-origin image rendering are unaffected.
+- **Focalized tests**: `node --test server/admin-web-security.test.mjs` and `node --test --test-name-pattern='receipt|payment receipt' server/mobile-tuverso-routes.test.mjs`. Verify UI/login with the production HTTPS origin before opening public traffic.
+- Do not treat these changes as a substitute for configuration of HTTPS, correct secret storage, authorization of S2S and monitoring.
