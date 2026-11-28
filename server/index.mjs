@@ -14,11 +14,10 @@ import {commercialNotificationsAdmin,publicCommercialNotifications,dispatchComme
 import {createServer} from 'node:http'
 import {attachMobileInteractionWebSocket} from './mobile-interaction-ws.mjs'
 import {createAdminLoginLimiter} from './admin-login-security.mjs'
-import {receiptIdFromCapabilityUrl,verifyReceiptCapability} from './receipt-access.mjs'
+import {verifyReceiptCapability} from './receipt-access.mjs'
 import {serveStatic} from './safe-static.mjs'
 import {applySecurityHeaders} from './web-security-headers.mjs'
-import {readFile,stat} from 'node:fs/promises'
-import {join,normalize,extname} from 'node:path'
+import {join} from 'node:path'
 import {randomBytes,scryptSync,timingSafeEqual,createHash,randomUUID} from 'node:crypto'
 import pg from 'pg'
 
