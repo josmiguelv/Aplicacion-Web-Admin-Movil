@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Building2, KeyRound, LogOut, Plus, Settings2, ShieldCheck } from 'lucide-react'
 import MobileOperations from './MobileOperations'
+import ChangePassword from './ChangePassword'
 import TuVersoIntegrations from './TuVersoIntegrations'
 import ServiceApiKeys from './ServiceApiKeys'
 import './AdminPortal.css'
@@ -8,7 +9,7 @@ import './AdminPortal.css'
 type Session = { role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; tenantId: string | null }
 type Tenant = { id: string; name: string; active: boolean }
 type TenantUser = { id: string; email: string; role: 'SUPER_ADMIN' | 'TENANT_ADMIN'; active: boolean; created_at: string }
-type Section = 'companies' | 'operations' | 'integrations' | 'api-keys'
+type Section = 'companies' | 'operations' | 'integrations' | 'api-keys' | 'account'
 
 async function api<T>(path: string, method: 'GET' | 'POST' = 'GET', data?: unknown): Promise<T> {
   const response = await fetch(path, {
@@ -29,6 +30,7 @@ export default function AdminPortal() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [loginNotice,setLoginNotice] = useState('')
   const [section, setSection] = useState<Section>('companies')
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loadingTenants, setLoadingTenants] = useState(false)
@@ -86,6 +88,7 @@ export default function AdminPortal() {
     void execute(async () => {
       const result = await api<Session>('/api/admin/login', 'POST', { email: email.trim(), password })
       setPassword('')
+      setLoginNotice('')
       setSession(result)
       setTenantId(result.tenantId || '')
       setSection(result.role === 'SUPER_ADMIN' ? 'companies' : 'operations')
@@ -97,6 +100,12 @@ export default function AdminPortal() {
     setSession(null); setTenants([]); setTenantId(''); setAdminEmail(''); setAdminPassword(''); setTenantUsers([])
     setSection('companies')
   })
+
+  const passwordChanged = () => {
+    setSession(null); setTenants([]); setTenantId(''); setPassword(''); setAdminPassword('');setTenantUsers([])
+    setSection('companies');setError('');setNotice('')
+    setLoginNotice('Contraseña actualizada correctamente. Inicia sesión con tu nueva contraseña.')
+  }
 
   const selectTenant = (id: string, goToOperations = false) => {
     setTenantId(id); setAdminEmail(''); setAdminPassword(''); setError(''); setNotice('')
@@ -135,6 +144,7 @@ export default function AdminPortal() {
         <label>Correo electrónico<input type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required /></label>
         <label>Contraseña<input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
         {error && <p className="portal-error" role="alert">{error}</p>}
+        {loginNotice && <p className="portal-notice" role="status">{loginNotice}</p>}
         <button className="portal-primary" type="submit" disabled={busy}>{busy ? 'Validando...' : 'Iniciar sesión'}</button>
       </form>
       <p className="portal-footnote">Acceso exclusivo a empresas y administradores registrados.</p>
@@ -146,19 +156,21 @@ export default function AdminPortal() {
   return <div className="portal-shell">
     <header className="portal-header">
       <div><div className="portal-brand">INTEGRA <span>B2G</span></div><small>Plataforma administrativa multitenant</small></div>
-      <div className="portal-header-right"><span className="portal-role">{superAdmin ? 'Super Administrador' : 'Administrador de empresa'}</span><button className="portal-link" type="button" onClick={logout} disabled={busy}><LogOut size={16} /> Cerrar sesión</button></div>
+      <div className="portal-header-right"><span className="portal-role">{superAdmin ? 'Super Administrador' : 'Administrador de empresa'}</span><button className="portal-link" type="button" onClick={() => {setSection('account');setError('');setNotice('')}}><KeyRound size={16}/> Mi cuenta</button><button className="portal-link" type="button" onClick={logout} disabled={busy}><LogOut size={16} /> Cerrar sesión</button></div>
     </header>
     <div className="portal-body">
       <nav className="portal-nav" aria-label="Administración">
         {superAdmin && <button className={section === 'companies' ? 'portal-tab active' : 'portal-tab'} type="button" onClick={() => { setSection('companies'); setError(''); setNotice('') }}><Building2 size={17} /> Empresas</button>}
         <button className={section === 'operations' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={superAdmin && !tenantId} onClick={() => { setSection('operations'); setError(''); setNotice('') }}><Settings2 size={17} /> Mi negocio</button>
+        <button className={section === 'account' ? 'portal-tab active' : 'portal-tab'} type="button" onClick={() => {setSection('account');setError('');setNotice('')}}><ShieldCheck size={17}/> Mi cuenta</button>
         {superAdmin && <div className="portal-technical-links" role="group" aria-label="Herramientas técnicas">
           <button className={section === 'integrations' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('integrations'); setError(''); setNotice('') }}>Conexiones externas</button>
           <button className={section === 'api-keys' ? 'portal-tab active' : 'portal-tab'} type="button" disabled={!tenantId} onClick={() => { setSection('api-keys'); setError(''); setNotice('') }}><KeyRound size={17}/> Claves de acceso</button>
         </div>}
       </nav>
-      {error && <p className="portal-error" role="alert">{error}</p>}
-      {notice && <p className="portal-notice" role="status">{notice}</p>}
+      {section !== 'account' && error && <p className="portal-error" role="alert">{error}</p>}
+      {section !== 'account' && notice && <p className="portal-notice" role="status">{notice}</p>}
+      {section === 'account' && <ChangePassword onPasswordChanged={passwordChanged}/> }
       {superAdmin && section === 'companies' && <main className="portal-content">
         <div className="portal-title"><div><h1>Empresas</h1><p className="portal-muted">Cada empresa administra sus propios locales, productos, precios y aplicaciones. No hay empresas creadas por defecto.</p></div><span className="portal-count">{tenants.length} registradas</span></div>
         <section className="portal-panel">
