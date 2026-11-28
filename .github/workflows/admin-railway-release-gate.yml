@@ -79,5 +79,22 @@ jobs:
           done
           if [ "$ready" -ne 1 ]; then cat /tmp/admin-railway-gate.log; exit 1; fi
           curl --fail --silent http://127.0.0.1:47820/health/live | grep -q '"status":"ok"'
+          # HTTP security wiring, no real clients or orders.
+          curl --fail --silent -D /tmp/admin-security-headers -o /tmp/admin-ui http://127.0.0.1:47820/
+          grep -qi '^content-security-policy:' /tmp/admin-security-headers
+          grep -qi '^x-frame-options: DENY' /tmp/admin-security-headers
+          grep -qi '^referrer-policy: no-referrer' /tmp/admin-security-headers
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:47820/.env)" = 403
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:47820/api/v1/mobile/payment-receipts/images/99999999-9999-4999-8999-999999999999)" = 403
+          for i in $(seq 1 8); do
+            test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              -H 'Origin: https://admin.example.test' -H 'Content-Type: application/json' \
+              -d '{"email":"security@example.test","password":"incorrect-password"}' \
+              http://127.0.0.1:47820/api/admin/login)" = 401
+          done
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            -H 'Origin: https://admin.example.test' -H 'Content-Type: application/json' \
+            -d '{"email":"security@example.test","password":"incorrect-password"}' \
+            http://127.0.0.1:47820/api/admin/login)" = 429
       - name: Docker packaging
         run: docker build -t integra-admin-railway-ci .
