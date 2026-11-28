@@ -244,7 +244,6 @@ CREATE INDEX IF NOT EXISTS idx_job_vacancy_stores_store
 ALTER TABLE mobile_apps ADD COLUMN IF NOT EXISTS complaints_book_url TEXT;
 
 -- Additive migration: preserves UUIDs, relationships and existing stores.
-BEGIN;
 ALTER TABLE stores ADD COLUMN IF NOT EXISTS code TEXT;
 UPDATE stores SET code='sede-'||id::text WHERE code IS NULL;
 ALTER TABLE stores ALTER COLUMN code SET NOT NULL;
@@ -263,10 +262,8 @@ BEGIN
 END $$;
 CREATE OR REPLACE TRIGGER stores_preserve_code BEFORE UPDATE ON stores
  FOR EACH ROW EXECUTE FUNCTION preserve_store_code();
-COMMIT;
 
 -- Local/approved database only. No credentials or external requests in migrations.
-BEGIN;
 CREATE TABLE IF NOT EXISTS tenant_integrations (
  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
  tenant_id UUID NOT NULL REFERENCES tenants(id),
@@ -311,21 +308,17 @@ CREATE TABLE IF NOT EXISTS integration_bindings (
  UNIQUE(integration_id,external_location_id,purpose)
 );
 CREATE INDEX IF NOT EXISTS integration_bindings_tenant ON integration_bindings(tenant_id,integration_id);
-COMMIT;
 
 -- Remote identity and queue metadata are not inputs to the 1A availability call.
 -- Keep every existing value; allow new connections without inventing identifiers.
-BEGIN;
 ALTER TABLE tenant_integrations ALTER COLUMN external_tenant_id DROP NOT NULL;
 ALTER TABLE tenant_integrations ALTER COLUMN channel_account_id DROP NOT NULL;
 ALTER TABLE tenant_integrations ALTER COLUMN channel_type DROP NOT NULL;
 ALTER TABLE tenant_integrations ALTER COLUMN instance_key DROP NOT NULL;
 ALTER TABLE integration_bindings ALTER COLUMN queue_reference DROP NOT NULL;
-COMMIT;
 
 -- INTEGRA B2G: API Keys S2S del backend administrativo.
 -- Migración aditiva: NO modifica TU VERSO ni credenciales tvi_v1_.
-BEGIN;
 
 CREATE TABLE IF NOT EXISTS tenant_api_keys (
  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -345,11 +338,9 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
 CREATE INDEX IF NOT EXISTS tenant_api_keys_tenant_created
  ON tenant_api_keys(tenant_id,created_at DESC);
 
-COMMIT;
 
 -- Tenant-scoped mobile order availability; same additive DDL as migration 006.
 -- Additive, tenant-scoped order availability. Do not run automatically at API startup.
-BEGIN;
 
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS time_zone TEXT NOT NULL DEFAULT 'America/Lima';
 
@@ -444,11 +435,9 @@ CREATE TABLE IF NOT EXISTS mobile_order_attempts (
 CREATE INDEX IF NOT EXISTS mobile_order_attempts_validation
   ON mobile_order_attempts(tenant_id,validation_id,attempt_number);
 
-COMMIT;
 
 -- Pollos B3: plazos de pago por empresa y notificaciones privadas por interacción.
 -- Ejecutar en la base independiente del Administrador, nunca en TU VERSO.
-BEGIN;
 CREATE TABLE IF NOT EXISTS mobile_checkout_policies(
  tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
  payment_wait_minutes INT NOT NULL DEFAULT 10 CHECK(payment_wait_minutes BETWEEN 5 AND 30),
@@ -483,7 +472,6 @@ CREATE INDEX IF NOT EXISTS mobile_checkout_followups_due
  ON mobile_checkout_followups(state,checkout_expires_at) WHERE state='PAYMENT_PENDING';
 CREATE INDEX IF NOT EXISTS mobile_checkout_followups_agent_due
  ON mobile_checkout_followups(state,agent_checked_at) WHERE state='WAITING';
-COMMIT;
 
 -- Reservation scheduling policy; isolated commercial configuration, OFF by default.
 -- Keep identical to server/migrations/008-store-reservation-settings.sql.
